@@ -1,0 +1,56 @@
+Copy dialog — shown on F5.
+
+┌─[Copy]─────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  Source:                                                                   │
+│    ~/projects/cargonaut/dist/myos2026.qcow2         (1.04 GiB)             │
+│                                                                            │
+│  Destination directory (opposite pane):                                    │
+│    /tmp/                                                                   │
+│                                                                            │
+│  Options:                                                                  │
+│    [x] Verify after copy (SHA-256)                                         │
+│    [x] Resume if interrupted (checkpoint every 8 MiB)                      │
+│    [ ] Preserve symlinks                                                   │
+│    [ ] Follow symlinks                                                     │
+│                                                                            │
+│  Estimated time:  ~3.2 s (380 MiB/s on this fs)                            │
+│                                                                            │
+│  [Enter] Confirm    [Esc] Cancel    [Tab] Options    [F2] Save as default  │
+└────────────────────────────────────────────────────────────────────────────┘
+
+During transfer:
+
+┌─[Copying 1 of 1 — Esc to cancel]──────────────────────────────────────────┐
+│ ~/projects/cargonaut/dist/myos2026.qcow2  →  /tmp/myos2026.qcow2          │
+│                                                                            │
+│  [████████████████████░░░░░░░░░░░░░░░░░]  52%   546 MiB / 1.04 GiB        │
+│                                                                            │
+│  Throughput:  412 MiB/s     ETA:  1.2 s     Checkpoint: 544 MiB           │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Conflict dialog (name collision):
+
+┌─[Conflict]────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  Destination already exists:                                               │
+│    /tmp/myos2026.qcow2  (986 MiB, mtime 2026-05-17 13:01)                  │
+│                                                                            │
+│  Source:                                                                   │
+│    ~/.../myos2026.qcow2  (1.04 GiB, mtime 2026-05-17 14:23) [newer, larger]│
+│                                                                            │
+│  [O]verwrite   [S]kip   [R]ename...   [M]erge directories   [A]ll          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Resume prompt (shown on launch when checkpoint files are detected):
+
+┌─[Resume previous transfer?]───────────────────────────────────────────────┐
+│                                                                            │
+│  Found 1 interrupted transfer:                                             │
+│                                                                            │
+│    ~/projects/.../myos2026.qcow2  →  /tmp/myos2026.qcow2                   │
+│    Last checkpoint:  544 MiB / 1.04 GiB  (52% complete; 1 min ago)         │
+│    Source checksum:  matches (SHA-256 prefix verified)                     │
+│                                                                            │
+│  [R]esume    [S]tart over    [D]iscard partial    [I]gnore                 │
+└────────────────────────────────────────────────────────────────────────────┘

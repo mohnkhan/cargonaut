@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/cargonaut/cargonaut/schema/menu.json",
+  "title": "Cargonaut user menu — FR-206",
+  "description": "F2 user-menu schema. Loaded from ~/.config/cargonaut/menu.toml (user-wide) merged with ./.cargonaut.menu.toml (per-directory; auto-loaded when focused pane's cwd contains it). Macros (all shell-quoted by impl per FR-205/206/207): %f / %F (focused active/passive), %d / %D (active/passive dir), %t / %T (tagged list, NUL-separated — %T returns JSON array for structured consumers), %s / %S (tagged-or-focused), %b (basename), %x (extension), %% (literal).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "entry": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/menu_entry" }
+    }
+  },
+  "definitions": {
+    "menu_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "command"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Human-readable text rendered in the F2 popup."
+        },
+        "key": {
+          "type": "string",
+          "description": "Optional single-key shortcut (lowercase letter or digit) to invoke directly from the popup."
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell snippet, runs via $SHELL -c with macros expanded + shell-quoted."
+        },
+        "condition": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Visibility guard. Built-ins: is-file, is-dir, is-symlink, is-executable, has-tagged, match-glob='*.rs', match-mime='text/*', has-cap='execute'."
+          },
+          "description": "Entry rendered iff all conditions are satisfied for the current selection."
+        },
+        "background": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run command detached; entry returns to menu immediately. Output captured to tasks panel (FR-016)."
+        }
+      }
+    }
+  }
+}

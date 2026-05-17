@@ -1,0 +1,14 @@
+[package]
+name = "cargonaut-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Configuration loader + schema for Cargonaut."
+
+[dependencies]
+figment = { workspace = true }
+serde = { workspace = true }
+schemars = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }

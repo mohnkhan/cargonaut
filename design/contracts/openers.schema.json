@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/cargonaut/cargonaut/schema/openers.json",
+  "title": "Cargonaut openers (extension binding) — FR-207",
+  "description": "Per-(ext|glob|mime) Open / View / Edit command dispatch. Loaded from ~/.config/cargonaut/openers.toml (overridable by per-dir ./.cargonaut.openers.toml). Matched in declaration order; first match wins. Macros: %f (focused active), %F (focused passive), %d (active dir), %D (passive dir), %b (basename), %x (extension), %% (literal). Every macro substitution MUST be shell-quoted by the implementation (FR-205/206/207 shell-injection rule).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "opener": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/opener_entry" }
+    }
+  },
+  "definitions": {
+    "opener_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match"],
+      "properties": {
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Exactly one of ext, glob, or mime must be set.",
+          "properties": {
+            "ext": { "type": "string", "description": "File extension WITHOUT leading dot, e.g. \"png\"." },
+            "glob": { "type": "string", "description": "Shell glob over basename, e.g. \"README.*\"." },
+            "mime": { "type": "string", "description": "MIME type, e.g. \"application/pdf\"." }
+          },
+          "oneOf": [
+            { "required": ["ext"] },
+            { "required": ["glob"] },
+            { "required": ["mime"] }
+          ]
+        },
+        "open": {
+          "type": "string",
+          "description": "Command run on Enter. Falls back to view if unset."
+        },
+        "view": {
+          "type": "string",
+          "description": "Command run on F3 (previewer pipe-through). Output captured to previewer pane."
+        },
+        "edit": {
+          "type": "string",
+          "description": "Command run on F4. Falls back to $EDITOR if unset (FR-104 compat)."
+        }
+      },
+      "anyOf": [
+        { "required": ["open"] },
+        { "required": ["view"] },
+        { "required": ["edit"] }
+      ]
+    }
+  }
+}

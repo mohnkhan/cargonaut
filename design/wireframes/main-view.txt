@@ -1,0 +1,28 @@
+Main view — two panes, status bar, command bar. ASCII wireframe; ratatui renders.
+
+┌─[1: ~/projects/cargonaut ●]──────────┬─[2: /tmp ]───────────────────────────┐
+│ ../                                  │ ../                                  │
+│ .git/                       512 B    │ ash-XXVKE2/             4 K          │
+│ .github/                            │ runtime-1000/           4 K          │
+│ Cargo.toml             1234 B  May17 │ snap-private-tmp/                    │
+│ Cargo.lock           48723 B  May17 │ systemd-private-...                  │
+│ README.md             3210 B  May17 │ tracker-extract-3-files-...          │
+│ src/                                │ vscode-ipc-...                       │
+│ tests/                              │                                      │
+│                                      │                                      │
+│                                      │                                      │
+│                                      │                                      │
+│ ─ 124,567 B   8 files                │ ─ 192 B   7 files                    │
+└───────────────────────────────────────┴───────────────────────────────────────┘
+ ~/projects/cargonaut/Cargo.toml | 1234 B | rw-r--r-- | 2026-05-17 14:23:01
+[F1]help [F3]view [F4]edit [F5]copy [F6]move [F7]mkdir [F8]del [F10]quit       [ ]
+
+Legend:
+  Pane title bar:  [N: cwd ●]  — ● marks focused pane
+  Cursor:          highlighted row (terminal-dependent — typically inverse video)
+  Selection:       leading "*" or row-highlight color
+  Footer row 1:    full path + meta of cursor file
+  Footer row 2:    function-key hints (changes per mode)
+  Bottom-right:    pending dialogs / progress (shown only when active)
+
+Sizes/dates/perms columns: configurable, default sizes elided for narrow terminals.

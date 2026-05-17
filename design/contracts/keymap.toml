@@ -1,0 +1,350 @@
+# Cargonaut default keymap. Phase 1 keys are required for SC-001 acceptance.
+# Users override via ~/.config/cargonaut/keymap.toml with the same schema.
+#
+# Modes: "global" | "pane" | "dialog" | "search" | "subshell"
+# Keys: literal char | "C-x" (ctrl) | "M-x" (alt/meta) | "S-x" (shift) | F1..F12
+# Special: "Tab", "Enter", "Esc", "Backspace", "Up", "Down", "Left", "Right",
+#          "Insert", "Delete", "Home", "End", "PageUp", "PageDown"
+
+[[binding]]
+mode = "global"
+key = "F1"
+action = "show-help"
+
+[[binding]]
+mode = "global"
+key = "F10"
+action = "quit"
+
+[[binding]]
+mode = "global"
+key = "Tab"
+action = "focus-swap-pane"
+
+[[binding]]
+mode = "global"
+key = "M-1"
+action = "focus-left-pane"
+
+[[binding]]
+mode = "global"
+key = "M-2"
+action = "focus-right-pane"
+
+[[binding]]
+mode = "global"
+key = "C-r"
+action = "reload-config-and-themes"
+
+# ── Pane navigation (Phase 1) ─────────────────────────────────────────────────
+[[binding]]
+mode = "pane"
+key = "j"
+action = "cursor-down"
+
+[[binding]]
+mode = "pane"
+key = "Down"
+action = "cursor-down"
+
+[[binding]]
+mode = "pane"
+key = "k"
+action = "cursor-up"
+
+[[binding]]
+mode = "pane"
+key = "Up"
+action = "cursor-up"
+
+[[binding]]
+mode = "pane"
+key = "Enter"
+action = "descend-or-open"
+
+[[binding]]
+mode = "pane"
+key = "Backspace"
+action = "ascend-parent"
+
+[[binding]]
+mode = "pane"
+key = "h"
+action = "ascend-parent"
+
+[[binding]]
+mode = "pane"
+key = "~"
+action = "cd-home"
+
+[[binding]]
+mode = "pane"
+key = "/"
+action = "cd-root"
+
+[[binding]]
+mode = "pane"
+key = ":"
+action = "open-cmdline"
+
+# ── Selection (Phase 1) ──────────────────────────────────────────────────────
+[[binding]]
+mode = "pane"
+key = "Insert"
+action = "selection-toggle"
+
+[[binding]]
+mode = "pane"
+key = "*"
+action = "selection-invert"
+
+[[binding]]
+mode = "pane"
+key = "+"
+action = "selection-add-by-pattern"
+
+[[binding]]
+mode = "pane"
+key = "-"
+action = "selection-remove-by-pattern"
+
+# ── File operations (Phase 1) ────────────────────────────────────────────────
+[[binding]]
+mode = "pane"
+key = "F5"
+action = "copy-selection"
+
+[[binding]]
+mode = "pane"
+key = "F6"
+action = "move-or-rename-selection"
+
+[[binding]]
+mode = "pane"
+key = "F7"
+action = "mkdir"
+
+[[binding]]
+mode = "pane"
+key = "F8"
+action = "delete-selection"
+
+[[binding]]
+mode = "pane"
+key = "C-c"
+action = "cancel-current-operation"
+
+# ── Sorting (Phase 1) ────────────────────────────────────────────────────────
+[[binding]]
+mode = "pane"
+key = "C-s"
+action = "cycle-sort-key"
+
+# ── Preview + editor (Phase 3) ───────────────────────────────────────────────
+[[binding]]
+mode = "pane"
+key = "F3"
+action = "preview"
+
+[[binding]]
+mode = "pane"
+key = "F4"
+action = "edit"
+
+# ── Power features (Phase 3+) ────────────────────────────────────────────────
+[[binding]]
+mode = "pane"
+key = "C-b"
+action = "bookmarks-menu"
+
+[[binding]]
+mode = "pane"
+key = "C-t"
+action = "new-tab"
+
+[[binding]]
+mode = "pane"
+key = "C-w"
+action = "close-tab"
+
+[[binding]]
+mode = "pane"
+key = "C-f"
+action = "filter-current-dir"
+
+[[binding]]
+mode = "pane"
+key = "C-z"
+action = "undo-last-op"
+
+[[binding]]
+mode = "pane"
+key = "C-o"
+action = "open-subshell"
+
+# ── Search mode ──────────────────────────────────────────────────────────────
+[[binding]]
+mode = "search"
+key = "Esc"
+action = "close-search"
+
+[[binding]]
+mode = "search"
+key = "Enter"
+action = "search-go-to-result"
+
+# ── Dialog mode ──────────────────────────────────────────────────────────────
+[[binding]]
+mode = "dialog"
+key = "Esc"
+action = "dialog-cancel"
+
+[[binding]]
+mode = "dialog"
+key = "Enter"
+action = "dialog-confirm"
+
+# ── MC compat mode (loaded only if [ui] mc_keys = true) ──────────────────────
+# All Phase 1 F-keys already match MC; the compat layer adds:
+#   Esc-N for F(N) (legacy MC fallback for terminals that swallow F-keys)
+[[binding]]
+mode = "pane"
+key = "M-5"
+action = "copy-selection"
+context = "mc-compat"
+
+[[binding]]
+mode = "pane"
+key = "M-6"
+action = "move-or-rename-selection"
+context = "mc-compat"
+
+# ── MC-parity panel ergonomics (Phase 1 — FR-011..017) ───────────────────────
+[[binding]]
+mode = "pane"
+key = "M-S-h"
+action = "show-directory-history"  # FR-011
+
+[[binding]]
+mode = "pane"
+key = "M-h"
+action = "show-command-history"  # FR-011
+
+[[binding]]
+mode = "pane"
+key = "M-y"
+action = "history-prev-dir"  # FR-011
+
+[[binding]]
+mode = "pane"
+key = "M-u"
+action = "history-next-dir"  # FR-011
+
+[[binding]]
+mode = "pane"
+key = "M-c"
+action = "quick-cd-popup"  # FR-012
+
+[[binding]]
+mode = "pane"
+key = "M-!"
+action = "toggle-panel-filter"  # FR-013
+
+[[binding]]
+mode = "pane"
+key = "M-i"
+action = "sync-other-panel-path"  # FR-014
+
+[[binding]]
+mode = "pane"
+key = "M-o"
+action = "show-focused-in-other-panel"  # FR-014
+
+[[binding]]
+mode = "pane"
+key = "M-."
+action = "toggle-hidden"  # FR-015
+
+[[binding]]
+mode = "pane"
+key = "M-,"
+action = "toggle-split-orientation"  # FR-015
+
+[[binding]]
+mode = "pane"
+key = "C-Space"
+action = "recursive-dir-size"  # FR-015
+
+[[binding]]
+mode = "global"
+key = "F12"
+action = "show-tasks-panel"  # FR-016
+
+# ── MC-killer features + modern niceties (Phase 3 — FR-204..211) ──────────────
+[[binding]]
+mode = "pane"
+key = "F2"
+action = "show-user-menu"  # FR-206
+
+[[binding]]
+mode = "pane"
+key = "C-x !"
+action = "external-panelize"  # FR-205 (also :!cmd)
+
+[[binding]]
+mode = "pane"
+key = "C-x r"
+action = "bulk-rename-via-editor"  # FR-208
+
+[[binding]]
+mode = "pane"
+key = "<"
+action = "open-fuzzy-filter"  # FR-210 (also :filter)
+
+# Previewer-mode-only bindings (FR-209)
+[[binding]]
+mode = "preview"
+key = "C-x X"
+action = "toggle-hex-view"  # FR-209 (note: NOT C-x h; reserved for FR-202 hotlist-add)
+
+[[binding]]
+mode = "preview"
+key = "/"
+action = "preview-search-forward"  # FR-209
+
+[[binding]]
+mode = "preview"
+key = "?"
+action = "preview-search-backward"  # FR-209
+
+[[binding]]
+mode = "preview"
+key = "n"
+action = "preview-search-next"  # FR-209
+
+[[binding]]
+mode = "preview"
+key = "N"
+action = "preview-search-prev"  # FR-209
+
+# ── Compare directories + diff (Phase 4 — FR-305) ─────────────────────────────
+[[binding]]
+mode = "pane"
+key = "C-x d"
+action = "compare-directories"  # FR-305
+
+[[binding]]
+mode = "pane"
+key = "C-x C-d"
+action = "diff-two-tagged-files"  # FR-305
+
+# ── Menu bar + listing modes (Phase 5 — FR-404, FR-405) ───────────────────────
+[[binding]]
+mode = "global"
+key = "F9"
+action = "open-menu-bar"  # FR-404
+
+[[binding]]
+mode = "pane"
+key = "M-t"
+action = "cycle-listing-mode"  # FR-405

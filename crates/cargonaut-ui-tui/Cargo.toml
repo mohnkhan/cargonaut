@@ -1,0 +1,17 @@
+[package]
+name = "cargonaut-ui-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ratatui-based renderer for Cargonaut."
+
+[dependencies]
+cargonaut-core = { path = "../cargonaut-core" }
+cargonaut-vfs = { path = "../cargonaut-vfs" }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

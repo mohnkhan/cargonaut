@@ -1,0 +1,95 @@
+# Cargonaut command palette — every `:cmd` recognised by the cmdline mode.
+#
+# Schema (per entry):
+#   name        = "cmd"            # what the user types after ":"
+#   args        = "<arg-shape>"    # human-readable; "" if none
+#   description = "..."            # one-line summary shown in :help
+#   min_phase   = 1..6             # phase in which the command becomes available
+#   fr          = ["FR-NNN", ...]  # the FR(s) this command implements
+#
+# Migrants from MC will press `:` first to discover; new users press F9 (FR-404)
+# for the menu bar; experts use the keybindings in contracts/keymap.toml.
+
+[[cmd]]
+name = "cd"
+args = "<path>"
+description = "Change focused pane to <path>; supports ~, /, relative."
+min_phase = 1
+fr = ["FR-003"]
+
+[[cmd]]
+name = "jobs"
+args = ""
+description = "Open the tasks/jobs panel (also F12)."
+min_phase = 1
+fr = ["FR-016"]
+
+[[cmd]]
+name = "filter"
+args = "[pattern]"
+description = "Open the fuzzy-filter prompt; empty arg toggles current filter off."
+min_phase = 3
+fr = ["FR-013", "FR-210"]
+
+[[cmd]]
+name = "z"
+args = "<fragment>"
+description = "Jump via zoxide query -i; soft-fails if zoxide not installed."
+min_phase = 3
+fr = ["FR-211"]
+
+[[cmd]]
+name = "hex"
+args = ""
+description = "Toggle hex view in the focused previewer pane."
+min_phase = 3
+fr = ["FR-209"]
+
+[[cmd]]
+name = "g"
+args = "<n>"
+description = "Inside previewer: go to line (text mode) or offset (hex mode)."
+min_phase = 3
+fr = ["FR-209"]
+
+[[cmd]]
+name = "!"
+args = "<shell-cmd>"
+description = "External panelize: run shell-cmd, build panel from each stdout line."
+min_phase = 3
+fr = ["FR-205"]
+
+[[cmd]]
+name = "find"
+args = "<expr>"
+description = "Open the Find dialog with <expr> pre-filled."
+min_phase = 3
+fr = ["FR-203"]
+
+[[cmd]]
+name = "rg"
+args = "<pattern>"
+description = "Content search via ripgrep; results as virtual directory."
+min_phase = 3
+fr = ["FR-203"]
+
+[[cmd]]
+name = "help"
+args = "[cmd]"
+description = "Show command palette (no arg) or details for one cmd."
+min_phase = 1
+fr = []
+
+[[cmd]]
+name = "q"
+args = ""
+description = "Quit cargonaut (alias for F10)."
+min_phase = 1
+fr = []
+
+[[cmd]]
+name = "reload"
+args = ""
+description = "Reload config + themes + keymap from disk (alias for Ctrl-r)."
+min_phase = 1
+fr = []

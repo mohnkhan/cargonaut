@@ -1,0 +1,442 @@
+# Cargonaut machine-readable requirements manifest.
+#
+# Every FR/SC/NFR from spec.md is mirrored here as a TOML entry. CI greps
+# this file to verify every requirement has a linked test or manual check.
+#
+# Schema (per entry):
+#   id            = "FR-NNN" | "SC-NNN" | "NFR-NNN"
+#   priority      = "P1" | "P2" | "P3" | "P4" | "P5" | "P6"
+#   phase         = 1..6                       # phase in which it MUST be satisfied
+#   acceptance    = "<one-line predicate>"     # human-readable summary
+#   verification  = "<test path or CI check>"  # link to enforcement
+#   depends_on    = ["FR-X", ...]              # optional, when satisfaction requires prior FRs
+
+[[fr]]
+id = "FR-001"
+priority = "P1"
+phase = 1
+acceptance = "Two-pane layout; Tab swaps focus; Alt-1/Alt-2 jumps."
+verification = "crates/cargonaut-ui-tui/tests/pane_focus.rs"
+
+[[fr]]
+id = "FR-002"
+priority = "P1"
+phase = 1
+acceptance = "Pane shows name/size/mtime/perms; sort cycle via Ctrl-s."
+verification = "crates/cargonaut-ui-tui/tests/sort_cycle.rs"
+
+[[fr]]
+id = "FR-003"
+priority = "P1"
+phase = 1
+acceptance = "j/k/Enter/Backspace/~//:cd navigation."
+verification = "crates/cargonaut-ui-tui/tests/navigation.rs"
+
+[[fr]]
+id = "FR-004"
+priority = "P1"
+phase = 1
+acceptance = "Insert toggles selection; * inverts; +/- glob dialog."
+verification = "crates/cargonaut-ui-tui/tests/selection.rs"
+
+[[fr]]
+id = "FR-005"
+priority = "P1"
+phase = 1
+acceptance = "F5/F6/F7/F8; destructive ops require confirmation."
+verification = "tests/integration/destructive_confirm.rs"
+
+[[fr]]
+id = "FR-006"
+priority = "P1"
+phase = 1
+acceptance = "Resumable transfer engine; checkpoint at dst dir every 8 MiB fsync'd."
+verification = "tests/integration/resume_sigkill.rs"
+
+[[fr]]
+id = "FR-007"
+priority = "P1"
+phase = 1
+acceptance = "Local-to-local copy ≥80% cp(1) throughput for ≥100 MiB files."
+verification = "benches/local-copy-vs-cp.rs"
+depends_on = ["FR-006"]
+
+[[fr]]
+id = "FR-008"
+priority = "P1"
+phase = 1
+acceptance = "Ctrl-c cancels within 500 ms; partial state cleaned/marked."
+verification = "tests/integration/cancellation.rs"
+
+[[fr]]
+id = "FR-009"
+priority = "P1"
+phase = 1
+acceptance = "RSS ≤ 64 MiB for typical session (3 panes, no plugins)."
+verification = "benches/rss-headroom.rs"
+
+[[fr]]
+id = "FR-010"
+priority = "P1"
+phase = 1
+acceptance = "Cold-cache launch to first paint ≤ 150 ms on reference hardware."
+verification = "benches/startup.rs"
+
+[[fr]]
+id = "FR-011"
+priority = "P1"
+phase = 1
+acceptance = "Directory + command history popups (Alt-Shift-h, Alt-h); persisted; bounded 100."
+verification = "tests/integration/history.rs"
+
+[[fr]]
+id = "FR-012"
+priority = "P1"
+phase = 1
+acceptance = "Alt-c opens quick-cd popup with tab-completion."
+verification = "crates/cargonaut-ui-tui/tests/quick_cd.rs"
+
+[[fr]]
+id = "FR-013"
+priority = "P1"
+phase = 1
+acceptance = "Alt-! prompts for glob; pane displays only matching entries."
+verification = "crates/cargonaut-ui-tui/tests/panel_filter.rs"
+
+[[fr]]
+id = "FR-014"
+priority = "P1"
+phase = 1
+acceptance = "Alt-i syncs other pane's path; Alt-o opens focused dir in other pane."
+verification = "crates/cargonaut-ui-tui/tests/sync_other_panel.rs"
+
+[[fr]]
+id = "FR-015"
+priority = "P1"
+phase = 1
+acceptance = "Alt-. toggles hidden; Alt-, toggles split orient; Ctrl-Space recursive size."
+verification = "crates/cargonaut-ui-tui/tests/panel_niceties.rs"
+
+[[fr]]
+id = "FR-016"
+priority = "P1"
+phase = 1
+acceptance = "F12 opens tasks panel with per-job pause/resume/cancel."
+verification = "tests/integration/tasks_panel.rs"
+
+[[fr]]
+id = "FR-017"
+priority = "P1"
+phase = 1
+acceptance = "Cargonaut writes exit cwd to $CARGONAUT_EXIT_CWD_FILE; contrib/cargonaut.sh wrapper cds parent shell."
+verification = "tests/integration/exit_cwd_wrapper.rs"
+
+[[fr]]
+id = "FR-101"
+priority = "P2"
+phase = 2
+acceptance = "VFS adapters: local (P1), sftp (P2), s3 (P2), smb (P3), archive (P3)."
+verification = "crates/cargonaut-vfs-*/tests/adapter_basics.rs"
+
+[[fr]]
+id = "FR-102"
+priority = "P2"
+phase = 2
+acceptance = "Credentials via ssh-agent / OS keychain / prompt; no plaintext on disk."
+verification = "tests/integration/credentials_paths.rs"
+
+[[fr]]
+id = "FR-103"
+priority = "P2"
+phase = 3
+acceptance = "Previewers: text (syntect), images (sixel/iTerm/Kitty/ASCII), media (ffprobe)."
+verification = "crates/cargonaut-ui-tui/tests/preview.rs"
+
+[[fr]]
+id = "FR-104"
+priority = "P2"
+phase = 3
+acceptance = "$EDITOR handoff; pane refreshes on editor exit."
+verification = "tests/integration/editor_handoff.rs"
+
+[[fr]]
+id = "FR-201"
+priority = "P3"
+phase = 3
+acceptance = "WASM plugin host with capability tokens; native plugins for trusted local."
+verification = "crates/cargonaut-plugin-host/tests/capability_enforcement.rs"
+
+[[fr]]
+id = "FR-202"
+priority = "P3"
+phase = 5
+acceptance = "Bookmarks (persisted); tabs; tags (per-path, indexed)."
+verification = "tests/integration/bookmarks_tabs_tags.rs"
+
+[[fr]]
+id = "FR-203"
+priority = "P3"
+phase = 3
+acceptance = "Filename search (glob/regex instant); content search via ripgrep."
+verification = "tests/integration/search.rs"
+
+[[fr]]
+id = "FR-204"
+priority = "P3"
+phase = 3
+acceptance = "Advanced mask rename: glob/regex source → templated target with backrefs; dry-run mandatory."
+verification = "tests/integration/mask_rename.rs"
+
+[[fr]]
+id = "FR-205"
+priority = "P3"
+phase = 3
+acceptance = ":!cmd / Ctrl-x ! pipes shell command stdout into panel; non-resolving lines marked."
+verification = "tests/integration/external_panelize.rs"
+
+[[fr]]
+id = "FR-206"
+priority = "P3"
+phase = 3
+acceptance = "F2 user menu; ~/.config/cargonaut/menu.toml + ./.cargonaut.menu.toml; macros %f/%t/etc."
+verification = "tests/integration/user_menu.rs"
+
+[[fr]]
+id = "FR-207"
+priority = "P3"
+phase = 3
+acceptance = "openers.toml maps (ext|glob|mime) → open/view/edit commands; bundled defaults."
+verification = "tests/integration/openers.rs"
+
+[[fr]]
+id = "FR-208"
+priority = "P3"
+phase = 3
+acceptance = "Bulk rename via $EDITOR; line-count mismatch is hard error; conflicts prompt per-row."
+verification = "tests/integration/bulk_rename_editor.rs"
+
+[[fr]]
+id = "FR-209"
+priority = "P3"
+phase = 3
+acceptance = "Previewer hex view (:hex / Ctrl-x h); regex search forward/back; goto offset/line."
+verification = "crates/cargonaut-ui-tui/tests/preview_hex_search.rs"
+
+[[fr]]
+id = "FR-210"
+priority = "P3"
+phase = 3
+acceptance = "< / :filter fuzzy ranks visible names; nucleo-backed."
+verification = "crates/cargonaut-ui-tui/tests/fuzzy_filter.rs"
+
+[[fr]]
+id = "FR-211"
+priority = "P3"
+phase = 3
+acceptance = ":z <fragment> jumps via zoxide query -i; :cd auto-records via zoxide add."
+verification = "tests/integration/zoxide.rs"
+
+[[fr]]
+id = "FR-301"
+priority = "P4"
+phase = 4
+acceptance = "Built-in terminal emulator (portable-pty + own VT100)."
+verification = "crates/cargonaut-ui-tui/tests/terminal_emulator.rs"
+
+[[fr]]
+id = "FR-302"
+priority = "P4"
+phase = 4
+acceptance = "Transactional undo; per-session stack persisted; default depth 100."
+verification = "tests/integration/undo_sequence.rs"
+
+[[fr]]
+id = "FR-303"
+priority = "P4"
+phase = 4
+acceptance = "Conflict dialogs: name collision, perm denied, checksum mismatch."
+verification = "tests/integration/conflict_dialogs.rs"
+
+[[fr]]
+id = "FR-304"
+priority = "P4"
+phase = 4
+acceptance = "Append-only audit log with HMAC chain; rotated daily."
+verification = "tests/integration/audit_tamper.rs"
+
+[[fr]]
+id = "FR-305"
+priority = "P4"
+phase = 4
+acceptance = "Ctrl-x d Compare-Directories (quick/thorough/mtime); auto-tag diffs; Ctrl-x Ctrl-d side-by-side diff."
+verification = "tests/integration/compare_diff.rs"
+
+[[fr]]
+id = "FR-401"
+priority = "P5"
+phase = 5
+acceptance = "TOML themes; 6 bundled (solarized x2, dracula, gruvbox, nord, mono)."
+verification = "crates/cargonaut-ui-tui/tests/themes.rs"
+
+[[fr]]
+id = "FR-402"
+priority = "P5"
+phase = 5
+acceptance = "English + 5 community locales via fluent-rs; runtime selection."
+verification = "tests/integration/locales.rs"
+
+[[fr]]
+id = "FR-403"
+priority = "P5"
+phase = 5
+acceptance = "--a11y-output text mode emits plain-text event stream for screen readers."
+verification = "tests/integration/a11y_output.rs"
+
+[[fr]]
+id = "FR-404"
+priority = "P5"
+phase = 5
+acceptance = "F9 menu bar with File/Edit/View/Navigate/Tools/Help; mouse + arrow-key navigable."
+verification = "crates/cargonaut-ui-tui/tests/menu_bar.rs"
+
+[[fr]]
+id = "FR-405"
+priority = "P5"
+phase = 5
+acceptance = "Alt-t cycles listing modes Brief/Standard/Long/User-defined; columns from config."
+verification = "crates/cargonaut-ui-tui/tests/listing_modes.rs"
+
+[[fr]]
+id = "FR-501"
+priority = "P6"
+phase = 6
+acceptance = "seccomp/landlock for main process; stricter seccomp for plugins."
+verification = "tests/integration/seccomp_filters.rs"
+
+[[fr]]
+id = "FR-502"
+priority = "P6"
+phase = 6
+acceptance = "io_uring on Linux for copy engine; SIMD-accelerated checksums."
+verification = "benches/copy-io_uring-vs-stdio.rs"
+
+[[fr]]
+id = "FR-503"
+priority = "P6"
+phase = 6
+acceptance = "MC bookmarks import; --mc-keys compat mode."
+verification = "tests/integration/mc_migration.rs"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Success Criteria (measurable outcomes — CI-gated)
+
+[[sc]]
+id = "SC-001"
+phase = 1
+target = "local-local 1 GiB copy ≤ 1.25 × cp(1)"
+verification = "benches/local-copy-vs-cp.rs"
+
+[[sc]]
+id = "SC-002"
+phase = 1
+target = "SIGKILL at offset N → resume within 8 MiB; final SHA-256 matches source"
+verification = "tests/integration/resume_sigkill.rs"
+
+[[sc]]
+id = "SC-003"
+phase = 1
+target = "3 panes × 10k-entry dirs → RSS ≤ 64 MiB"
+verification = "benches/rss-headroom.rs"
+
+[[sc]]
+id = "SC-004"
+phase = 1
+target = "cold launch → first paint ≤ 150 ms; warm ≤ 40 ms"
+verification = "benches/startup.rs"
+
+[[sc]]
+id = "SC-005"
+phase = 2
+target = "localhost SFTP throughput ≥ 200 MiB/s for ≥100 MiB files"
+verification = "benches/sftp-throughput.rs"
+
+[[sc]]
+id = "SC-006"
+phase = 3
+target = "sandbox-escape fuzzer runs 100k random WASM; zero escapes"
+verification = "tests/fuzz/sandbox_escape/"
+
+[[sc]]
+id = "SC-007"
+phase = 4
+target = "10 random destructive ops + 10 undos → bit-identical directory tree"
+verification = "tests/integration/undo_sequence.rs"
+
+[[sc]]
+id = "SC-008"
+phase = 4
+target = "audit-log tamper detected on next launch via HMAC-chain verification"
+verification = "tests/integration/audit_tamper.rs"
+
+[[sc]]
+id = "SC-009"
+phase = 6
+target = "MC bookmarks importable; --mc-keys passes 30-shortcut checklist"
+verification = "tests/integration/mc_migration.rs"
+
+[[sc]]
+id = "SC-010"
+phase = 6
+target = "cargo-tarpaulin ≥ 80% on core crates"
+verification = "ci: tarpaulin step"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-Functional Requirements
+
+[[nfr]]
+id = "NFR-001"
+phase = 1
+target = "release binary ≤ 8 MiB stripped"
+verification = "ci: size check"
+
+[[nfr]]
+id = "NFR-002"
+phase = 1
+target = "first-paint after keypress ≤ 16 ms (60 Hz)"
+verification = "benches/keypress-latency.rs"
+
+[[nfr]]
+id = "NFR-003"
+phase = 1
+target = "virtual-scroll 10⁶-entry directory without RSS over FR-009 ceiling"
+verification = "benches/large-dir-scroll.rs"
+
+[[nfr]]
+id = "NFR-004"
+phase = 1
+target = "≥ 8 concurrent transfers without UI stalling"
+verification = "tests/integration/concurrent_transfers.rs"
+
+[[nfr]]
+id = "NFR-005"
+phase = 1
+target = "no detached background tasks after user cancel"
+verification = "tests/integration/cancellation.rs"
+
+[[nfr]]
+id = "NFR-006"
+phase = 3
+target = "plugin sandbox rejects every out-of-cap syscall"
+verification = "tests/fuzz/sandbox_escape/"
+
+[[nfr]]
+id = "NFR-007"
+phase = 6
+target = "core crates ≥ 80% coverage; adapter crates ≥ 60%"
+verification = "ci: tarpaulin"
+
+[[nfr]]
+id = "NFR-008"
+phase = "all"
+target = "no unsafe in core/ crates without // SAFETY: + unit test"
+verification = "ci: clippy-deny-unsafe + grep"

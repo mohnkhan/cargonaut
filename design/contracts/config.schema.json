@@ -1,0 +1,191 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/cargonaut/cargonaut/schema/config.json",
+  "title": "Cargonaut configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "theme": { "type": "string", "default": "solarized-dark" },
+        "mouse": { "type": "boolean", "default": false },
+        "mc_keys": { "type": "boolean", "default": false,
+                     "description": "Load the MC-compat keymap layer on top of defaults." },
+        "show_hidden": { "type": "boolean", "default": false },
+        "date_format": { "type": "string", "default": "%Y-%m-%d %H:%M" },
+        "zoxide": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string", "enum": ["auto"] }
+          ],
+          "default": "auto",
+          "description": "FR-211. \"auto\" enables zoxide integration iff the zoxide binary is on $PATH at startup. true forces on (error if missing). false disables."
+        },
+        "history": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "directory_depth": {
+              "type": "integer", "minimum": 0, "maximum": 10000, "default": 100,
+              "description": "FR-011. Max in-session directory-history entries per pane (0 = disabled)."
+            },
+            "command_depth": {
+              "type": "integer", "minimum": 0, "maximum": 100000, "default": 1000,
+              "description": "FR-011. Max persisted command-history entries (0 = disabled)."
+            },
+            "persist_path": {
+              "type": "string", "default": "~/.local/state/cargonaut/history",
+              "description": "FR-011. Where command history is persisted across sessions."
+            }
+          }
+        },
+        "listing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "default_mode": {
+              "type": "string",
+              "enum": ["brief", "standard", "long", "user"],
+              "default": "standard",
+              "description": "FR-405. Initial listing mode; Alt-t cycles at runtime."
+            },
+            "user": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "description": "Column id: built-in (name|size|mtime|perms|ino|blocks|ctime|atime|xattr|target) OR plugin-provided (plugin-name/column-name)."
+                  },
+                  "default": ["name", "size", "perms"],
+                  "description": "FR-405. Column layout for listing.default_mode = \"user\"."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "transfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_interval_mib": {
+          "type": "integer", "minimum": 1, "maximum": 1024, "default": 8,
+          "description": "MiB of bytes written between fsync'd checkpoints."
+        },
+        "parallelism": {
+          "type": "integer", "minimum": 1, "maximum": 32, "default": 4,
+          "description": "Max concurrent transfer tasks per session."
+        },
+        "verify_after_copy": {
+          "type": "boolean", "default": true,
+          "description": "Re-read destination SHA-256 after copy completes."
+        },
+        "buffer_mib": {
+          "type": "integer", "minimum": 1, "maximum": 256, "default": 16,
+          "description": "Per-transfer read/write buffer size."
+        },
+        "io_uring": {
+          "type": "boolean", "default": true,
+          "description": "Use io_uring on Linux ≥5.10 (Phase 6)."
+        },
+        "on_cancel": {
+          "type": "string",
+          "enum": ["delete", "keep"],
+          "default": "keep",
+          "description": "FR-008. On Ctrl-c cancel of an in-flight transfer: delete the partial destination, OR keep it with a checkpoint for resume."
+        }
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "array", "items": { "type": "string" }, "default": [],
+          "description": "Plugin names to load on launch."
+        },
+        "allow_network": { "type": "boolean", "default": false },
+        "allow_exec": { "type": "boolean", "default": false },
+        "memory_limit_mib": {
+          "type": "integer", "minimum": 1, "maximum": 4096, "default": 64,
+          "description": "Per-plugin wasmtime memory limit."
+        },
+        "fuel_limit": {
+          "type": "integer", "minimum": 1, "default": 1000000000,
+          "description": "Per-host-call wasmtime fuel limit (~100 ms wall)."
+        }
+      }
+    },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["system-keychain", "agent", "prompt"],
+          "default": "system-keychain"
+        },
+        "cache_passwords_for_seconds": {
+          "type": "integer", "minimum": 0, "maximum": 86400, "default": 0,
+          "description": "In-memory cache (0 = prompt every time)."
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "rotate_daily": { "type": "boolean", "default": true },
+        "max_size_mib": {
+          "type": "integer", "minimum": 1, "maximum": 1024, "default": 64
+        },
+        "hmac_keyring_entry": {
+          "type": "string", "default": "cargonaut/audit-hmac",
+          "description": "OS-keychain entry name for the audit HMAC key."
+        }
+      }
+    },
+    "remote": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sftp": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connect_timeout_secs": { "type": "integer", "default": 30 },
+            "keepalive_secs": { "type": "integer", "default": 60 },
+            "pipelined_reads": { "type": "integer", "minimum": 1, "maximum": 16, "default": 4 }
+          }
+        },
+        "s3": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "region": { "type": "string", "default": "us-east-1" },
+            "endpoint": { "type": "string", "description": "Custom S3 endpoint (MinIO, etc.)" },
+            "multipart_threshold_mib": { "type": "integer", "default": 64 }
+          }
+        }
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ripgrep_path": { "type": "string", "default": "rg" },
+        "default_pattern_type": {
+          "type": "string", "enum": ["glob", "regex", "fixed"], "default": "glob"
+        },
+        "max_results": { "type": "integer", "minimum": 10, "maximum": 100000, "default": 5000 }
+      }
+    }
+  }
+}

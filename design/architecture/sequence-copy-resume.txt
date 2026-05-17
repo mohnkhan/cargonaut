@@ -1,0 +1,79 @@
+Sequence diagram — F5 copy with mid-transfer SIGKILL + relaunch + resume.
+
+ASCII swim-lane (UI / Core / Transfer / Vfs-Local / Filesystem / Process)
+
+User      UI(tui)   Core      Transfer       Vfs-Local      Filesystem    Kernel
+ │         │         │           │              │              │            │
+ │ F5 ───▶ │         │           │              │              │            │
+ │         │ Cmd(copy)│           │              │              │            │
+ │         ├────────▶│           │              │              │            │
+ │         │         │ submit_transfer(src,dst,opts)│           │            │
+ │         │         ├──────────▶│              │              │            │
+ │         │         │           │ stat(src) ──▶│              │            │
+ │         │         │           │              │ stat()      ▶│            │
+ │         │         │           │              │              │ syscall   ▶│
+ │         │         │           │              │              │            │ size=1GB
+ │         │         │           │              │              │ ◀── ok    │
+ │         │         │           │              │ ◀──── ok ────│            │
+ │         │         │           │ ◀──── meta ──│              │            │
+ │         │         │           │              │              │            │
+ │         │         │           │ create_checkpoint(.cargonaut-transfer-uuid.json) │
+ │         │         │           │              │              │ write     ▶│
+ │         │         │           │              │              │ fsync     ▶│
+ │         │         │           │              │              │            │
+ │         │         │ ◀── TransferJob handle ──│              │            │
+ │         │ ◀──── ok│           │              │              │            │
+ │         │         │           │ spawn worker task            │            │
+ │         │         │           ├─── parallel read+write loop ─┤            │
+ │         │         │           │                              │            │
+ │         │ progress watch::Receiver              │           │            │
+ │         │ ◀── tick(N bytes done)              │           │            │
+ │         │ render progress bar               │           │            │
+ │ updates │                                   │           │            │
+ │ ◀────── │                                   │           │            │
+ │         │         │           │  every 8 MiB: write checkpoint + fsync   │
+ │         │         │           │              │              │ fsync    ▶│
+ │         │         │           │              │              │            │
+ │         │         │           │  ── 544 MiB written ──      │            │
+ │ SIGKILL │         │           │              │              │            │
+ │ ──────▶ │         │           │              │              │            │
+ │         │ ✗       │           │              │              │            │
+ │         X         X           X              X              X            │
+ │                                                                          │
+ │                              ── process dies ──                           │
+ │                                                                          │
+ │ launch cargonaut                                                         │
+ │ ─────▶  │         │           │              │              │            │
+ │         │ ▶ main()│           │              │              │            │
+ │         │         ├─ scan_resumable(panes)──▶│              │            │
+ │         │         │           │ readdir for .cargonaut-transfer-*.json   │
+ │         │         │           │              │              │ readdir   ▶│
+ │         │         │           │ ◀── found 1 ─│              │            │
+ │         │         │           │ validate checkpoint (CRC + src SHA prefix)│
+ │         │         │           │              │              │            │
+ │         │ ◀── ResumeOffer──── │              │              │            │
+ │         │ show resume dialog  │              │              │            │
+ │ ◀────── │                     │              │              │            │
+ │ press R │                     │              │              │            │
+ │ ──────▶ │                     │              │              │            │
+ │         │ Cmd(resume, jobid)  │              │              │            │
+ │         ├───────▶│            │              │              │            │
+ │         │         │ resume_transfer(checkpoint)│            │            │
+ │         │         ├──────────▶│              │              │            │
+ │         │         │           │ open src/dst at offset 544 MiB           │
+ │         │         │           │ verify dst CRC chain matches checkpoint  │
+ │         │         │           │ resume parallel read+write loop          │
+ │         │         │           │                                          │
+ │         │         │ ◀── ok ──│                                          │
+ │         │ ◀── ok ─│           │                                          │
+ │         │         │           │ → completes at 100%; verify dst SHA      │
+ │         │         │ ◀── Completed(sha256_match=true)                     │
+ │         │ ◀── done│           │ delete .cargonaut-transfer-*.json        │
+ │         │ show success status │                                          │
+ │ ◀────── │                     │                                          │
+
+Critical-path timings (reference hardware, FR-007/SC-001):
+  stat(src):         < 0.5 ms
+  checkpoint write:  ~80 ms per checkpoint (8 MiB interval fsync)
+  read+write throughput: ≥ 80% of cp(1) at steady state
+  resume validation: < 100 ms regardless of file size (CRC chain only)

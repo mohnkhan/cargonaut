@@ -1,0 +1,29 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+*.rlib
+*.prof*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Cargonaut runtime
+.cargonaut-transfer-*.json
+audit.log
+audit.log.*
+~/.local/share/cargonaut/
+
+# Misc
+*.log
+*.tmp
