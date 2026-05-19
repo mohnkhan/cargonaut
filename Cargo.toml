@@ -1,10 +1,8 @@
 # Cargonaut workspace.
 #
-# To bootstrap into its own repo:
-#   1. Copy this scaffold/ tree to a fresh git repo root
-#   2. `cargo build` should produce a runnable `cargonaut` binary (the
-#      Phase 1 prototype — dual pane stub + resumable-copy demo)
-#   3. Iterate on tasks T1.04+ from specs/.../tasks.md
+# See design/plan.md for the multi-phase architecture and design/tasks.md
+# for the current task backlog. `cargo build` produces the `cargonaut`
+# binary (Phase 1 in progress).
 
 [workspace]
 resolver = "2"
