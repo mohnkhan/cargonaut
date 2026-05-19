@@ -1,0 +1,74 @@
+name: Bug report
+description: Something behaves unexpectedly in MyOS2026 (kernel, userland, build, or tests).
+title: "<one-line symptom>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more of the fields below you can fill in, the faster this gets root-caused.
+        If you don't know a field's answer, leave it blank — partial reports are still useful.
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What did you observe? One paragraph; the externally-visible behavior.
+      placeholder: e.g. `cat /proc/1/wchan` returns "[running]" even for a clearly-sleeping init.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Exact commands or steps to reproduce. Copy/paste from a real terminal where possible.
+      render: shell
+      placeholder: |
+        $ make image
+        $ qemu-system-x86_64 ... dist/myos2026.qcow2
+        nsh$ cat /proc/1/wchan
+        [running]
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include exit codes, error strings, or symptom delta vs expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: serial
+    attributes:
+      label: Captured serial output / dmesg
+      description: |
+        If the bug involves the kernel, paste relevant serial output. The panic-tail (Feature 038) and
+        backtrace + PCB-dump (Feature 046) blocks are especially valuable — paste them verbatim.
+        Use `dmesg` over SSH or read `/proc/dmesg` to grab pre-panic context.
+      render: shell
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Branch / commit, QEMU version, host kernel, image variant (image, image-kasan, image-kassert, etc.).
+      placeholder: "branch=056-..., commit=a013c20, qemu=8.2.4, host=Linux 6.17, image=myos2026.qcow2"
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues (open and closed) and didn't find a duplicate.
+        - label: I verified this reproduces on `master` (or noted the branch in Environment above).

@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a new capability, subsystem, or improvement to MyOS2026.
+title: "<short feature name>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose a new feature or improvement. Non-trivial features
+        will typically be specified more formally under `specs/NNN-<name>/` via the
+        spec-kit workflow before implementation — this issue is the starting point.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: One paragraph describing the capability. Concrete, not aspirational.
+      placeholder: e.g. Add a `/proc/<pid>/maps` file that reports the address space of the named process.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: |
+        What problem does this solve, or what unlock does it enable? If it makes
+        debugging easier, name the bug-class it would catch. If it closes a gap vs Linux,
+        link to the corresponding `proc(5)` / man page.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / non-scope
+      description: |
+        What's IN this feature and what's deliberately OUT? Helps avoid scope creep
+        before specs are written. Use bullets.
+      placeholder: |
+        IN:
+        - Per-PID maps file
+        - Read-only
+
+        OUT (separate follow-up if needed):
+        - /proc/<pid>/numa_maps
+        - Write support (mprotect via proc)
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other designs you weighed and why this one wins. OK to leave blank if there's only one reasonable shape.
+
+  - type: input
+    id: tier
+    attributes:
+      label: ROADMAP tier (if known)
+      description: Which `ROADMAP.md` tier does this fit? (tier-1 through tier-5; leave blank if unsure)
+      placeholder: tier-3
