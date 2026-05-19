@@ -27,3 +27,10 @@ audit.log.*
 # Misc
 *.log
 *.tmp
+
+# CI bundling
+dist/
+
+# Claude Code per-machine state
+.claude/settings.local.json
+

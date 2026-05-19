@@ -4,6 +4,26 @@
 
 **Status**: Phase 1 scaffold + design tunnel complete; implementation has not started.
 
+## At a Glance
+
+| Target | Goal | Result |
+|--------|------|--------|
+| Cold launch | < 150 ms | _pending impl_ |
+| Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
+| Resident memory | ≤ 64 MiB | _pending impl_ |
+| Unit tests | All pass | _0/0 — implementation not started_ |
+| Clippy | `-D warnings` clean | _pending impl_ |
+| CI pipeline | `make ci-local` green | _pending impl_ |
+
+Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documentation discipline).
+
+## Feature History
+
+Most recent first.
+
+- **Feature 001 — dev-culture-bootstrap** (2026-05-20). Transferred development conventions from sibling MyOS2026: `.specify/` + `.claude/` (spec-kit slash commands), `CLAUDE.md` (workflow rules), `CONTRIBUTING.md` + `CODE_OF_CONDUCT.md`, `.github/workflows/ci.yml` (cargo-shaped CI rollup), CI scripts (`check-pr-body.sh`, `docs-gate.sh`, `ci-local.sh`), `Makefile` with cargo wrappers + tmpfs targets, `ROADMAP.md` + `Learnings.md` skeletons. Added SSD-preservation tmpfs discipline (`make tmpfs-setup` redirects `target/` → `/tmp/cargonaut/<hash>/target/`) as mandatory dev-machine convention. Branch `001-dev-culture-bootstrap` → PR #N → merged.
+
+
 ## Origins
 
 Cargonaut was designed through a single comprehensive spec-kit-shaped planning

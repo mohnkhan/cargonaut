@@ -1,0 +1,71 @@
+name: Follow-up from a prior PR / spec
+description: A known gap deferred from a shipped PR (e.g. live verification, deferred refactor, v2 of a v1 feature). Models #82, #91.
+title: "<short summary> (PR #N follow-up)"
+labels: ["follow-up"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when a prior PR shipped with an explicitly-deferred gap and you want
+        to track closing it. The point of a follow-up issue is to keep the original PR
+        small and reviewable while ensuring the gap isn't forgotten.
+
+  - type: input
+    id: parent
+    attributes:
+      label: Parent PR / issue
+      description: The PR or spec that deferred this work.
+      placeholder: "PR #92, spec 049"
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: |
+        What did the parent PR ship, and what gap is THIS issue closing? Be specific
+        about which acceptance criterion was left unproven or which v2 capability is being tracked.
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom (if a bug-shaped follow-up)
+      description: |
+        If the parent PR shipped structurally-correct code but live integration didn't
+        work, describe the failing observation. Skip this field for clean "v2 capability" follow-ups.
+      render: shell
+
+  - type: textarea
+    id: diagnostic
+    attributes:
+      label: Suggested diagnostic order (cheapest first)
+      description: |
+        Ranked list of investigation steps. The point is to save the next person the
+        framing time. Match the shape of #91 — start with the cheapest isolated test
+        (e.g. a kernel cmdline-trigger + panic-dump scrape) before any live integration chase.
+      placeholder: |
+        1. **Direct kernel test**: add a `<name>_test=1` cmdline flag that ...
+        2. **stdlib + proc test**: write a 30-line C program that ...
+        3. **End-to-end via nsh**: if 1+2 pass, the issue is in ...
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: When is this follow-up done? Concrete, observable.
+      placeholder: e.g. `strace ./echo hello` over hvc0 emits trace records to stderr; child exit code propagates.
+    validations:
+      required: true
+
+  - type: textarea
+    id: refs
+    attributes:
+      label: References
+      description: Files, prior PRs, related issues, specs.
+      placeholder: |
+        - PR #N (the parent)
+        - `kernel/src/foo/bar.rs`
+        - spec `specs/NNN-name/`
