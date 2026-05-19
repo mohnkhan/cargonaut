@@ -12,7 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Top-level configuration tree.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Config {
     /// UI settings.
@@ -25,18 +25,6 @@ pub struct Config {
     pub credentials: CredentialsConfig,
     /// Audit log settings.
     pub audit: AuditConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            ui: UiConfig::default(),
-            transfer: TransferConfig::default(),
-            plugins: PluginsConfig::default(),
-            credentials: CredentialsConfig::default(),
-            audit: AuditConfig::default(),
-        }
-    }
 }
 
 /// UI-related settings.
@@ -84,7 +72,7 @@ impl Default for TransferConfig {
 }
 
 /// Plugin host settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct PluginsConfig {
     /// Plugin names to load.
@@ -93,16 +81,6 @@ pub struct PluginsConfig {
     pub allow_network: bool,
     /// Allow plugins to spawn subprocesses.
     pub allow_exec: bool,
-}
-
-impl Default for PluginsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: vec![],
-            allow_network: false,
-            allow_exec: false,
-        }
-    }
 }
 
 /// Credential backend.
