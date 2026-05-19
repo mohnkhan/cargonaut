@@ -1,7 +1,7 @@
 //! The `VfsBackend` trait that every adapter (local, sftp, s3, ...) implements.
 
-use super::types::{DirListing, Sort, VfsMetadata, VfsPath};
 use super::error::VfsError;
+use super::types::{DirListing, Sort, VfsMetadata, VfsPath};
 use async_trait::async_trait;
 use futures::{AsyncRead, AsyncWrite};
 use std::pin::Pin;

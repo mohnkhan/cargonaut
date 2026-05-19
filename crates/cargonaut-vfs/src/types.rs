@@ -71,7 +71,7 @@ pub enum VfsKind {
     /// Symbolic link (with its target).
     Symlink {
         /// Target path (may be relative or absolute).
-        target: VfsPath,
+        target: Box<VfsPath>,
     },
     /// Other (FIFO, device, etc.).
     Other,
