@@ -2,7 +2,7 @@
 
 > Rust-native, terminal, keyboard-first dual-pane file manager — Midnight Commander reimagined for 2026.
 
-**Status**: Phase 1 — foundational VFS types landed (T1.04). VFS trait + `LocalFs` impl in flight.
+**Status**: Phase 1 — foundational VFS types landed (T1.04). VFS trait + `LocalFs` impl + config loader in flight.
 
 ## At a Glance
 
@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **15/15** (VfsPath round-trip + parse/display/parent/join) |
+| Unit tests | All pass | **25/25** (15 VfsPath + 10 Config loader / schema) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 009 — T1.16: cargonaut-config schema expansion + figment loader** (2026-05-20). Expands the `Config` struct surface to full coverage of `design/contracts/config.schema.json` (new fields across `ui` / `transfer` / `plugins` / `credentials` / `audit`; new top-level `remote.sftp` / `remote.s3` / `search` sections; new enums `ZoxideMode` / `OnCancel` / `CredentialsBackend` / `ListingMode` / `PatternType`). Implements `Config::load` (XDG path → TOML → `CARGONAUT_*` env), `load_from_path` / `load_from_str` (pure TOML), `load_from_str_with_env` (opt-in env layer), and `json_schema_pretty` (schemars-derived). All structs gain `#[serde(default, deny_unknown_fields)]` for partial-TOML support + typo rejection. 10 tests cover defaults, round-trip, partial-TOML, env override, unknown-field rejection, schema generation, and the `ZoxideMode` custom `oneOf: [bool, "auto"]` serde shape. Branch `009-t1.16-config-loader` → PR #N.
 
 - **Feature 003 — Phase 1 foundational: scaffold compile fix + T1.04 VfsPath types** (2026-05-20). Fixed the initial scaffold's compile errors (missing `bitflags` workspace dep, mis-located `Sort` re-export, oversized `VfsKind::Symlink` variant, derivable Default impls flagged by clippy) and lands the `VfsPath` / `VfsMetadata` / `DirListing` / `VfsKind` / `VfsCaps` types per T1.04 (red + green commits). Proptest covers the parse/display round-trip across schemes/authorities/segment counts; concrete tests cover edge cases (root paths, rejected `..`/empty/trailing-slash). Branch `003-pre-session` → PR #3.
 
