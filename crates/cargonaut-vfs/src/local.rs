@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! `LocalFs` — the file-system backend.
 //!
 //! Phase 1 implementation skeleton. Full body in T1.06.

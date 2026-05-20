@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! `TransferJob` submission + the resumable copy loop.
 
 use super::checkpoint::ResumableTransfer;
