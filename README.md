@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **25/25** (15 VfsPath + 10 Config loader / schema) |
+| Unit tests | All pass | **29/29** (15 VfsPath + 10 Config + 4 VfsBackend dyn-dispatch) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 004 — T1.05: VfsBackend trait docs + dyn-dispatch smoke test** (2026-05-20). Expands every `VfsBackend` method's docs with semantics + invariants + error contract (`crates/cargonaut-vfs/src/traits.rs`); adds `tests/dyn_dispatch.rs` pinning trait object-safety + `Send + Sync` bounds at compile time + `Arc<dyn VfsBackend>` construction at runtime, guarding the load-bearing `VfsRef` invariant against accidental regression. Introduces `ByteRange::FULL` for the whole-file invariant. Branch `004-t1.05-vfsbackend-docs` → PR #5.
 
 - **Feature 009 — T1.16: cargonaut-config schema expansion + figment loader** (2026-05-20). Expands the `Config` struct surface to full coverage of `design/contracts/config.schema.json` (new fields across `ui` / `transfer` / `plugins` / `credentials` / `audit`; new top-level `remote.sftp` / `remote.s3` / `search` sections; new enums `ZoxideMode` / `OnCancel` / `CredentialsBackend` / `ListingMode` / `PatternType`). Implements `Config::load` (XDG path → TOML → `CARGONAUT_*` env), `load_from_path` / `load_from_str` (pure TOML), `load_from_str_with_env` (opt-in env layer), and `json_schema_pretty` (schemars-derived). All structs gain `#[serde(default, deny_unknown_fields)]` for partial-TOML support + typo rejection. 10 tests cover defaults, round-trip, partial-TOML, env override, unknown-field rejection, schema generation, and the `ZoxideMode` custom `oneOf: [bool, "auto"]` serde shape. Branch `009-t1.16-config-loader` → PR #N.
 
