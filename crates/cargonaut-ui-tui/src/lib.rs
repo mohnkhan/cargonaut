@@ -6,6 +6,12 @@
 
 #![warn(missing_docs)]
 
+pub mod keymap;
+pub use keymap::{
+    parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
+    SeqLookup,
+};
+
 /// Run the TUI event loop, dispatching key events to the App and rendering
 /// state changes. T1.07 + T1.17 + T1.18 + T1.19 implement.
 ///
