@@ -24,3 +24,7 @@ tracing = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+[[bench]]
+name = "local_copy_vs_cp"
+harness = false

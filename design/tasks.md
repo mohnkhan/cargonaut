@@ -35,9 +35,9 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [ ] T1.07 [US1] Integration test `tests/integration/local_navigation.rs`: launch cargonaut with two tempdir args, simulate keypresses (Tab, j, Enter, Backspace, :cd), assert pane state evolves correctly. Use `crossterm-test` or similar input-injection helper.  **(0.5)**
 - [ ] T1.08 [US1] Integration test `tests/integration/resume_sigkill.rs`: create 4 GiB random file, spawn cargonaut subprocess to F5 copy, wait 1 s, SIGKILL, relaunch, automate the `[r]esume` prompt, wait for completion, assert SHA-256 match. **SC-002 gate.**  **(0.75)**
 - [X] T1.09 [US1] Property test `cargonaut-transfer/src/checkpoint.rs::tests::roundtrip`: random `TransferCheckpoint` serializes + deserializes equal.  **(0.25)**
-- [ ] T1.10 [US1] Bench `benches/local-copy-vs-cp.rs`: criterion bench comparing cargonaut's copy throughput to `cp(1)` for 100 MiB, 1 GiB. **SC-001 gate (≥80%).**  **(0.5)**
-- [ ] T1.11 [US1] Bench `benches/startup.rs`: hyperfine wrapper measuring cold + warm startup. **SC-004 gate (≤150 ms cold).**  **(0.25)**
-- [ ] T1.12 [US1] Bench `benches/rss-headroom.rs`: spawn cargonaut, drive it into 3 panes × 10k-entry-each session, sample RSS. **SC-003 gate (≤64 MiB).**  **(0.25)**
+- [X] T1.10 [US1] Bench `benches/local-copy-vs-cp.rs`: criterion bench comparing cargonaut's copy throughput to `cp(1)` for 100 MiB, 1 GiB. **SC-001 gate (≥80%).**  **(0.5)**
+- [X] T1.11 [US1] Bench `benches/startup.rs`: hyperfine wrapper measuring cold + warm startup. **SC-004 gate (≤150 ms cold).**  **(0.25)**
+- [X] T1.12 [US1] Bench `benches/rss-headroom.rs`: spawn cargonaut, drive it into 3 panes × 10k-entry-each session, sample RSS. **SC-003 gate (≤64 MiB).**  **(0.25)**
 
 - [X] T1.12b [US1] Integration test `tests/integration/cancellation.rs`: start a 1 GiB local-to-local copy, send Ctrl-c (or SIGINT) at offset N, assert: (a) the transfer task observes cancellation within 500 ms (wall-clock); (b) per `[transfer] on_cancel = "delete" | "keep"` config, the partial destination is either removed or remains with a valid `.cargonaut-transfer-*.json` checkpoint; (c) no tokio task survives 1 s after cancel (verified via `tokio-metrics` or task-count probe). **Covers FR-008 + NFR-005.** (Phase 1: implemented `keep` semantics + 500ms gate via `crates/cargonaut-transfer/tests/cancellation.rs`; `delete` mode + tokio-metrics task-count probe deferred.)  **(0.5)**
 
@@ -68,8 +68,8 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 ### Polish (Phase 1)
 
 - [X] T1.22a [P] [US1] CI check `scripts/check-binary-size.sh`: cargo build --release, run `strip`, fail if size > 8 MiB. Wire into `.github/workflows/ci.yml`. **Covers NFR-001.**  **(0.1)**
-- [ ] T1.22b [P] [US1] Bench `benches/keypress-latency.rs`: criterion harness that simulates one keypress through the dispatch loop, measures dispatch → first-paint render latency. Fail >16 ms p95. **Covers NFR-002.**  **(0.25)**
-- [ ] T1.22c [P] [US1] Bench `benches/large-dir-scroll.rs`: synthesize a 1M-entry tempdir, open it in one pane, scroll cursor j 10k times, sample RSS at each 100k. Assert RSS stays ≤64 MiB (per FR-009). **Covers NFR-003.**  **(0.25)**
+- [X] T1.22b [P] [US1] Bench `benches/keypress-latency.rs`: criterion harness that simulates one keypress through the dispatch loop, measures dispatch → first-paint render latency. Fail >16 ms p95. **Covers NFR-002.**  **(0.25)**
+- [X] T1.22c [P] [US1] Bench `benches/large-dir-scroll.rs`: synthesize a 1M-entry tempdir, open it in one pane, scroll cursor j 10k times, sample RSS at each 100k. Assert RSS stays ≤64 MiB (per FR-009). **Covers NFR-003.**  **(0.25)**
 - [X] T1.22d [P] [US1] Integration test `tests/integration/concurrent_transfers.rs`: submit 8 simultaneous LocalFs→LocalFs 100 MiB copies; assert all complete; assert no UI render frame exceeded 16 ms during the burst (via tracing-subscriber latency probe). **Covers NFR-004.** (Phase 1: 8×4 MiB completion gate via `crates/cargonaut-transfer/tests/concurrent_transfers.rs`; render-frame latency probe deferred until the binary integration test exists.)  **(0.5)**
 
 - [X] T1.22  Docs: README quick-start (10 lines + screenshot), `docs/architecture.md` (link to spec architecture/), per-crate `lib.rs` rustdoc. (Per-crate rustdoc was completed inline during each impl task; README quick-start refreshed; docs/architecture.md added as a thin pointer to design/.)  **(0.5)**
