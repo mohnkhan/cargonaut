@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **87/87** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint + 5 submit_transfer + 9 scan_resumable + 5 resume_transfer) |
+| Unit tests | All pass | **103/103** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 014 — T1.18: keymap parser** (2026-05-20). `crates/cargonaut-ui-tui/src/keymap.rs` parses `design/contracts/keymap.toml` (60+ bindings, 6 modes) into a `Keymap` indexed by `(Mode, KeySequence)` → `Command` (60-variant enum). `parse_key_sequence` handles single chords (`F10`, `M-1`, `j`) and multi-key chords (`C-x !`, `C-x C-d` — required by FR-205/208/209/305). `lookup_sequence` returns three-state `SeqLookup::{Command, Pending, NoMatch}` for the dispatcher's wait-for-next-key state machine. 16 tests cover full default-keymap parse, named specials, modifier prefixes, multi-chord prefix/match/no-match, and user-override merge semantics. Branch `014-t1.18-keymap` → PR #N.
 
 - **Feature 013 — T1.15: implement resume_transfer** (2026-05-20). New `resume_transfer(src, dst, checkpoint, opts)` in `crates/cargonaut-transfer/src/job.rs` that defensively re-verifies the destination CRC chain (fast-fails before spawning if invalid), preserves the checkpoint's job_id (audit-log correlation), opens streams at `bytes_written` (`src.read_stream(ByteRange{start, end:None})` + `dst.write_stream(offset, AppendAtOffset)`), and runs `run_transfer_with_state` — a sibling of `submit_transfer`'s `run_transfer` that starts with the existing `chunk_crcs` chain pre-loaded and continues the loop. 5 tokio tests cover successful completion, CRC-corrupted dst rejection, bytes_written > src_size rejection, job_id preservation, and "first Running.bytes_done > checkpoint.bytes_written". Branch `013-t1.15-resume-transfer` → PR #N.
 
