@@ -3,7 +3,7 @@
 
 //! `TransferJob` submission + the resumable copy loop.
 
-use super::checkpoint::{ResumableTransfer, TransferCheckpoint};
+use super::checkpoint::TransferCheckpoint;
 use cargonaut_vfs::{ByteRange, VfsBackend, VfsPath, WriteMode};
 use futures::{AsyncReadExt, AsyncWriteExt};
 use sha2::{Digest, Sha256};
@@ -449,17 +449,6 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// Scan a destination directory for orphan checkpoint files and validate
-/// each one (source SHA-256 prefix match + destination CRC chain match).
-///
-/// T1.14 implements.
-pub async fn scan_resumable(
-    _dst_backend: Arc<dyn VfsBackend>,
-    _dst_dir: VfsPath,
-) -> Result<Vec<ResumableTransfer>, TransferError> {
-    unimplemented!("T1.14")
 }
 
 #[cfg(test)]
