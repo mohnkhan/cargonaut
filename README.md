@@ -2,7 +2,7 @@
 
 > Rust-native, terminal, keyboard-first dual-pane file manager — Midnight Commander reimagined for 2026.
 
-**Status**: Phase 1 scaffold + design tunnel complete; implementation has not started.
+**Status**: Phase 1 — foundational VFS types landed (T1.04). VFS trait + `LocalFs` impl in flight.
 
 ## At a Glance
 
@@ -11,9 +11,9 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | _0/0 — implementation not started_ |
-| Clippy | `-D warnings` clean | _pending impl_ |
-| CI pipeline | `make ci-local` green | _pending impl_ |
+| Unit tests | All pass | **15/15** (VfsPath round-trip + parse/display/parent/join) |
+| Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
+| CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
 Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documentation discipline).
 
@@ -21,7 +21,9 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 
 Most recent first.
 
-- **Feature 001 — dev-culture-bootstrap** (2026-05-20). Transferred development conventions from sibling MyOS2026: `.specify/` + `.claude/` (spec-kit slash commands), `CLAUDE.md` (workflow rules), `CONTRIBUTING.md` + `CODE_OF_CONDUCT.md`, `.github/workflows/ci.yml` (cargo-shaped CI rollup), CI scripts (`check-pr-body.sh`, `docs-gate.sh`, `ci-local.sh`), `Makefile` with cargo wrappers + tmpfs targets, `ROADMAP.md` + `Learnings.md` skeletons. Added SSD-preservation tmpfs discipline (`make tmpfs-setup` redirects `target/` → `/tmp/cargonaut/<hash>/target/`) as mandatory dev-machine convention. Branch `001-dev-culture-bootstrap` → PR #N → merged.
+- **Feature 003 — Phase 1 foundational: scaffold compile fix + T1.04 VfsPath types** (2026-05-20). Fixed the initial scaffold's compile errors (missing `bitflags` workspace dep, mis-located `Sort` re-export, oversized `VfsKind::Symlink` variant, derivable Default impls flagged by clippy) and lands the `VfsPath` / `VfsMetadata` / `DirListing` / `VfsKind` / `VfsCaps` types per T1.04 (red + green commits). Proptest covers the parse/display round-trip across schemes/authorities/segment counts; concrete tests cover edge cases (root paths, rejected `..`/empty/trailing-slash). Branch `003-pre-session` → PR #3.
+
+- **Feature 001 — dev-culture-bootstrap** (2026-05-20). Transferred development conventions from sibling MyOS2026: `.specify/` + `.claude/` (spec-kit slash commands), `CLAUDE.md` (workflow rules), `CONTRIBUTING.md` + `CODE_OF_CONDUCT.md`, `.github/workflows/ci.yml` (cargo-shaped CI rollup), CI scripts (`check-pr-body.sh`, `docs-gate.sh`, `ci-local.sh`), `Makefile` with cargo wrappers + tmpfs targets, `ROADMAP.md` + `Learnings.md` skeletons. Added SSD-preservation tmpfs discipline (`make tmpfs-setup` redirects `target/` → `/tmp/cargonaut/<hash>/target/`) as mandatory dev-machine convention. Branch `001-dev-culture-bootstrap` → PR #2 → merged.
 
 
 ## Origins
