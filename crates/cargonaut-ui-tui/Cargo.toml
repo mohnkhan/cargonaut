@@ -20,3 +20,12 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 smol_str = { workspace = true }
+humantime = "2"
+
+[[bench]]
+name = "keypress_latency"
+harness = false
+
+[[bench]]
+name = "large_dir_scroll"
+harness = false
