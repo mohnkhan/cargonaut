@@ -307,6 +307,10 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::SyncOtherPanelPath => AppCommand::SyncOtherPanelPath,
         U::ShowFocusedInOtherPanel => AppCommand::ShowFocusedInOtherPanel,
         U::ToggleSplitOrientation => AppCommand::ToggleSplitOrientation,
+        U::HistoryPrevDir => AppCommand::HistoryPrevDir,
+        U::HistoryNextDir => AppCommand::HistoryNextDir,
+        U::QuickCdPopup => AppCommand::QuickCdPopup,
+        U::ShowTasksPanel => AppCommand::ShowTasksPanel,
         _ => return None,
     })
 }
