@@ -228,6 +228,7 @@ dependencies = [
  "crossterm 0.28.1",
  "ratatui",
  "serde",
+ "smol_str",
  "thiserror",
  "tokio",
  "toml",
