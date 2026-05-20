@@ -171,7 +171,7 @@ async fn read_full(backend: &dyn VfsBackend, path: &VfsPath) -> Result<Vec<u8>, 
     Ok(buf)
 }
 
-async fn compute_src_prefix_for_resume(
+pub(crate) async fn compute_src_prefix_for_resume(
     backend: &dyn VfsBackend,
     path: &VfsPath,
 ) -> Result<[u8; 32], TransferError> {
@@ -194,7 +194,7 @@ async fn compute_src_prefix_for_resume(
     Ok(h.finalize().into())
 }
 
-async fn verify_dst_crc_chain(
+pub(crate) async fn verify_dst_crc_chain(
     backend: &dyn VfsBackend,
     dst: &VfsPath,
     cp: &TransferCheckpoint,

@@ -19,6 +19,6 @@ pub mod job;
 
 pub use checkpoint::{scan_resumable, ResumableTransfer, TransferCheckpoint};
 pub use job::{
-    submit_transfer, Progress, TransferError, TransferId, TransferJob, TransferMode,
-    TransferOptions, TransferState,
+    resume_transfer, submit_transfer, Progress, TransferError, TransferId, TransferJob,
+    TransferMode, TransferOptions, TransferState,
 };

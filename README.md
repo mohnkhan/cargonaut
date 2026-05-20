@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **82/82** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint + 5 submit_transfer + 9 scan_resumable) |
+| Unit tests | All pass | **87/87** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint + 5 submit_transfer + 9 scan_resumable + 5 resume_transfer) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 013 — T1.15: implement resume_transfer** (2026-05-20). New `resume_transfer(src, dst, checkpoint, opts)` in `crates/cargonaut-transfer/src/job.rs` that defensively re-verifies the destination CRC chain (fast-fails before spawning if invalid), preserves the checkpoint's job_id (audit-log correlation), opens streams at `bytes_written` (`src.read_stream(ByteRange{start, end:None})` + `dst.write_stream(offset, AppendAtOffset)`), and runs `run_transfer_with_state` — a sibling of `submit_transfer`'s `run_transfer` that starts with the existing `chunk_crcs` chain pre-loaded and continues the loop. 5 tokio tests cover successful completion, CRC-corrupted dst rejection, bytes_written > src_size rejection, job_id preservation, and "first Running.bytes_done > checkpoint.bytes_written". Branch `013-t1.15-resume-transfer` → PR #N.
 
 - **Feature 012 — T1.14: implement scan_resumable** (2026-05-20). Moves `scan_resumable` from `job.rs` to `crates/cargonaut-transfer/src/checkpoint.rs` (where the task spec places it) and implements it: lists dst dir via `VfsBackend::list`, filters `.cargonaut-transfer-*.json` entries, parses each as `TransferCheckpoint`, then pre-validates both halves of the resume contract — re-computes the source SHA-256 prefix (Phase 1 only resolves `file://` sources) and re-walks the destination CRC chain at the recorded chunk size. Sidecars with wrong schema versions / parse failures / read failures are silently skipped (per-sidecar errors don't block siblings). 9 tokio tests cover empty dir, unrelated files, happy path, src-modified, dst-corrupt (CRC mismatch), dst-truncated, wrong schema version, malformed JSON, multiple checkpoints. Branch `012-t1.14-scan-resumable` → PR #N.
 
