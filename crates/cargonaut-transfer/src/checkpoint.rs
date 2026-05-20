@@ -56,3 +56,99 @@ pub struct ResumableTransfer {
     /// Pre-validated: destination bytes match the CRC chain up to `bytes_written`.
     pub dest_intact: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn checkpoint_strategy() -> impl Strategy<Value = TransferCheckpoint> {
+        (
+            any::<u32>(),                                                   // version
+            "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", // job_id (uuid-shaped)
+            "(file|sftp|s3)://[a-zA-Z0-9._/-]{1,32}",                       // src_uri
+            any::<u64>(),                                                   // src_size
+            any::<[u8; 32]>(),                                              // src_sha256_prefix
+            "(file|sftp|s3)://[a-zA-Z0-9._/-]{1,32}",                       // dst_uri
+            any::<u64>(),                                                   // bytes_written
+            proptest::collection::vec(any::<u32>(), 0..32),                 // chunk_crcs
+            1u64..=(1024 * 1024 * 1024),                                    // chunk_size_bytes
+            any::<u64>(),                                                   // created_at
+            any::<u64>(),                                                   // last_update_at
+        )
+            .prop_map(
+                |(
+                    version,
+                    job_id,
+                    src_uri,
+                    src_size,
+                    src_sha256_prefix,
+                    dst_uri,
+                    bytes_written,
+                    chunk_crcs,
+                    chunk_size_bytes,
+                    created_at,
+                    last_update_at,
+                )| TransferCheckpoint {
+                    version,
+                    job_id,
+                    src_uri,
+                    src_size,
+                    src_sha256_prefix,
+                    dst_uri,
+                    bytes_written,
+                    chunk_crcs,
+                    chunk_size_bytes,
+                    created_at,
+                    last_update_at,
+                },
+            )
+    }
+
+    proptest! {
+        #[test]
+        fn roundtrip(cp in checkpoint_strategy()) {
+            let json = serde_json::to_string(&cp).expect("serialize");
+            let back: TransferCheckpoint = serde_json::from_str(&json).expect("deserialize");
+            prop_assert_eq!(back, cp);
+        }
+
+        #[test]
+        fn roundtrip_pretty(cp in checkpoint_strategy()) {
+            // Pretty-printed form must also round-trip (used by `cargonaut audit`
+            // dumps and any human-edited checkpoint file).
+            let json = serde_json::to_string_pretty(&cp).expect("serialize");
+            let back: TransferCheckpoint = serde_json::from_str(&json).expect("deserialize");
+            prop_assert_eq!(back, cp);
+        }
+    }
+
+    #[test]
+    fn default_version_is_one() {
+        // Constant — guards against silent schema-version bumps without
+        // a migration path being added at the call site.
+        assert_eq!(TransferCheckpoint::VERSION, 1);
+    }
+
+    #[test]
+    fn empty_chunk_crcs_serializes() {
+        // Newly-submitted job before the first checkpoint interval has
+        // an empty CRC vec; must still round-trip.
+        let cp = TransferCheckpoint {
+            version: TransferCheckpoint::VERSION,
+            job_id: "00000000-0000-0000-0000-000000000000".into(),
+            src_uri: "file:///src".into(),
+            src_size: 0,
+            src_sha256_prefix: [0u8; 32],
+            dst_uri: "file:///dst".into(),
+            bytes_written: 0,
+            chunk_crcs: vec![],
+            chunk_size_bytes: 8 * 1024 * 1024,
+            created_at: 0,
+            last_update_at: 0,
+        };
+        let json = serde_json::to_string(&cp).unwrap();
+        let back: TransferCheckpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(cp, back);
+    }
+}

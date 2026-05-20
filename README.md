@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **64/64** (15 VfsPath + 10 Config + 4 VfsBackend dyn-dispatch + 35 LocalFs) |
+| Unit tests | All pass | **68/68** (15 VfsPath + 10 Config + 4 VfsBackend dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint roundtrip) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 010 — T1.09: TransferCheckpoint roundtrip property test** (2026-05-20). Proptest in `crates/cargonaut-transfer/src/checkpoint.rs::tests` covers `TransferCheckpoint` serialize/deserialize round-trip for both compact and pretty-printed JSON forms (operators occasionally `vim` checkpoint sidecars per FR-006). `pub const VERSION = 1` + a unit test guard catch silent schema bumps. 4 new tests; total workspace now 68/68. Branch `010-t1.09-checkpoint-roundtrip` → PR #N.
 
 - **Feature 002 — T1.06: implement LocalFs over tokio::fs** (2026-05-20). Lands the concrete `LocalFs: VfsBackend` (red + green commits): 35 per-method tempdir tests across `list` / `stat` / `read_stream` / `write_stream` / `unlink` / `rmdir` / `rename` / `mkdir`. Bridges tokio's `AsyncRead`/`Write` to the trait's `futures::` return types via `tokio_util::compat` (the `compat` cargo feature). Symlink-correct (`stat`/`list`/`unlink` all use `symlink_metadata` so symlinks stay reported as `Symlink`, never silently followed). `read_stream` clamps past-EOF starts to file size (yields at-EOF reader per spec, not error). `write_stream::AppendAtOffset` opens without create/truncate and seeks; file must exist (resume contract). `rename` rejects cross-authority moves with `Unsupported`. Branch `002-localfs-vfs-backend` → PR #6.
 
