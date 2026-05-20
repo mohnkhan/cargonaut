@@ -61,6 +61,27 @@ impl PaneView {
         }
     }
 
+    /// Sync this view from the App's authoritative [`PaneState`]. Copies
+    /// `cwd`, `listing`, `selected`, `show_hidden`, `filter`, and
+    /// translates the App's absolute cursor index into a visible-relative
+    /// position for ratatui's `ListState`. Called once per frame by the
+    /// binary's event loop so the rendered view never drifts from App state.
+    pub fn sync_from(&mut self, state: &cargonaut_core::PaneState) {
+        self.cwd = state.cwd.clone();
+        self.listing = state.listing.clone();
+        self.selected = state.selected.clone();
+        self.show_hidden = state.show_hidden;
+        self.filter = state.filter.clone();
+        // Translate visible-relative cursor (state.cursor) to ListState.
+        let visible_len = self.visible_indices().len();
+        if visible_len == 0 {
+            self.list_state.select(None);
+        } else {
+            let clamped = state.cursor.min(visible_len - 1);
+            self.list_state.select(Some(clamped));
+        }
+    }
+
     /// Replace the listing (e.g. after a `cd`). Cursor + selection reset
     /// because absolute indices don't carry across directories.
     pub fn set_listing(&mut self, listing: DirListing) {

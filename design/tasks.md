@@ -51,7 +51,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [X] T1.18 [US1] Implement `cargonaut-ui-tui::keymap` in `cargonaut-ui-tui/src/keymap.rs`: loads `contracts/keymap.toml`, maps key events to `Command` enum.  **(0.5)**
 - [X] T1.19 [US1] Implement `cargonaut-core::App` in `cargonaut-core/src/app.rs`: command queue, two PaneViews, status bar, dispatch loop. Async; uses `tokio::select!` to multiplex input + transfer progress.  **(1.5)**
 - [X] T1.20 [US1] Implement dialogs: copy/move/delete confirmation (`cargonaut-ui-tui/src/dialog.rs`) + resume prompt on launch.  **(0.75)**
-- [ ] T1.21 [US1] Implement `cargonaut-bin/src/main.rs`: parse CLI (`clap`), load config, build App, install SIGINT/SIGTERM handlers, run event loop. `--version`, `--help`, subcommands list-plugins/audit/resume.  **(0.5)**
+- [X] T1.21 [US1] Implement `cargonaut-bin/src/main.rs`: parse CLI (`clap`), load config, build App, install SIGINT/SIGTERM handlers, run event loop. `--version`, `--help`, subcommands list-plugins/audit/resume.  **(0.5)**
 
 #### MC-parity panel ergonomics (Phase 1 additions from MC gap analysis)
 
