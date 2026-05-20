@@ -1,21 +1,33 @@
+// Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Cargonaut configuration schema + loader.
 //!
-//! Loads from (highest precedence first): CLI args → `CARGONAUT_*` env vars →
-//! `~/.config/cargonaut/config.toml` → built-in defaults.
+//! Load order (highest precedence first): `CARGONAUT_*` env vars → TOML at
+//! the given path (or the default `~/.config/cargonaut/config.toml`) →
+//! built-in defaults from this module.
 //!
-//! Schema is mirror-defined in `contracts/config.schema.json`; this file is
-//! the runtime authority.
+//! The schema is mirror-defined in `design/contracts/config.schema.json`;
+//! this module is the runtime authority. JSON Schema can be regenerated
+//! via [`Config::json_schema_pretty`].
 
 #![warn(missing_docs)]
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
-/// Top-level configuration tree.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+// =====================================================================
+// Top-level
+// =====================================================================
+
+/// Full configuration tree. Every field has a default from
+/// `contracts/config.schema.json`; partial TOML fills in only what the
+/// user overrides.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// UI settings.
+    /// TUI / interaction settings.
     pub ui: UiConfig,
     /// Transfer engine settings.
     pub transfer: TransferConfig,
@@ -25,18 +37,36 @@ pub struct Config {
     pub credentials: CredentialsConfig,
     /// Audit log settings.
     pub audit: AuditConfig,
+    /// Remote-backend settings (SFTP, S3).
+    pub remote: RemoteConfig,
+    /// Search settings.
+    pub search: SearchConfig,
 }
 
+// =====================================================================
+// UI
+// =====================================================================
+
 /// UI-related settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct UiConfig {
     /// Theme name.
     pub theme: String,
     /// Enable mouse input.
     pub mouse: bool,
-    /// Load MC-compat keymap layer.
+    /// Load the MC-compat keymap layer.
     pub mc_keys: bool,
+    /// Show Unix dotfiles by default.
+    pub show_hidden: bool,
+    /// `strftime`-style date format for the listing.
+    pub date_format: String,
+    /// FR-211 zoxide integration tri-state.
+    pub zoxide: ZoxideMode,
+    /// FR-011 history settings.
+    pub history: HistoryConfig,
+    /// FR-405 listing-mode settings.
+    pub listing: ListingConfig,
 }
 
 impl Default for UiConfig {
@@ -45,20 +75,148 @@ impl Default for UiConfig {
             theme: "solarized-dark".into(),
             mouse: false,
             mc_keys: false,
+            show_hidden: false,
+            date_format: "%Y-%m-%d %H:%M".into(),
+            zoxide: ZoxideMode::Auto,
+            history: HistoryConfig::default(),
+            listing: ListingConfig::default(),
         }
     }
 }
 
+/// FR-211. `auto` enables zoxide iff the binary is on `$PATH` at startup;
+/// `true` forces on (error if missing); `false` disables.
+///
+/// Serializes as the JSON value `"auto"` / `true` / `false` to match the
+/// schema's `oneOf: [boolean, "auto"]` shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+pub enum ZoxideMode {
+    /// Enable iff `zoxide` is on `$PATH` at startup.
+    Auto,
+    /// Force on; error if missing.
+    On,
+    /// Disable.
+    Off,
+}
+
+impl Serialize for ZoxideMode {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ZoxideMode::Auto => s.serialize_str("auto"),
+            ZoxideMode::On => s.serialize_bool(true),
+            ZoxideMode::Off => s.serialize_bool(false),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ZoxideMode {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{self, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = ZoxideMode;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "boolean or the string \"auto\"")
+            }
+            fn visit_bool<E: de::Error>(self, b: bool) -> Result<ZoxideMode, E> {
+                Ok(if b { ZoxideMode::On } else { ZoxideMode::Off })
+            }
+            fn visit_str<E: de::Error>(self, s: &str) -> Result<ZoxideMode, E> {
+                if s == "auto" {
+                    Ok(ZoxideMode::Auto)
+                } else {
+                    Err(de::Error::custom(format!(
+                        "expected boolean or \"auto\", got {s:?}"
+                    )))
+                }
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// FR-011. Per-pane / global history bounds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct HistoryConfig {
+    /// Max in-session directory-history entries per pane (0 = disabled).
+    pub directory_depth: u32,
+    /// Max persisted command-history entries (0 = disabled).
+    pub command_depth: u32,
+    /// Where command history is persisted across sessions.
+    pub persist_path: String,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            directory_depth: 100,
+            command_depth: 1000,
+            persist_path: "~/.local/state/cargonaut/history".into(),
+        }
+    }
+}
+
+/// FR-405. Listing-mode settings.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ListingConfig {
+    /// Initial listing mode; `Alt-t` cycles at runtime.
+    pub default_mode: ListingMode,
+    /// User-defined column layout (used when `default_mode == User`).
+    pub user: UserListingConfig,
+}
+
+/// FR-405. Per-pane listing layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ListingMode {
+    /// Name-only, multi-column auto-fit.
+    Brief,
+    /// FR-002 default (name + size + mtime + perms).
+    #[default]
+    Standard,
+    /// One row per file with extended attrs.
+    Long,
+    /// Columns enumerated in [`UserListingConfig::columns`].
+    User,
+}
+
+/// FR-405 user-defined column layout.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct UserListingConfig {
+    /// Column ids: built-in (`name|size|mtime|perms|ino|blocks|ctime|atime|xattr|target`)
+    /// OR plugin-provided (`plugin-name/column-name`).
+    pub columns: Vec<String>,
+}
+
+impl Default for UserListingConfig {
+    fn default() -> Self {
+        Self {
+            columns: vec!["name".into(), "size".into(), "perms".into()],
+        }
+    }
+}
+
+// =====================================================================
+// Transfer
+// =====================================================================
+
 /// Transfer engine settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct TransferConfig {
-    /// Bytes between fsync'd checkpoints.
+    /// MiB written between fsync'd checkpoints.
     pub checkpoint_interval_mib: u32,
     /// Max concurrent transfers.
     pub parallelism: u32,
     /// Re-read destination after copy and verify SHA-256.
     pub verify_after_copy: bool,
+    /// Use `io_uring` on Linux ≥5.10 (Phase 6).
+    pub io_uring: bool,
+    /// FR-008. Behavior on Ctrl-c cancel of an in-flight transfer.
+    pub on_cancel: OnCancel,
 }
 
 impl Default for TransferConfig {
@@ -67,46 +225,108 @@ impl Default for TransferConfig {
             checkpoint_interval_mib: 8,
             parallelism: 4,
             verify_after_copy: true,
+            io_uring: true,
+            on_cancel: OnCancel::Keep,
         }
     }
 }
 
+/// FR-008. On Ctrl-c: delete the partial destination, OR keep it with a
+/// checkpoint for resume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum OnCancel {
+    /// Remove the partial destination on cancel.
+    Delete,
+    /// Keep the partial destination + checkpoint for resume.
+    #[default]
+    Keep,
+}
+
+// =====================================================================
+// Plugins
+// =====================================================================
+
 /// Plugin host settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct PluginsConfig {
-    /// Plugin names to load.
+    /// Plugin names to load on launch.
     pub enabled: Vec<String>,
     /// Allow plugins to use the network.
     pub allow_network: bool,
     /// Allow plugins to spawn subprocesses.
     pub allow_exec: bool,
+    /// Per-plugin wasmtime memory limit.
+    pub memory_limit_mib: u32,
+    /// Per-host-call wasmtime fuel limit (~100 ms wall).
+    pub fuel_limit: u64,
 }
 
-/// Credential backend.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+impl Default for PluginsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: vec![],
+            allow_network: false,
+            allow_exec: false,
+            memory_limit_mib: 64,
+            fuel_limit: 1_000_000_000,
+        }
+    }
+}
+
+// =====================================================================
+// Credentials
+// =====================================================================
+
+/// Credential backend selection + cache.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct CredentialsConfig {
-    /// Backend identifier: "system-keychain" | "agent" | "prompt".
-    pub backend: String,
+    /// Backend used for storing remote credentials.
+    pub backend: CredentialsBackend,
+    /// In-memory password cache duration (`0` = prompt every time).
+    pub cache_passwords_for_seconds: u32,
 }
 
 impl Default for CredentialsConfig {
     fn default() -> Self {
         Self {
-            backend: "system-keychain".into(),
+            backend: CredentialsBackend::SystemKeychain,
+            cache_passwords_for_seconds: 0,
         }
     }
 }
 
+/// Credential backend identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CredentialsBackend {
+    /// OS keychain (libsecret / Keychain / wincred).
+    #[default]
+    SystemKeychain,
+    /// SSH agent unix socket.
+    Agent,
+    /// Interactive prompt only.
+    Prompt,
+}
+
+// =====================================================================
+// Audit
+// =====================================================================
+
 /// Audit log settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct AuditConfig {
     /// Enable audit logging.
     pub enabled: bool,
     /// Rotate daily.
     pub rotate_daily: bool,
+    /// Per-file size cap before rotation.
+    pub max_size_mib: u32,
+    /// OS-keychain entry name for the audit HMAC key.
+    pub hmac_keyring_entry: String,
 }
 
 impl Default for AuditConfig {
@@ -114,21 +334,337 @@ impl Default for AuditConfig {
         Self {
             enabled: true,
             rotate_daily: true,
+            max_size_mib: 64,
+            hmac_keyring_entry: "cargonaut/audit-hmac".into(),
         }
     }
 }
 
+// =====================================================================
+// Remote
+// =====================================================================
+
+/// Settings for remote VFS backends.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct RemoteConfig {
+    /// SFTP adapter settings.
+    pub sftp: SftpConfig,
+    /// S3 adapter settings.
+    pub s3: S3Config,
+}
+
+/// SFTP adapter settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SftpConfig {
+    /// TCP connect timeout (seconds).
+    pub connect_timeout_secs: u32,
+    /// SSH keepalive interval (seconds).
+    pub keepalive_secs: u32,
+    /// Number of parallel pipelined SFTP read requests (1-16).
+    pub pipelined_reads: u32,
+}
+
+impl Default for SftpConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout_secs: 30,
+            keepalive_secs: 60,
+            pipelined_reads: 4,
+        }
+    }
+}
+
+/// S3 adapter settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct S3Config {
+    /// AWS region.
+    pub region: String,
+    /// Custom S3 endpoint (MinIO, R2, etc.); `None` uses the default for the region.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// File size above which multi-part upload is used.
+    pub multipart_threshold_mib: u32,
+}
+
+impl Default for S3Config {
+    fn default() -> Self {
+        Self {
+            region: "us-east-1".into(),
+            endpoint: None,
+            multipart_threshold_mib: 64,
+        }
+    }
+}
+
+// =====================================================================
+// Search
+// =====================================================================
+
+/// Search settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SearchConfig {
+    /// Path to the `rg` (ripgrep) binary; defaults to looking up on `$PATH`.
+    pub ripgrep_path: String,
+    /// Initial pattern interpretation in the Find dialog.
+    pub default_pattern_type: PatternType,
+    /// Cap on results before truncation.
+    pub max_results: u32,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            ripgrep_path: "rg".into(),
+            default_pattern_type: PatternType::Glob,
+            max_results: 5000,
+        }
+    }
+}
+
+/// Pattern interpretation mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PatternType {
+    /// Shell-style glob (`*.rs`, `**/foo`).
+    #[default]
+    Glob,
+    /// Rust `regex` crate syntax.
+    Regex,
+    /// Literal fixed-string search.
+    Fixed,
+}
+
+// =====================================================================
+// Loader
+// =====================================================================
+
 impl Config {
-    /// Load with full precedence chain. T1.16 implements.
+    /// Load from the default path (`~/.config/cargonaut/config.toml`) +
+    /// `CARGONAUT_*` env vars, with built-in defaults filling missing fields.
     pub fn load() -> Result<Self, ConfigError> {
         unimplemented!("T1.16 — see design/tasks.md")
     }
+
+    /// Load from the given TOML file path + `CARGONAUT_*` env vars.
+    pub fn load_from_path(_path: &Path) -> Result<Self, ConfigError> {
+        unimplemented!("T1.16")
+    }
+
+    /// Load from a TOML string + `CARGONAUT_*` env vars. Useful for tests
+    /// and for the `--config-string` CLI flag.
+    pub fn load_from_str(_toml: &str) -> Result<Self, ConfigError> {
+        unimplemented!("T1.16")
+    }
+
+    /// Render the JSON Schema for [`Config`] as a pretty-printed JSON string.
+    /// Mirror of `design/contracts/config.schema.json`; useful for IDE
+    /// completion + ad-hoc validation.
+    pub fn json_schema_pretty() -> String {
+        unimplemented!("T1.16")
+    }
 }
+
+// =====================================================================
+// Error
+// =====================================================================
 
 /// Errors from loading config.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    /// File not parseable.
+    /// TOML / JSON parse failure.
     #[error("parse: {0}")]
     Parse(String),
+
+    /// IO error reading the config file.
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Figment provider failure (env var conversion, missing file, etc.).
+    #[error("figment: {0}")]
+    Figment(String),
+}
+
+// =====================================================================
+// Tests
+// =====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn defaults_have_documented_values() {
+        let c = Config::default();
+        // UI
+        assert_eq!(c.ui.theme, "solarized-dark");
+        assert!(!c.ui.mouse);
+        assert!(!c.ui.mc_keys);
+        assert!(!c.ui.show_hidden);
+        assert_eq!(c.ui.date_format, "%Y-%m-%d %H:%M");
+        assert_eq!(c.ui.zoxide, ZoxideMode::Auto);
+        assert_eq!(c.ui.history.directory_depth, 100);
+        assert_eq!(c.ui.history.command_depth, 1000);
+        assert_eq!(
+            c.ui.history.persist_path,
+            "~/.local/state/cargonaut/history"
+        );
+        assert_eq!(c.ui.listing.default_mode, ListingMode::Standard);
+        assert_eq!(c.ui.listing.user.columns, vec!["name", "size", "perms"]);
+        // Transfer
+        assert_eq!(c.transfer.checkpoint_interval_mib, 8);
+        assert_eq!(c.transfer.parallelism, 4);
+        assert!(c.transfer.verify_after_copy);
+        assert!(c.transfer.io_uring);
+        assert_eq!(c.transfer.on_cancel, OnCancel::Keep);
+        // Plugins
+        assert!(c.plugins.enabled.is_empty());
+        assert!(!c.plugins.allow_network);
+        assert!(!c.plugins.allow_exec);
+        assert_eq!(c.plugins.memory_limit_mib, 64);
+        assert_eq!(c.plugins.fuel_limit, 1_000_000_000);
+        // Credentials
+        assert_eq!(c.credentials.backend, CredentialsBackend::SystemKeychain);
+        assert_eq!(c.credentials.cache_passwords_for_seconds, 0);
+        // Audit
+        assert!(c.audit.enabled);
+        assert!(c.audit.rotate_daily);
+        assert_eq!(c.audit.max_size_mib, 64);
+        assert_eq!(c.audit.hmac_keyring_entry, "cargonaut/audit-hmac");
+        // Remote
+        assert_eq!(c.remote.sftp.connect_timeout_secs, 30);
+        assert_eq!(c.remote.sftp.keepalive_secs, 60);
+        assert_eq!(c.remote.sftp.pipelined_reads, 4);
+        assert_eq!(c.remote.s3.region, "us-east-1");
+        assert!(c.remote.s3.endpoint.is_none());
+        assert_eq!(c.remote.s3.multipart_threshold_mib, 64);
+        // Search
+        assert_eq!(c.search.ripgrep_path, "rg");
+        assert_eq!(c.search.default_pattern_type, PatternType::Glob);
+        assert_eq!(c.search.max_results, 5000);
+    }
+
+    #[test]
+    fn defaults_round_trip_through_toml() {
+        let c = Config::default();
+        let s = toml::to_string(&c).unwrap();
+        let c2: Config = toml::from_str(&s).unwrap();
+        assert_eq!(c, c2);
+    }
+
+    #[test]
+    fn defaults_round_trip_through_json() {
+        let c = Config::default();
+        let s = serde_json::to_string(&c).unwrap();
+        let c2: Config = serde_json::from_str(&s).unwrap();
+        assert_eq!(c, c2);
+    }
+
+    #[test]
+    fn load_from_str_with_partial_toml_fills_defaults() {
+        let toml_text = r#"
+[ui]
+theme = "dracula"
+mc_keys = true
+
+[transfer]
+parallelism = 8
+"#;
+        let c = Config::load_from_str(toml_text).unwrap();
+        assert_eq!(c.ui.theme, "dracula");
+        assert!(c.ui.mc_keys);
+        assert!(!c.ui.mouse);
+        assert_eq!(c.transfer.parallelism, 8);
+        assert_eq!(c.transfer.checkpoint_interval_mib, 8);
+    }
+
+    #[test]
+    fn load_from_path_reads_toml_file() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(
+            br#"
+[plugins]
+enabled = ["git-status"]
+"#,
+        )
+        .unwrap();
+        let c = Config::load_from_path(f.path()).unwrap();
+        assert_eq!(c.plugins.enabled, vec!["git-status".to_string()]);
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)] // figment::Jail's API returns figment::Error directly
+    fn env_var_overrides_toml() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("CARGONAUT_UI__THEME", "monochrome");
+            let toml_text = r#"
+[ui]
+theme = "dracula"
+"#;
+            let c = Config::load_from_str(toml_text).unwrap();
+            assert_eq!(c.ui.theme, "monochrome");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn unknown_field_is_rejected() {
+        let toml_text = r#"
+[ui]
+theme = "dracula"
+wibble = 42
+"#;
+        let res = Config::load_from_str(toml_text);
+        assert!(res.is_err(), "deny_unknown_fields should reject 'wibble'");
+    }
+
+    #[test]
+    fn json_schema_includes_all_top_level_sections() {
+        let schema = Config::json_schema_pretty();
+        for section in &[
+            "ui",
+            "transfer",
+            "plugins",
+            "credentials",
+            "audit",
+            "remote",
+            "search",
+        ] {
+            assert!(
+                schema.contains(&format!("\"{section}\"")),
+                "missing section: {section}"
+            );
+        }
+    }
+
+    #[test]
+    fn zoxide_mode_serde_round_trip() {
+        for mode in [ZoxideMode::Auto, ZoxideMode::On, ZoxideMode::Off] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let back: ZoxideMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(mode, back);
+        }
+    }
+
+    #[test]
+    fn zoxide_mode_accepts_auto_string_and_bool() {
+        assert_eq!(
+            serde_json::from_str::<ZoxideMode>(r#""auto""#).unwrap(),
+            ZoxideMode::Auto
+        );
+        assert_eq!(
+            serde_json::from_str::<ZoxideMode>("true").unwrap(),
+            ZoxideMode::On
+        );
+        assert_eq!(
+            serde_json::from_str::<ZoxideMode>("false").unwrap(),
+            ZoxideMode::Off
+        );
+        assert!(serde_json::from_str::<ZoxideMode>(r#""bogus""#).is_err());
+    }
 }
