@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Cargonaut binary — argument parsing, config load, App boot, signal handlers.
 //!
 //! Phase 1 prototype: this is a runnable stub that prints the loaded
