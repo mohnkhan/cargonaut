@@ -8,7 +8,7 @@ description = "VFS trait + local-filesystem backend for Cargonaut."
 
 [dependencies]
 tokio = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["compat"] }
 async-trait = { workspace = true }
 serde = { workspace = true }
 smol_str = { workspace = true }
