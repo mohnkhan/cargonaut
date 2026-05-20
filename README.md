@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **68/68** (15 VfsPath + 10 Config + 4 VfsBackend dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint roundtrip) |
+| Unit tests | All pass | **73/73** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint + 5 submit_transfer) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 011 — T1.13: implement submit_transfer over VfsBackend** (2026-05-20). Implements the resumable copy loop in `crates/cargonaut-transfer/src/job.rs`: stats source up-front (immediate caller feedback on NotFound), spawns a tokio task that streams `opts.buffer_size_bytes` chunks from src to dst, accumulates pending bytes and drains them as `checkpoint_interval_bytes` chunks (CRC32 each + JSON sidecar rewrite + flush), emits `Running` state on every chunk read (with throughput + ETA), honors `CancellationToken` between iterations (leaves sidecar in place — `Canceled` is resumable), and on EOF optionally re-reads both sides to verify full SHA-256 before deleting the sidecar. 5 tokio integration tests via `LocalFs` + `TempDir`. Branch `011-t1.13-submit-transfer` → PR #N.
 
 - **Feature 010 — T1.09: TransferCheckpoint roundtrip property test** (2026-05-20). Proptest in `crates/cargonaut-transfer/src/checkpoint.rs::tests` covers `TransferCheckpoint` serialize/deserialize round-trip for both compact and pretty-printed JSON forms (operators occasionally `vim` checkpoint sidecars per FR-006). `pub const VERSION = 1` + a unit test guard catch silent schema bumps. 4 new tests; total workspace now 68/68. Branch `010-t1.09-checkpoint-roundtrip` → PR #N.
 
