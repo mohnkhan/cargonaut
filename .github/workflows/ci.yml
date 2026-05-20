@@ -59,7 +59,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo test --workspace
-        run: cargo test --workspace --all-targets
+        # Note: NOT --all-targets — that forces benches with
+        # harness=false to be invoked as tests, and the SC/NFR gates
+        # in benches/*.rs are calibrated for release builds. Benches
+        # are exercised by `cargo bench` ad-hoc (see Learnings Feature
+        # 027 for the trap).
+        run: cargo test --workspace --lib --tests
       - name: Bundle failure artifacts
         if: failure()
         env:
