@@ -442,29 +442,88 @@ pub enum PatternType {
 // Loader
 // =====================================================================
 
+/// Env-var prefix for figment overrides. `CARGONAUT_UI__THEME` overrides
+/// `ui.theme`; the `__` (double-underscore) is the figment-standard
+/// nested-section separator.
+const ENV_PREFIX: &str = "CARGONAUT_";
+
 impl Config {
-    /// Load from the default path (`~/.config/cargonaut/config.toml`) +
-    /// `CARGONAUT_*` env vars, with built-in defaults filling missing fields.
+    /// Production loader: defaults → TOML at the default path → `CARGONAUT_*`
+    /// env vars. A missing config file is not an error.
     pub fn load() -> Result<Self, ConfigError> {
-        unimplemented!("T1.16 — see design/tasks.md")
+        let path = default_config_path();
+        let mut fig = base_figment();
+        if path.exists() {
+            use figment::providers::{Format, Toml};
+            fig = fig.merge(Toml::file(&path));
+        }
+        with_env(fig).extract().map_err(figment_err)
     }
 
-    /// Load from the given TOML file path + `CARGONAUT_*` env vars.
-    pub fn load_from_path(_path: &Path) -> Result<Self, ConfigError> {
-        unimplemented!("T1.16")
+    /// Load from the given TOML file path layered on defaults. **Does not**
+    /// apply env overrides — that's the job of [`Self::load`] in production.
+    /// Errors if the file does not exist or is malformed.
+    pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
+        use figment::providers::{Format, Toml};
+        base_figment()
+            .merge(Toml::file(path))
+            .extract()
+            .map_err(figment_err)
     }
 
-    /// Load from a TOML string + `CARGONAUT_*` env vars. Useful for tests
-    /// and for the `--config-string` CLI flag.
-    pub fn load_from_str(_toml: &str) -> Result<Self, ConfigError> {
-        unimplemented!("T1.16")
+    /// Load from a TOML string layered on defaults. **Does not** apply env
+    /// overrides — that's the job of [`Self::load`] in production. Mostly
+    /// for tests and the `--config-string` CLI flag.
+    pub fn load_from_str(toml_text: &str) -> Result<Self, ConfigError> {
+        use figment::providers::{Format, Toml};
+        base_figment()
+            .merge(Toml::string(toml_text))
+            .extract()
+            .map_err(figment_err)
+    }
+
+    /// Same as [`Self::load_from_str`] but also applies `CARGONAUT_*` env
+    /// overrides on top of the TOML. Separated from [`Self::load_from_str`]
+    /// because env vars are process-wide global state that breaks parallel
+    /// test isolation — opt in explicitly when you want production semantics.
+    pub fn load_from_str_with_env(toml_text: &str) -> Result<Self, ConfigError> {
+        use figment::providers::{Format, Toml};
+        with_env(base_figment().merge(Toml::string(toml_text)))
+            .extract()
+            .map_err(figment_err)
     }
 
     /// Render the JSON Schema for [`Config`] as a pretty-printed JSON string.
     /// Mirror of `design/contracts/config.schema.json`; useful for IDE
     /// completion + ad-hoc validation.
     pub fn json_schema_pretty() -> String {
-        unimplemented!("T1.16")
+        let schema = schemars::schema_for!(Config);
+        serde_json::to_string_pretty(&schema).expect("schemars output is always valid JSON")
+    }
+}
+
+fn base_figment() -> figment::Figment {
+    figment::Figment::from(figment::providers::Serialized::defaults(Config::default()))
+}
+
+fn with_env(fig: figment::Figment) -> figment::Figment {
+    fig.merge(figment::providers::Env::prefixed(ENV_PREFIX).split("__"))
+}
+
+fn figment_err(e: figment::Error) -> ConfigError {
+    ConfigError::Figment(e.to_string())
+}
+
+/// Resolve the default config path. Honors `$XDG_CONFIG_HOME`, falls back
+/// to `$HOME/.config/cargonaut/config.toml`; if neither is set, returns
+/// a relative path that the caller is unlikely to find — but no panic.
+fn default_config_path() -> std::path::PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        std::path::PathBuf::from(xdg).join("cargonaut/config.toml")
+    } else if let Ok(home) = std::env::var("HOME") {
+        std::path::PathBuf::from(home).join(".config/cargonaut/config.toml")
+    } else {
+        std::path::PathBuf::from(".config/cargonaut/config.toml")
     }
 }
 
@@ -600,13 +659,16 @@ enabled = ["git-status"]
     #[test]
     #[allow(clippy::result_large_err)] // figment::Jail's API returns figment::Error directly
     fn env_var_overrides_toml() {
+        // Uses load_from_str_with_env, not load_from_str — env vars are
+        // process-wide global state and only the _with_env variant reads
+        // them, so this test can't pollute parallel siblings.
         figment::Jail::expect_with(|jail| {
             jail.set_env("CARGONAUT_UI__THEME", "monochrome");
             let toml_text = r#"
 [ui]
 theme = "dracula"
 "#;
-            let c = Config::load_from_str(toml_text).unwrap();
+            let c = Config::load_from_str_with_env(toml_text).unwrap();
             assert_eq!(c.ui.theme, "monochrome");
             Ok(())
         });
