@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **73/73** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint + 5 submit_transfer) |
+| Unit tests | All pass | **82/82** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 4 TransferCheckpoint + 5 submit_transfer + 9 scan_resumable) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 012 — T1.14: implement scan_resumable** (2026-05-20). Moves `scan_resumable` from `job.rs` to `crates/cargonaut-transfer/src/checkpoint.rs` (where the task spec places it) and implements it: lists dst dir via `VfsBackend::list`, filters `.cargonaut-transfer-*.json` entries, parses each as `TransferCheckpoint`, then pre-validates both halves of the resume contract — re-computes the source SHA-256 prefix (Phase 1 only resolves `file://` sources) and re-walks the destination CRC chain at the recorded chunk size. Sidecars with wrong schema versions / parse failures / read failures are silently skipped (per-sidecar errors don't block siblings). 9 tokio tests cover empty dir, unrelated files, happy path, src-modified, dst-corrupt (CRC mismatch), dst-truncated, wrong schema version, malformed JSON, multiple checkpoints. Branch `012-t1.14-scan-resumable` → PR #N.
 
 - **Feature 011 — T1.13: implement submit_transfer over VfsBackend** (2026-05-20). Implements the resumable copy loop in `crates/cargonaut-transfer/src/job.rs`: stats source up-front (immediate caller feedback on NotFound), spawns a tokio task that streams `opts.buffer_size_bytes` chunks from src to dst, accumulates pending bytes and drains them as `checkpoint_interval_bytes` chunks (CRC32 each + JSON sidecar rewrite + flush), emits `Running` state on every chunk read (with throughput + ETA), honors `CancellationToken` between iterations (leaves sidecar in place — `Canceled` is resumable), and on EOF optionally re-reads both sides to verify full SHA-256 before deleting the sidecar. 5 tokio integration tests via `LocalFs` + `TempDir`. Branch `011-t1.13-submit-transfer` → PR #N.
 
