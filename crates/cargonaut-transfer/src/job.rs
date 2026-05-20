@@ -3,9 +3,12 @@
 
 //! `TransferJob` submission + the resumable copy loop.
 
-use super::checkpoint::ResumableTransfer;
-use cargonaut_vfs::{VfsBackend, VfsPath};
+use super::checkpoint::{ResumableTransfer, TransferCheckpoint};
+use cargonaut_vfs::{ByteRange, VfsBackend, VfsPath, WriteMode};
+use futures::{AsyncReadExt, AsyncWriteExt};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -113,17 +116,339 @@ pub enum TransferError {
     Checkpoint(String),
 }
 
-/// Submit a new transfer. Spawns a tokio task; returns the handle.
+/// Submit a new transfer. Stats the source synchronously (so the caller
+/// learns about NotFound / permission errors immediately rather than via
+/// a `Failed` state), then spawns a tokio task that runs the resumable
+/// copy loop. The returned [`TransferJob`] hands back a
+/// [`watch::Receiver`] for progress + a [`CancellationToken`] to abort.
 ///
-/// T1.13 implements the actual copy loop.
+/// The copy loop:
+/// - Computes a SHA-256 prefix of the first 1 MiB of the source (used by
+///   resume to detect "source changed since checkpoint").
+/// - Opens `src.read_stream(FULL)` and `dst.write_stream(0, Truncate)`.
+/// - Reads `opts.buffer_size_bytes` chunks; writes each to the destination.
+/// - Every `opts.checkpoint_interval_bytes` of written data, drains the
+///   accumulated bytes into a chunk, CRC32s it, appends to the
+///   [`TransferCheckpoint::chunk_crcs`] chain, flushes the writer, and
+///   writes/overwrites the checkpoint sidecar at
+///   `<dst-parent>/.cargonaut-transfer-<job-id>.json`.
+/// - Emits a `Running` state on every chunk read (bytes_done, throughput,
+///   ETA estimate from the wall-clock).
+/// - Checks the cancellation token at the top of every iteration; on
+///   cancel, sets `Canceled` and leaves the checkpoint in place so the
+///   transfer is resumable.
+/// - On EOF + final flush: optionally re-reads source and destination to
+///   verify SHA-256 (if `opts.verify_after_copy`); unlinks the checkpoint
+///   sidecar (best-effort); emits `Completed { sha256_match }`.
 pub async fn submit_transfer(
-    _src_backend: Arc<dyn VfsBackend>,
-    _src_path: VfsPath,
-    _dst_backend: Arc<dyn VfsBackend>,
-    _dst_path: VfsPath,
-    _opts: TransferOptions,
+    src_backend: Arc<dyn VfsBackend>,
+    src_path: VfsPath,
+    dst_backend: Arc<dyn VfsBackend>,
+    dst_path: VfsPath,
+    opts: TransferOptions,
 ) -> Result<TransferJob, TransferError> {
-    unimplemented!("T1.13 — see design/tasks.md")
+    let id = TransferId(Uuid::new_v4());
+    let cancel = CancellationToken::new();
+    let (state_tx, state_rx) = watch::channel(TransferState::Queued);
+
+    // Stat source synchronously — caller wants immediate error feedback.
+    let src_meta = src_backend.stat(&src_path).await?;
+    let src_size = src_meta.size;
+
+    // SHA-256 of the first 1 MiB of source — used by resume to detect a
+    // swapped/modified source.
+    let src_sha256_prefix = compute_src_prefix(&*src_backend, &src_path).await?;
+
+    // Checkpoint sidecar lives at <dst-parent>/.cargonaut-transfer-<id>.json
+    // (per spec §14 clarification: beside the destination, hidden filename).
+    let dst_parent = dst_path
+        .parent()
+        .ok_or_else(|| TransferError::Checkpoint("dst path has no parent".into()))?;
+    let checkpoint_path = dst_parent.join(&format!(".cargonaut-transfer-{}.json", id.0));
+
+    let mode = opts.mode;
+    let job = TransferJob {
+        id,
+        src: (Arc::clone(&src_backend), src_path.clone()),
+        dst: (Arc::clone(&dst_backend), dst_path.clone()),
+        mode,
+        state: state_rx,
+        cancel: cancel.clone(),
+    };
+
+    tokio::spawn(run_transfer(
+        id,
+        src_backend,
+        src_path,
+        dst_backend,
+        dst_path,
+        opts,
+        src_size,
+        src_sha256_prefix,
+        checkpoint_path,
+        state_tx,
+        cancel,
+    ));
+
+    Ok(job)
+}
+
+#[allow(clippy::too_many_arguments)] // private helper; arguments are a bag of pre-resolved inputs.
+async fn run_transfer(
+    id: TransferId,
+    src_backend: Arc<dyn VfsBackend>,
+    src_path: VfsPath,
+    dst_backend: Arc<dyn VfsBackend>,
+    dst_path: VfsPath,
+    opts: TransferOptions,
+    src_size: u64,
+    src_sha256_prefix: [u8; 32],
+    checkpoint_path: VfsPath,
+    state_tx: watch::Sender<TransferState>,
+    cancel: CancellationToken,
+) {
+    let start = Instant::now();
+    let created_at = now_secs();
+
+    // Open source reader.
+    let mut reader = match src_backend.read_stream(&src_path, ByteRange::FULL).await {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = state_tx.send(TransferState::Failed {
+                error: format!("open src: {e}"),
+                resumable: false,
+            });
+            return;
+        }
+    };
+
+    // Open destination writer (truncating).
+    let mut writer = match dst_backend
+        .write_stream(&dst_path, 0, WriteMode::Truncate)
+        .await
+    {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = state_tx.send(TransferState::Failed {
+                error: format!("open dst: {e}"),
+                resumable: false,
+            });
+            return;
+        }
+    };
+
+    let mut bytes_written: u64 = 0;
+    let mut chunk_crcs: Vec<u32> = Vec::new();
+    let mut pending_chunk: Vec<u8> = Vec::with_capacity(opts.checkpoint_interval_bytes as usize);
+    let mut read_buf = vec![0u8; opts.buffer_size_bytes];
+
+    loop {
+        // Cancellation check — fast path between chunks; keeps response
+        // time bounded by chunk-read latency (≤ buffer_size_bytes /
+        // throughput).
+        if cancel.is_cancelled() {
+            // Leave the checkpoint sidecar in place — the partial dst is
+            // resumable.
+            let _ = state_tx.send(TransferState::Canceled);
+            return;
+        }
+
+        // Read next chunk.
+        let n = match reader.read(&mut read_buf).await {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
+            Err(e) => {
+                let _ = state_tx.send(TransferState::Failed {
+                    error: format!("read src: {e}"),
+                    resumable: true,
+                });
+                return;
+            }
+        };
+
+        // Write the chunk.
+        if let Err(e) = writer.write_all(&read_buf[..n]).await {
+            let _ = state_tx.send(TransferState::Failed {
+                error: format!("write dst: {e}"),
+                resumable: true,
+            });
+            return;
+        }
+        bytes_written += n as u64;
+        pending_chunk.extend_from_slice(&read_buf[..n]);
+
+        // Emit a Running update on every chunk read.
+        let elapsed = start.elapsed().as_secs_f64();
+        let throughput_mibs = if elapsed > 0.0 {
+            (bytes_written as f64 / elapsed / (1024.0 * 1024.0)) as f32
+        } else {
+            0.0
+        };
+        let eta_secs = if throughput_mibs > 0.0 && bytes_written < src_size {
+            let remaining_mib = (src_size - bytes_written) as f64 / (1024.0 * 1024.0);
+            (remaining_mib / throughput_mibs as f64) as u32
+        } else {
+            0
+        };
+        let _ = state_tx.send(TransferState::Running {
+            bytes_done: bytes_written,
+            bytes_total: src_size,
+            eta_secs,
+            throughput_mibs,
+        });
+
+        // Drain full checkpoint-interval chunks; write/refresh sidecar
+        // after each.
+        let interval = opts.checkpoint_interval_bytes as usize;
+        while pending_chunk.len() >= interval {
+            let chunk: Vec<u8> = pending_chunk.drain(..interval).collect();
+            chunk_crcs.push(crc32fast::hash(&chunk));
+
+            if let Err(e) = writer.flush().await {
+                let _ = state_tx.send(TransferState::Failed {
+                    error: format!("flush dst: {e}"),
+                    resumable: true,
+                });
+                return;
+            }
+
+            let cp = TransferCheckpoint {
+                version: TransferCheckpoint::VERSION,
+                job_id: id.0.to_string(),
+                src_uri: src_path.display(),
+                src_size,
+                src_sha256_prefix,
+                dst_uri: dst_path.display(),
+                bytes_written,
+                chunk_crcs: chunk_crcs.clone(),
+                chunk_size_bytes: opts.checkpoint_interval_bytes,
+                created_at,
+                last_update_at: now_secs(),
+            };
+            if let Err(e) = write_checkpoint(&*dst_backend, &checkpoint_path, &cp).await {
+                let _ = state_tx.send(TransferState::Failed {
+                    error: format!("checkpoint write: {e}"),
+                    resumable: true,
+                });
+                return;
+            }
+        }
+    }
+
+    // Final flush + close.
+    if let Err(e) = writer.flush().await {
+        let _ = state_tx.send(TransferState::Failed {
+            error: format!("final flush: {e}"),
+            resumable: true,
+        });
+        return;
+    }
+    if let Err(e) = writer.close().await {
+        let _ = state_tx.send(TransferState::Failed {
+            error: format!("close dst: {e}"),
+            resumable: true,
+        });
+        return;
+    }
+
+    // Optional SHA-256 verify (re-reads both sides — expensive; opt-in
+    // via opts.verify_after_copy, default ON because correctness > speed).
+    let sha256_match = if opts.verify_after_copy {
+        verify_full_sha256(&*src_backend, &src_path, &*dst_backend, &dst_path)
+            .await
+            .unwrap_or_default()
+    } else {
+        // Without verification we can't claim a match; report false to
+        // keep the contract honest.
+        false
+    };
+
+    // Best-effort cleanup of the checkpoint sidecar. NotFound is OK
+    // (small transfers never wrote one).
+    let _ = dst_backend.unlink(&checkpoint_path).await;
+
+    let _ = state_tx.send(TransferState::Completed { sha256_match });
+}
+
+async fn write_checkpoint(
+    backend: &dyn VfsBackend,
+    path: &VfsPath,
+    cp: &TransferCheckpoint,
+) -> Result<(), TransferError> {
+    let json =
+        serde_json::to_string_pretty(cp).map_err(|e| TransferError::Checkpoint(e.to_string()))?;
+    let mut w = backend
+        .write_stream(path, 0, WriteMode::Truncate)
+        .await
+        .map_err(|e| TransferError::Checkpoint(e.to_string()))?;
+    w.write_all(json.as_bytes())
+        .await
+        .map_err(|e| TransferError::Checkpoint(e.to_string()))?;
+    w.flush()
+        .await
+        .map_err(|e| TransferError::Checkpoint(e.to_string()))?;
+    w.close()
+        .await
+        .map_err(|e| TransferError::Checkpoint(e.to_string()))?;
+    Ok(())
+}
+
+async fn compute_src_prefix(
+    backend: &dyn VfsBackend,
+    path: &VfsPath,
+) -> Result<[u8; 32], TransferError> {
+    let mut reader = backend
+        .read_stream(
+            path,
+            ByteRange {
+                start: 0,
+                end: Some(1024 * 1024),
+            },
+        )
+        .await?;
+    let mut buf = Vec::with_capacity(1024 * 1024);
+    reader
+        .read_to_end(&mut buf)
+        .await
+        .map_err(|e| TransferError::Checkpoint(format!("read src prefix: {e}")))?;
+    let mut h = Sha256::new();
+    h.update(&buf);
+    Ok(h.finalize().into())
+}
+
+async fn verify_full_sha256(
+    src_backend: &dyn VfsBackend,
+    src: &VfsPath,
+    dst_backend: &dyn VfsBackend,
+    dst: &VfsPath,
+) -> Result<bool, TransferError> {
+    let s = full_sha256(src_backend, src).await?;
+    let d = full_sha256(dst_backend, dst).await?;
+    Ok(s == d)
+}
+
+async fn full_sha256(backend: &dyn VfsBackend, path: &VfsPath) -> Result<[u8; 32], TransferError> {
+    let mut reader = backend.read_stream(path, ByteRange::FULL).await?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .await
+            .map_err(|e| TransferError::Checkpoint(format!("read for verify: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().into())
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Scan a destination directory for orphan checkpoint files and validate
@@ -333,9 +658,7 @@ mod tests {
         let td = TempDir::new().unwrap();
         let src = td.path().join("src.bin");
         let dst = td.path().join("dst.bin");
-        let payload: Vec<u8> = (0..2048u32)
-            .flat_map(|n| (n as u32).to_le_bytes())
-            .collect();
+        let payload: Vec<u8> = (0..2048u32).flat_map(u32::to_le_bytes).collect();
         fs::write(&src, &payload).await.unwrap();
 
         let lfs: Arc<dyn VfsBackend> = Arc::new(LocalFs::new());
