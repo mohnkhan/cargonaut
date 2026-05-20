@@ -25,7 +25,9 @@ humantime = "2"
 [[bench]]
 name = "keypress_latency"
 harness = false
+test = false
 
 [[bench]]
 name = "large_dir_scroll"
 harness = false
+test = false

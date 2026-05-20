@@ -24,7 +24,9 @@ tokio = { workspace = true, features = ["test-util"] }
 [[bench]]
 name = "startup"
 harness = false
+test = false
 
 [[bench]]
 name = "rss_headroom"
 harness = false
+test = false
