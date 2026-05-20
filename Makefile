@@ -23,7 +23,7 @@
 #     help              Show this help
 
 .PHONY: help build build-release test clippy fmt fmt-check clean \
-        ci-local tmpfs-setup tmpfs-status tmpfs-teardown
+        ci-local tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
 
 # Default goal: print help instead of building, so a user who types `make`
 # without arguments sees what's available.
@@ -32,14 +32,16 @@
 help:
 	@echo "Cargonaut — 'make help' target reference"
 	@echo
-	@echo "Build / test:"
+	@echo "Build / test (all gated by check-tmpfs per Constitution §V):"
 	@echo "  build             cargo build --workspace"
 	@echo "  build-release     cargo build --release --workspace"
-	@echo "  test              cargo test --workspace --all-targets"
+	@echo "  test              cargo test --workspace --lib --tests"
+	@echo "  bench             cargo bench --workspace"
 	@echo "  clippy            cargo clippy --workspace --all-targets -- -D warnings"
 	@echo "  fmt               cargo fmt --all"
 	@echo "  fmt-check         cargo fmt --all -- --check"
 	@echo "  clean             cargo clean (symlink-aware; preserves tmpfs targets)"
+	@echo "  check-tmpfs       Constitution §V guard — error if target/ is on SSD"
 	@echo
 	@echo "CI:"
 	@echo "  ci-local          Run the full CI pipeline locally (fmt+clippy+test+build+docs-gate)"
@@ -54,17 +56,22 @@ help:
 	@echo "  WIPE=1            For tmpfs-teardown: also rm -rf the tmpfs subdir"
 
 # ── Build / test ──────────────────────────────────────────────────────────────
+# Heavy build targets depend on `check-tmpfs` per Constitution §V — see
+# .specify/memory/constitution.md (SSD Preservation, NON-NEGOTIABLE).
 
-build:
+build: check-tmpfs
 	cargo build --workspace
 
-build-release:
+build-release: check-tmpfs
 	cargo build --release --workspace
 
-test:
-	cargo test --workspace --all-targets
+test: check-tmpfs
+	cargo test --workspace --lib --tests
 
-clippy:
+bench: check-tmpfs
+	cargo bench --workspace
+
+clippy: check-tmpfs
 	cargo clippy --workspace --all-targets -- -D warnings
 
 fmt:
@@ -101,6 +108,12 @@ tmpfs-status:
 
 tmpfs-teardown:
 	@bash scripts/tmpfs-teardown.sh "$(CARGONAUT_TMPFS_ROOT)" "$(WIPE)"
+
+# Guard invoked as a prereq by all heavy build targets (build / test /
+# bench / clippy). Errors loudly when target/ is a real on-SSD directory.
+# Bypassed by CI=true or CARGONAUT_ALLOW_SSD_TARGET=1. See Constitution §V.
+check-tmpfs:
+	@bash scripts/check-tmpfs.sh
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 # Symlink-aware: when target/ is a tmpfs symlink (after `make tmpfs-setup`),

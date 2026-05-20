@@ -24,6 +24,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 
 Most recent first.
 
+- **Feature 029 — Constitution §V (SSD preservation) + `make check-tmpfs` guard** (2026-05-21). Elevates the "MANDATORY: target/ in tmpfs" prose rule from CLAUDE.md to constitutional Principle V (NON-NEGOTIABLE, dev-host scope; CI exempt via `$CI=true`); bumps the constitution to v1.1.0. New `scripts/check-tmpfs.sh` errors loudly when `target/` is a real on-SSD directory; wired as a prereq of `make build` / `test` / `bench` / `clippy`. Per-session waiver via `CARGONAUT_ALLOW_SSD_TARGET=1` (requires Learnings.md entry per §V). Triggered by ~2.8 GB of SSD writes caused by a stray `cargo clean` invocation that bypassed `make clean`'s symlink-aware logic.
+
 - **Feature 028 — Phase 1 closure: T1.07/08/24/25/29 + 0.1.0 release** (2026-05-20). T1.24 dir-history (back+fwd stack per pane, FR-011 Alt-y/Alt-u, bounded by config); T1.25/T1.29 stubbed as status-bar placeholders + keymap-mapped (full popups deferred to Phase 1.1 polish); T1.07/T1.08 stubbed as `#[ignore]` integration tests with manual-smoke docs (PTY automation deferred). Workspace version bumped 0.1.0-pre → **0.1.0**. Phase 1 complete: 152 unit + 3 integration tests, 1.91 MiB stripped binary, all SC/NFR gates either green or bench-available.
 
 - **Feature 027 — T1.10/11/12 + T1.22b/22c: phase 1 benches** (2026-05-20). Five `harness=false` benches covering SC-001 (cp(1) ratio), SC-004 (in-process startup), SC-003 (RSS), NFR-002 (keymap lookup + render), NFR-003 (1M-entry virtual scroll). Each env-overridable for tightening. CI `cargo test --workspace` switched to `--lib --tests` so benches don't run as tests.
@@ -157,12 +159,13 @@ Full SC + NFR matrix in [`design/contracts/requirements.toml`](./design/contract
 The design tunnel was produced inside the MyOS2026 spec-kit workflow; we
 adopted its four constitutional principles verbatim (with one scoped
 reinterpretation noted in [`design/plan.md`](./design/plan.md) §"Constitution
-Check"):
+Check") and added a fifth dev-host discipline (Constitution v1.1.0):
 
 1. **Code Quality** — clippy `-D warnings`, missing-docs on every public crate, peer review required
 2. **Test-First** (NON-NEGOTIABLE) — failing test SHA committed before any implementation merge
 3. **UX Consistency** — keymap centralized; theme variables typed; FR-403 plain-text event stream for screen readers
 4. **Performance** — SC-001/003/004 enforced by criterion benches in CI; >10% regression blocks merge
+5. **SSD Preservation** (NON-NEGOTIABLE, dev-host) — `target/` MUST be a tmpfs symlink (`make tmpfs-setup` / `make check-tmpfs`); CI exempt via `$CI=true`; per-session waiver via `CARGONAUT_ALLOW_SSD_TARGET=1` requires a documented Learnings.md entry. See [`.specify/memory/constitution.md`](./.specify/memory/constitution.md) §V.
 
 ## License
 
