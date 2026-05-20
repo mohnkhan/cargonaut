@@ -34,3 +34,5 @@ dist/
 # Claude Code per-machine state
 .claude/settings.local.json
 
+# Proptest
+**/proptest-regressions/

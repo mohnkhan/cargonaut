@@ -67,7 +67,12 @@ pub enum DialogKind {
     /// Resume a previously-interrupted transfer.
     Resume(Vec<String>),
     /// Conflict: destination exists.
-    Conflict { src: String, dst: String },
+    Conflict {
+        /// Source path being copied/moved.
+        src: String,
+        /// Destination path that already exists.
+        dst: String,
+    },
 }
 
 /// Application root. T1.19 implements.

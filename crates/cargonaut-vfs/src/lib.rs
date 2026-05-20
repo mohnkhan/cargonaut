@@ -9,12 +9,12 @@
 
 #![warn(missing_docs)]
 
-pub mod types;
-pub mod traits;
-pub mod local;
 pub mod error;
+pub mod local;
+pub mod traits;
+pub mod types;
 
 pub use error::VfsError;
 pub use local::LocalFs;
-pub use traits::{VfsBackend, VfsCaps, WriteMode, ByteRange, Sort};
-pub use types::{VfsPath, VfsMetadata, VfsKind, FileMode, DirListing, DirEntry};
+pub use traits::{ByteRange, VfsBackend, VfsCaps, WriteMode};
+pub use types::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsPath};
