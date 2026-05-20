@@ -4,7 +4,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 # Tasks: Cargonaut (Phases 1-3 detailed; 4-6 high-level)
 
-**Input**: Design documents from `/specs/069-cargonaut-file-manager/`
+**Input**: Design documents in `design/`.
 
 **Prerequisites**: spec.md, plan.md, research.md, data-model.md, contracts/, milestones.md, tests-plan.md.
 
@@ -140,12 +140,12 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 > **TDD note (Constitution Principle II)**: each task below bundles test + impl into one line for brevity, BUT the per-task git history MUST show test-first ordering — commit the failing test SHA before merging the implementation.
 
-- [ ] T3.21 [US3] Implement advanced mask rename (FR-204): "Advanced Rename" dialog with glob|regex toggle, target template with `\1..\9` backrefs / `*` wildcards, before→after preview table with per-row untoggle, dry-run mandatory before apply. Use `regex` crate. Integration test on 50 tagged files.  **(1.0)**
+- [ ] T3.21 [US3] Implement advanced mask rename (FR-204): "Advanced Rename" dialog with glob|regex toggle, target template with `$1..$9` backrefs (Rust regex convention; NOT sed-style `\1..\9`) / `*` wildcards, before→after preview table with per-row untoggle, dry-run mandatory before apply. Use `regex` crate. Integration test on 50 tagged files.  **(1.0)**
 - [ ] T3.22 [US3] Implement external panelize (FR-205): `:!cmd` / `Ctrl-x !` runs cmd via `$SHELL -c`, captures stdout, builds an ephemeral panel from each line treated as a VfsPath. Strike-through non-resolving lines. Integration test with `:!find . -name '*.rs'`.  **(0.5)**
 - [ ] T3.23 [US3] Implement user menu (FR-206): F2 opens menu from `~/.config/cargonaut/menu.toml` ∪ `./.cargonaut.menu.toml`. Macro expander (`%f`/`%F`/`%d`/`%D`/`%t`/`%T`/`%s`/`%S`/`%b`/`%x`/`%%`). Conditions (`is-file`, `is-dir`, `match-glob`, `has-cap`). Each invocation logged to audit log (Phase 4) when present, stdout/stderr captured. Bundle 3 starter menu entries.  **(1.0)**
 - [ ] T3.24 [US3] Implement openers.toml ext-binding (FR-207): TOML loader; (ext|glob|mime) match priority order; Enter dispatches `open`, F3 `view`, F4 `edit` (with `$EDITOR` fallback for FR-104 compat). Bundle defaults for chafa/pdftotext/glow/syntect/zcat. Integration test exercises 5 ext types.  **(0.5)**
 - [ ] T3.25 [US3] Implement bulk rename via $EDITOR (FR-208): "Bulk Rename" command (default Ctrl-x r) on ≥2 tagged files writes names to a tempfile, opens `$EDITOR`, on save diffs old↔new rows and applies. Hard-error on line-count mismatch; per-row conflict prompt. Integration test asserts $EDITOR=true returns to cargonaut with no rename; $EDITOR=fake-editor-that-rewrites returns with renames applied.  **(0.5)**
-- [ ] T3.26 [US3] Implement previewer hex view + search (FR-209): `:hex` / Ctrl-x h toggles xxd-style hex view; `/<regex>` forward, `?<regex>` backward, `n`/`N` next/prev, `:g <n>` goto line/offset. Re-uses syntect for text mode. Integration tests cover both modes.  **(1.0)**
+- [ ] T3.26 [US3] Implement previewer hex view + search (FR-209): `:hex` / Ctrl-x X toggles xxd-style hex view (NOT `Ctrl-x h` — reserved for FR-202 hotlist-add in Phase 5); `/<regex>` forward, `?<regex>` backward, `n`/`N` next/prev, `:g <n>` goto line/offset. Re-uses syntect for text mode. Integration tests cover both modes.  **(1.0)**
 - [ ] T3.27 [US5] Implement fuzzy filter (FR-210): `<` / `:filter` opens inline fuzzy prompt; `nucleo` scorer over visible names; results re-rank per keystroke. Also add `--fuzzy` switch to FR-203 Find dialog. Bench: 10k entries, scorer p99 < 16 ms.  **(0.5)**
 - [ ] T3.28 [US5] Implement zoxide integration (FR-211): detect `zoxide` on $PATH at startup; auto-set `[ui] zoxide = true` if found. `:z <fragment>` invokes `zoxide query -i`; every `:cd` / `Alt-c` accepted path runs `zoxide add` (best-effort, no error surfacing).  **(0.25)**
 
@@ -180,10 +180,11 @@ Sketch:
 - T5.x: Listing modes (FR-405) — Alt-t cycles Brief/Standard/Long/User-defined column layouts; user-defined block in `[ui.listing.user]` config. ~0.5 ow.
 - New SCs: usability test pass
 
-### Phase 6: security hardening + perf tuning + MC migration (10 owner-weeks)
+### Phase 6: security hardening + perf tuning + MC migration (12 owner-weeks)
 - T6.x: seccomp + landlock filters; per-plugin stricter seccomp
 - T6.x: io_uring on Linux; SIMD-accelerated checksums
 - T6.x: MC bookmarks importer + `--mc-keys` verification (30-shortcut checklist)
+- T6.x: FISH backend (`sh://` over SSH for boxes without sftp-server) — ~2 ow per spec §15
 - New SCs: SC-009 (MC migration), SC-010 (coverage)
 
 ---

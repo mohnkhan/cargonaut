@@ -1,6 +1,6 @@
 # Feature Specification: Cargonaut — Rust-native terminal file manager
 
-**Feature Branch**: `082-cargonaut-file-manager`
+**Status**: Phase 1 in progress (artifacts live in `design/`; work happens on `main`)
 
 **Created**: 2026-05-17
 
