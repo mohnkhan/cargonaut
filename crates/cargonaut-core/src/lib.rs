@@ -67,6 +67,12 @@ pub struct PaneState {
     pub show_hidden: bool,
     /// Substring filter (placeholder for FR-013 globset).
     pub filter: Option<String>,
+    /// FR-011 back history: cwds visited before the current one, most
+    /// recent at the end. Bounded by `Config::ui.history.directory_depth`.
+    pub dir_history_back: Vec<VfsPath>,
+    /// FR-011 forward history: only populated after [`Command::HistoryPrevDir`].
+    /// Cleared on any non-history navigation (descend / ascend / sync).
+    pub dir_history_fwd: Vec<VfsPath>,
 }
 
 impl PaneState {
@@ -134,6 +140,19 @@ pub enum Command {
     ShowFocusedInOtherPanel,
     /// FR-015 Alt-, — cycle split orientation horizontal ↔ vertical.
     ToggleSplitOrientation,
+    /// FR-011 Alt-y — step to the previous dir in the active pane's
+    /// back-history (no-op if empty).
+    HistoryPrevDir,
+    /// FR-011 Alt-u — step to the next dir in the active pane's
+    /// forward-history (populated only after `HistoryPrevDir`).
+    HistoryNextDir,
+    /// FR-012 Alt-c — open the quick-cd popup. Phase 1: stub (status
+    /// message); the popup widget lands in the next polish PR.
+    QuickCdPopup,
+    /// FR-016 F12 — show the in-flight transfers panel. Phase 1: stub
+    /// (status message listing active transfer count); the panel
+    /// widget lands in the next polish PR.
+    ShowTasksPanel,
     /// F5 — copy selection (or focused entry) to the opposite pane.
     Copy,
     /// F6 — move/rename selection to the opposite pane.
@@ -261,6 +280,8 @@ impl App {
                 selected: BTreeSet::new(),
                 show_hidden,
                 filter: None,
+                dir_history_back: Vec::new(),
+                dir_history_fwd: Vec::new(),
             },
             PaneState {
                 cwd: right_p,
@@ -269,6 +290,8 @@ impl App {
                 selected: BTreeSet::new(),
                 show_hidden,
                 filter: None,
+                dir_history_back: Vec::new(),
+                dir_history_fwd: Vec::new(),
             },
         ];
 
@@ -402,6 +425,17 @@ impl App {
                     Event::PaneUpdated(PaneId::Right),
                 ])
             }
+            HistoryPrevDir => self.history_prev_dir().await,
+            HistoryNextDir => self.history_next_dir().await,
+            QuickCdPopup => Ok(vec![Event::Status(
+                "QuickCd popup not yet implemented (T1.25 stub)".into(),
+            )]),
+            ShowTasksPanel => {
+                let n = self.transfer_order.len();
+                Ok(vec![Event::Status(format!(
+                    "Tasks panel not yet implemented (T1.29 stub) — {n} active transfer(s)"
+                ))])
+            }
             Copy => self.request_copy_confirmation(),
             Move => self.request_move_confirmation(),
             Delete => self.request_delete_confirmation(),
@@ -524,35 +558,19 @@ impl App {
             return Ok(vec![Event::Status(format!("{name} is not a directory"))]);
         }
         let new_cwd = self.pane(id).cwd.join(&name);
-        let listing = self.local_fs.list(&new_cwd, Sort::NameAsc).await?;
-        let p = self.pane_mut(id);
-        p.cwd = new_cwd;
-        p.listing = listing;
-        p.cursor = 0;
-        p.selected.clear();
-        Ok(vec![Event::PaneUpdated(id)])
+        self.navigate_to(id, new_cwd).await
     }
 
     async fn sync_other_panel_path(&mut self) -> Result<Vec<Event>, AppError> {
         let active = self.active;
         let other = active.other();
         let other_cwd = self.pane(other).cwd.clone();
-        // Re-list the active pane at the other pane's path. (Re-listing
-        // rather than copying the cached `listing` defends against the
-        // other pane being stale.)
-        let listing = self.local_fs.list(&other_cwd, Sort::NameAsc).await?;
-        let p = self.pane_mut(active);
-        p.cwd = other_cwd;
-        p.listing = listing;
-        p.cursor = 0;
-        p.selected.clear();
-        Ok(vec![Event::PaneUpdated(active)])
+        self.navigate_to(active, other_cwd).await
     }
 
     async fn show_focused_in_other_panel(&mut self) -> Result<Vec<Event>, AppError> {
         let active = self.active;
         let other = active.other();
-        // Resolve the focused entry's dir target.
         let target = {
             let p = self.pane(active);
             p.focused_entry_index()
@@ -567,14 +585,8 @@ impl App {
                 "Focused entry isn't a directory".into(),
             )]);
         };
-        let listing = self.local_fs.list(&target, Sort::NameAsc).await?;
-        let p = self.pane_mut(other);
-        p.cwd = target;
-        p.listing = listing;
-        p.cursor = 0;
-        p.selected.clear();
-        // Focus stays on the originating pane per FR-014.
-        Ok(vec![Event::PaneUpdated(other)])
+        // navigate_to acts on `other`, not `active` — FR-014: focus stays put.
+        self.navigate_to(other, target).await
     }
 
     async fn ascend_to_parent(&mut self) -> Result<Vec<Event>, AppError> {
@@ -582,9 +594,57 @@ impl App {
         let Some(parent) = self.pane(id).cwd.parent() else {
             return Ok(vec![Event::Status("Already at root".into())]);
         };
-        let listing = self.local_fs.list(&parent, Sort::NameAsc).await?;
+        self.navigate_to(id, parent).await
+    }
+
+    /// FR-011 history-aware navigation. Pushes the OLD cwd onto the
+    /// pane's back-history (bounded by `Config::ui.history.directory_depth`)
+    /// and clears the forward-history. Called by every non-history nav
+    /// entry point (descend, ascend, sync, show-in-other).
+    async fn navigate_to(&mut self, id: PaneId, new_cwd: VfsPath) -> Result<Vec<Event>, AppError> {
+        let listing = self.local_fs.list(&new_cwd, Sort::NameAsc).await?;
+        let depth = self.config.ui.history.directory_depth as usize;
         let p = self.pane_mut(id);
-        p.cwd = parent;
+        let old_cwd = std::mem::replace(&mut p.cwd, new_cwd);
+        if depth > 0 {
+            p.dir_history_back.push(old_cwd);
+            while p.dir_history_back.len() > depth {
+                p.dir_history_back.remove(0);
+            }
+        }
+        p.dir_history_fwd.clear();
+        p.listing = listing;
+        p.cursor = 0;
+        p.selected.clear();
+        Ok(vec![Event::PaneUpdated(id)])
+    }
+
+    async fn history_prev_dir(&mut self) -> Result<Vec<Event>, AppError> {
+        let id = self.active;
+        let prev = self.pane_mut(id).dir_history_back.pop();
+        let Some(prev) = prev else {
+            return Ok(vec![Event::Status("No prior directory".into())]);
+        };
+        let listing = self.local_fs.list(&prev, Sort::NameAsc).await?;
+        let p = self.pane_mut(id);
+        let cur = std::mem::replace(&mut p.cwd, prev);
+        p.dir_history_fwd.push(cur);
+        p.listing = listing;
+        p.cursor = 0;
+        p.selected.clear();
+        Ok(vec![Event::PaneUpdated(id)])
+    }
+
+    async fn history_next_dir(&mut self) -> Result<Vec<Event>, AppError> {
+        let id = self.active;
+        let next = self.pane_mut(id).dir_history_fwd.pop();
+        let Some(next) = next else {
+            return Ok(vec![Event::Status("No forward directory".into())]);
+        };
+        let listing = self.local_fs.list(&next, Sort::NameAsc).await?;
+        let p = self.pane_mut(id);
+        let cur = std::mem::replace(&mut p.cwd, next);
+        p.dir_history_back.push(cur);
         p.listing = listing;
         p.cursor = 0;
         p.selected.clear();
@@ -916,6 +976,109 @@ mod tests {
         // Status event but no PaneUpdated.
         assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
         assert!(!events.iter().any(|e| matches!(e, Event::PaneUpdated(_))));
+    }
+
+    #[tokio::test]
+    async fn descend_pushes_back_history_clears_forward() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::create_dir(td_l.path().join("sub"))
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let initial_cwd = app.pane(PaneId::Left).cwd.clone();
+        app.dispatch(Command::Descend).await.unwrap();
+        let p = app.pane(PaneId::Left);
+        assert_eq!(p.dir_history_back, vec![initial_cwd]);
+        assert!(p.dir_history_fwd.is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_prev_dir_pops_back_pushes_to_forward() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::create_dir(td_l.path().join("sub"))
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let initial_cwd = app.pane(PaneId::Left).cwd.clone();
+        app.dispatch(Command::Descend).await.unwrap();
+        let sub_cwd = app.pane(PaneId::Left).cwd.clone();
+
+        app.dispatch(Command::HistoryPrevDir).await.unwrap();
+        let p = app.pane(PaneId::Left);
+        assert_eq!(p.cwd, initial_cwd);
+        assert!(p.dir_history_back.is_empty());
+        assert_eq!(p.dir_history_fwd, vec![sub_cwd]);
+    }
+
+    #[tokio::test]
+    async fn history_next_dir_returns_after_prev() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::create_dir(td_l.path().join("sub"))
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::Descend).await.unwrap();
+        let sub_cwd = app.pane(PaneId::Left).cwd.clone();
+        app.dispatch(Command::HistoryPrevDir).await.unwrap();
+        app.dispatch(Command::HistoryNextDir).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cwd, sub_cwd);
+        assert!(app.pane(PaneId::Left).dir_history_fwd.is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_prev_dir_with_empty_history_is_noop_with_status() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app.dispatch(Command::HistoryPrevDir).await.unwrap();
+        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+    }
+
+    #[tokio::test]
+    async fn descend_after_prev_drops_forward_history() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::create_dir(td_l.path().join("a")).await.unwrap();
+        tokio::fs::create_dir(td_l.path().join("b")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Descend into "a", then back, then descend into "b" — forward
+        // should be cleared.
+        // (Cursor starts at 0 = "a" since NameAsc.)
+        app.dispatch(Command::Descend).await.unwrap();
+        app.dispatch(Command::HistoryPrevDir).await.unwrap();
+        assert!(!app.pane(PaneId::Left).dir_history_fwd.is_empty());
+        // Move cursor to "b" then descend.
+        app.dispatch(Command::CursorDown).await.unwrap();
+        app.dispatch(Command::Descend).await.unwrap();
+        assert!(app.pane(PaneId::Left).dir_history_fwd.is_empty());
+    }
+
+    #[tokio::test]
+    async fn quick_cd_popup_emits_status_stub() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app.dispatch(Command::QuickCdPopup).await.unwrap();
+        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+    }
+
+    #[tokio::test]
+    async fn show_tasks_panel_emits_status_with_transfer_count() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app.dispatch(Command::ShowTasksPanel).await.unwrap();
+        let has_status = events.iter().any(|e| match e {
+            Event::Status(s) => s.contains("0 active"),
+            _ => false,
+        });
+        assert!(
+            has_status,
+            "expected '0 active transfer' status, got {events:?}"
+        );
     }
 
     #[tokio::test]

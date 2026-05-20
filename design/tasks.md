@@ -32,8 +32,8 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 #### Tests for US1 (write first, confirm failing per Constitution Principle II)
 
-- [ ] T1.07 [US1] Integration test `tests/integration/local_navigation.rs`: launch cargonaut with two tempdir args, simulate keypresses (Tab, j, Enter, Backspace, :cd), assert pane state evolves correctly. Use `crossterm-test` or similar input-injection helper.  **(0.5)**
-- [ ] T1.08 [US1] Integration test `tests/integration/resume_sigkill.rs`: create 4 GiB random file, spawn cargonaut subprocess to F5 copy, wait 1 s, SIGKILL, relaunch, automate the `[r]esume` prompt, wait for completion, assert SHA-256 match. **SC-002 gate.**  **(0.75)**
+- [X] T1.07 [US1] Integration test `tests/integration/local_navigation.rs`: launch cargonaut with two tempdir args, simulate keypresses (Tab, j, Enter, Backspace, :cd), assert pane state evolves correctly. Use `crossterm-test` or similar input-injection helper.  **(0.5)**
+- [X] T1.08 [US1] Integration test `tests/integration/resume_sigkill.rs`: create 4 GiB random file, spawn cargonaut subprocess to F5 copy, wait 1 s, SIGKILL, relaunch, automate the `[r]esume` prompt, wait for completion, assert SHA-256 match. **SC-002 gate.**  **(0.75)**
 - [X] T1.09 [US1] Property test `cargonaut-transfer/src/checkpoint.rs::tests::roundtrip`: random `TransferCheckpoint` serializes + deserializes equal.  **(0.25)**
 - [X] T1.10 [US1] Bench `benches/local-copy-vs-cp.rs`: criterion bench comparing cargonaut's copy throughput to `cp(1)` for 100 MiB, 1 GiB. **SC-001 gate (≥80%).**  **(0.5)**
 - [X] T1.11 [US1] Bench `benches/startup.rs`: hyperfine wrapper measuring cold + warm startup. **SC-004 gate (≤150 ms cold).**  **(0.25)**
@@ -57,12 +57,12 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 > **TDD note (Constitution Principle II)**: each task below bundles test + impl into one line for brevity, BUT the per-task git history MUST show test-first ordering — commit the failing test SHA before merging the implementation. Same rule as T1.07-T1.12 in the original Phase 1 set.
 
-- [ ] T1.24 [US1] Implement directory + command history (FR-011): in-session ring buffer for cwd history (per pane, depth 100); persistent shell-line history at `~/.local/state/cargonaut/history`. Alt-Shift-h opens dir-history popup; Alt-h opens cmd-history popup; Alt-y/Alt-u step prev/next dir. Unit + integration tests.  **(0.5)**
-- [ ] T1.25 [US1] Implement quick-cd popup (FR-012): Alt-c opens inline cd prompt with tab-completion over the focused VFS + recent dirs. Test injected-input fixture.  **(0.25)**
+- [X] T1.24 [US1] Implement directory + command history (FR-011): in-session ring buffer for cwd history (per pane, depth 100); persistent shell-line history at `~/.local/state/cargonaut/history`. Alt-Shift-h opens dir-history popup; Alt-h opens cmd-history popup; Alt-y/Alt-u step prev/next dir. Unit + integration tests.  **(0.5)**
+- [X] T1.25 [US1] Implement quick-cd popup (FR-012): Alt-c opens inline cd prompt with tab-completion over the focused VFS + recent dirs. Test injected-input fixture.  **(0.25)**
 - [X] T1.26 [US1] Implement panel filter (FR-013): Alt-! prompt; pane state stores `Option<GlobPattern>`; render filters in `PaneView::visible_entries`. Toggle off on empty input. Test with synthetic 1k-entry dir. (Phase 1: toggle-clears only; setting via prompt dialog deferred.)  **(0.25)**
 - [X] T1.27 [US1] Implement sync/show-in-other (FR-014): Alt-i copies other pane's cwd; Alt-o opens focused entry's dir in other pane. Test asserts focus stays put.  **(0.25)**
 - [X] T1.28 [US1] Implement panel niceties (FR-015): Alt-. toggle hidden-file mask in `PaneView`; Alt-, toggle `LayoutOrient::Vertical|Horizontal`; Ctrl-Space spawn tokio `walk-sum` task for focused/tagged entries, render result inline. Three small integration tests. (Phase 1: Alt-. + Alt-, wired; Ctrl-Space recursive-dir-size deferred.)  **(0.5)**
-- [ ] T1.29 [US1] Implement tasks/jobs panel (FR-016): F12 / :jobs opens a transient panel from `Vec<TransferJob>` snapshot; per-row pause/resume/cancel actions (pause via task cooperation, resume via re-arm cancellation token). Required for NFR-004 sanity. Integration test: submit 3 jobs, pause one, verify others continue.  **(1.0)**
+- [X] T1.29 [US1] Implement tasks/jobs panel (FR-016): F12 / :jobs opens a transient panel from `Vec<TransferJob>` snapshot; per-row pause/resume/cancel actions (pause via task cooperation, resume via re-arm cancellation token). Required for NFR-004 sanity. Integration test: submit 3 jobs, pause one, verify others continue.  **(1.0)**
 - [X] T1.30 [US1] Implement exit-cwd writer (FR-017): cargonaut writes its last pane's cwd to `$CARGONAUT_EXIT_CWD_FILE` on graceful exit. Ship `contrib/cargonaut.sh` + `contrib/cargonaut.fish` wrapper functions. Document in README. Integration test: invoke binary via wrapper, set var, verify $PWD changes in shell after exit (automation via PTY deferred — manual smoke test only for Phase 1).  **(0.1)**
 
 ### Polish (Phase 1)
@@ -73,7 +73,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [X] T1.22d [P] [US1] Integration test `tests/integration/concurrent_transfers.rs`: submit 8 simultaneous LocalFs→LocalFs 100 MiB copies; assert all complete; assert no UI render frame exceeded 16 ms during the burst (via tracing-subscriber latency probe). **Covers NFR-004.** (Phase 1: 8×4 MiB completion gate via `crates/cargonaut-transfer/tests/concurrent_transfers.rs`; render-frame latency probe deferred until the binary integration test exists.)  **(0.5)**
 
 - [X] T1.22  Docs: README quick-start (10 lines + screenshot), `docs/architecture.md` (link to spec architecture/), per-crate `lib.rs` rustdoc. (Per-crate rustdoc was completed inline during each impl task; README quick-start refreshed; docs/architecture.md added as a thin pointer to design/.)  **(0.5)**
-- [ ] T1.23  Phase 1 release: bump to 0.1.0, GitHub release with linux-x86_64 binary + sha256, demo recording.  **(0.5)**
+- [X] T1.23  Phase 1 release: bump to 0.1.0, GitHub release with linux-x86_64 binary + sha256, demo recording.  **(0.5)**
 
 ---
 

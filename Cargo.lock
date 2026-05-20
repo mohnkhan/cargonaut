@@ -159,7 +159,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cargonaut"
-version = "0.1.0-pre"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "cargonaut-config",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-config"
-version = "0.1.0-pre"
+version = "0.1.0"
 dependencies = [
  "figment",
  "schemars",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-core"
-version = "0.1.0-pre"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "cargonaut-config",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-transfer"
-version = "0.1.0-pre"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "cargonaut-vfs",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-ui-tui"
-version = "0.1.0-pre"
+version = "0.1.0"
 dependencies = [
  "cargonaut-core",
  "cargonaut-vfs",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-vfs"
-version = "0.1.0-pre"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bitflags",
