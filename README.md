@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **103/103** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap) |
+| Unit tests | All pass | **114/114** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 11 PaneView) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 015 — T1.17: PaneView widget** (2026-05-20). `crates/cargonaut-ui-tui/src/pane.rs` wraps ratatui's `List` + `ListState` to render a `DirListing` with cursor (highlight-reversed row), selection (`*` prefix), hidden-file masking (FR-015 `Alt-.`), and a substring filter (placeholder for FR-013's globset in T1.26). Cursor moves track the *visible* subset (filter + hidden-masked) so the filter + cursor interact correctly. Virtual scrolling falls out of ratatui's stateful widget. 11 tests cover cursor bounds, selection toggle, hidden-file filter, substring filter, set_listing reset, and rendering via `TestBackend` (including a 10000-entry stress that scrolls cursor to row 5000). Branch `015-t1.17-paneview` → PR #N.
 
 - **Feature 014 — T1.18: keymap parser** (2026-05-20). `crates/cargonaut-ui-tui/src/keymap.rs` parses `design/contracts/keymap.toml` (60+ bindings, 6 modes) into a `Keymap` indexed by `(Mode, KeySequence)` → `Command` (60-variant enum). `parse_key_sequence` handles single chords (`F10`, `M-1`, `j`) and multi-key chords (`C-x !`, `C-x C-d` — required by FR-205/208/209/305). `lookup_sequence` returns three-state `SeqLookup::{Command, Pending, NoMatch}` for the dispatcher's wait-for-next-key state machine. 16 tests cover full default-keymap parse, named specials, modifier prefixes, multi-chord prefix/match/no-match, and user-override merge semantics. Branch `014-t1.18-keymap` → PR #N.
 
