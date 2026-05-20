@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **139/139** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 11 PaneView + 13 dialogs + 12 App) |
+| Unit tests | All pass | **144/144** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 11 PaneView + 13 dialogs + 17 App) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,12 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 022 — T1.26 + T1.27 + T1.28: MC-parity panel ergonomics** (2026-05-20). Five new commands batched: `TogglePanelFilter` (FR-013 — clear-only for Phase 1; prompt dialog deferred), `SyncOtherPanelPath` + `ShowFocusedInOtherPanel` (FR-014), `ToggleSplitOrientation` (FR-015; new `SplitOrient` enum on `App`). All async-mapped via `ui_command_to_core`. 5 new tokio tests in `cargonaut-core`. Branch `021-t1.26-27-28-mc-parity` → PR #22.
+
+- **Feature 021 — T1.30: exit-cwd writer + bash/fish wrappers** (2026-05-20). `bin/main.rs` writes the active pane's cwd to `$CARGONAUT_EXIT_CWD_FILE` on graceful exit; `contrib/cargonaut.sh` (bash/zsh) and `contrib/cargonaut.fish` shell functions wrap the binary to cd into that path on exit (FR-017). `ui_tui::run` signature changed to `&mut App` so the caller retains ownership for the post-exit cwd read. Branch `020-t1.30-exit-cwd` → PR #21.
+
+- **Feature 020 — T1.22a: binary-size CI gate (NFR-001)** (2026-05-20). `scripts/check-binary-size.sh` strips the release binary and fails if > 8 MiB. Wired into the `build` job in `.github/workflows/ci.yml`. Current local measure: **1.91 MiB**, well within ceiling. Branch `019-t1.22a-binary-size` → PR #20.
 
 - **Feature 018 — T1.21: binary main + event loop** (2026-05-20). `crates/cargonaut-bin/src/main.rs` becomes runnable: clap CLI (positional `LEFT`/`RIGHT` paths, `--config`, `--theme`, `--mc-keys`, `--enable-plugin`, `--a11y-output`, `-v`), `Config::load(--config)` or default, `App::new(config, left, right).await`, then `cargonaut_ui_tui::run(app).await`. Subcommands `list-plugins` / `audit` / `resume` stub future phases. The event loop (now in `cargonaut-ui-tui/src/lib.rs::run`) drives `tokio::select!` over `crossterm::EventStream` + `tokio::signal::ctrl_c` + a 100ms redraw tick; routes keys through the keymap (with multi-chord `Pending` state), maps `keymap::Command` → `core::Command`, dispatches into `App`, handles `DialogRequested` via `ConfirmDialog`, calls `App::confirm_copy` on Confirm. Terminal teardown (raw-mode off + leave alternate-screen + show cursor) always runs even on error. Branch `018-t1.21-bin-and-event-loop` → PR #N.
 
