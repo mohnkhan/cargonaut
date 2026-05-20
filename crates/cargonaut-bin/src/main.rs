@@ -82,11 +82,38 @@ async fn main() -> anyhow::Result<()> {
     let left = path_arg(cli.left.clone(), home_dir());
     let right = path_arg(cli.right.clone(), "/tmp".into());
 
-    let app =
+    let mut app =
         cargonaut_core::App::new(config, &left.to_string_lossy(), &right.to_string_lossy()).await?;
 
-    cargonaut_ui_tui::run(app).await?;
+    let run_result = cargonaut_ui_tui::run(&mut app).await;
+
+    // FR-017 exit-cwd writer: when invoked via the contrib/cargonaut.sh
+    // wrapper (which sets $CARGONAUT_EXIT_CWD_FILE), write the active
+    // pane's cwd to that file so the wrapper can `cd` to it after exit.
+    // Best-effort: silent on missing var; logs on write failure.
+    if let Ok(path) = std::env::var("CARGONAUT_EXIT_CWD_FILE") {
+        if !path.is_empty() {
+            let cwd = active_pane_local_path(&app);
+            if let Err(e) = std::fs::write(&path, cwd.as_bytes()) {
+                tracing::warn!("could not write exit-cwd file {path}: {e}");
+            }
+        }
+    }
+
+    run_result?;
     Ok(())
+}
+
+/// Active pane's cwd as a local-filesystem path string (stripped of the
+/// `file://` scheme). Phase 1 LocalFs only; non-`file://` panes return
+/// the raw `VfsPath::display()` so the wrapper script's `cd` fails
+/// loudly rather than silently jumping to the wrong dir.
+fn active_pane_local_path(app: &cargonaut_core::App) -> String {
+    let display = app.active_pane_state().cwd.display();
+    display
+        .strip_prefix("file://")
+        .unwrap_or(&display)
+        .to_string()
 }
 
 fn path_arg(p: Option<PathBuf>, default: PathBuf) -> PathBuf {

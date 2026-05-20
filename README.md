@@ -69,9 +69,27 @@ cargo build --release
 ./target/release/cargonaut --help
 ```
 
-The Phase 1 binary right now prints a placeholder showing the loaded config
-plus the two pane paths it would open. The real UI lands in tasks T1.07+
-(see [`design/tasks.md`](./design/tasks.md)).
+The Phase 1 binary launches a dual-pane TUI for the two given paths
+(defaulting to `$HOME` and `/tmp`). `F10` quits; basic navigation
+(`j`/`k`/`Enter`/`Backspace`/`Tab`) works.
+
+### cd-on-exit (FR-017)
+
+Source one of the `contrib/` shell wrappers to have cargonaut cd into
+the active pane's directory when you quit:
+
+```bash
+# bash / zsh
+source /path/to/cargonaut/contrib/cargonaut.sh
+
+# fish
+source /path/to/cargonaut/contrib/cargonaut.fish
+```
+
+The wrapper passes `$CARGONAUT_EXIT_CWD_FILE` through the environment;
+on graceful exit the binary writes the active pane's cwd there and the
+wrapper `cd`s into it. Running cargonaut without the wrapper still
+works — the shell just stays in your launch directory.
 
 ## Workspace layout
 

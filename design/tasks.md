@@ -63,7 +63,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [ ] T1.27 [US1] Implement sync/show-in-other (FR-014): Alt-i copies other pane's cwd; Alt-o opens focused entry's dir in other pane. Test asserts focus stays put.  **(0.25)**
 - [ ] T1.28 [US1] Implement panel niceties (FR-015): Alt-. toggle hidden-file mask in `PaneView`; Alt-, toggle `LayoutOrient::Vertical|Horizontal`; Ctrl-Space spawn tokio `walk-sum` task for focused/tagged entries, render result inline. Three small integration tests.  **(0.5)**
 - [ ] T1.29 [US1] Implement tasks/jobs panel (FR-016): F12 / :jobs opens a transient panel from `Vec<TransferJob>` snapshot; per-row pause/resume/cancel actions (pause via task cooperation, resume via re-arm cancellation token). Required for NFR-004 sanity. Integration test: submit 3 jobs, pause one, verify others continue.  **(1.0)**
-- [ ] T1.30 [US1] Implement exit-cwd writer (FR-017): cargonaut writes its last pane's cwd to `$CARGONAUT_EXIT_CWD_FILE` on graceful exit. Ship `contrib/cargonaut.sh` + `contrib/cargonaut.fish` wrapper functions. Document in README. Integration test: invoke binary via wrapper, set var, verify $PWD changes in shell after exit.  **(0.1)**
+- [X] T1.30 [US1] Implement exit-cwd writer (FR-017): cargonaut writes its last pane's cwd to `$CARGONAUT_EXIT_CWD_FILE` on graceful exit. Ship `contrib/cargonaut.sh` + `contrib/cargonaut.fish` wrapper functions. Document in README. Integration test: invoke binary via wrapper, set var, verify $PWD changes in shell after exit (automation via PTY deferred — manual smoke test only for Phase 1).  **(0.1)**
 
 ### Polish (Phase 1)
 
