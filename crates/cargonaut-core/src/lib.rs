@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Cargonaut core — application state, event loop, command dispatch.
 //!
 //! The UI layer emits `Command`s into the App; the App applies them to

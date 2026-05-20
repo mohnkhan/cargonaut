@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Pure data types shared across every VFS backend.
 
 use serde::{Deserialize, Serialize};
