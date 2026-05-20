@@ -41,14 +41,14 @@ const DEFAULT_KEYMAP: &str = include_str!("../../../design/contracts/keymap.toml
 /// tick, dispatches commands into the `App`, manages modal-dialog
 /// state, and restores the terminal on exit (best-effort even on panic
 /// — wrapped in a teardown that always runs).
-pub async fn run(mut app: App) -> Result<(), Error> {
+pub async fn run(app: &mut App) -> Result<(), Error> {
     enable_raw_mode().map_err(Error::Terminal)?;
     let mut out = stdout();
     execute!(out, EnterAlternateScreen).map_err(Error::Terminal)?;
     let backend = CrosstermBackend::new(out);
     let mut term = Terminal::new(backend).map_err(Error::Terminal)?;
 
-    let result = run_loop(&mut term, &mut app).await;
+    let result = run_loop(&mut term, app).await;
 
     // Teardown — always best-effort, even on error from the loop.
     let _ = disable_raw_mode();
