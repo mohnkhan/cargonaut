@@ -1,6 +1,6 @@
 # Implementation Plan: Cargonaut
 
-**Branch**: `082-cargonaut-file-manager` | **Date**: 2026-05-17 | **Spec**: [spec.md](./spec.md)
+**Status**: Phase 1 in progress (on `main`) | **Date**: 2026-05-17 (last revised 2026-05-20) | **Spec**: [spec.md](./spec.md)
 
 ## Summary
 
@@ -163,9 +163,9 @@ This project is *separate from* MyOS2026; the MyOS2026 constitution doesn't dire
   *Transfer note*: MyOS2026's Principle III mandates WCAG 2.1 AA, written for graphical UIs with a DOM. Cargonaut is a TUI without DOM/ARIA semantics; WCAG conformance is not directly applicable. Cargonaut's a11y commitment is FR-403 (Phase 5): `--a11y-output text` mode emits a plain-text event stream consumable by screen readers. This is a scoped reinterpretation of Principle III, not a waiver — the *spirit* (every UI shipped is usable by assistive tech) is honored.
 - **IV. Performance**: SC-001/003/004 enforced by criterion benches in CI; regressions >10% block merge.
 
-## Project structure (this repo's relationship)
+## Project structure (this repo)
 
-Cargonaut is a STANDALONE project that lives in its own repo. The spec-kit artefacts here under `specs/069-cargonaut-file-manager/` are PLANNING materials produced as part of MyOS2026's spec-kit workflow; the actual implementation repo would be initialized FROM the [`scaffold/`](./scaffold/) directory once the user is ready to begin Phase 1.
+This IS the Cargonaut repo. Design artifacts (spec, plan, research, data-model, tasks, contracts, milestones, tests-plan) live under [`design/`](./). Source crates live under [`crates/`](../crates/) per the workspace layout above. Current work is on `main` (Phase 1 in progress); future per-feature work will follow the standard speckit feature-branch flow under `.specify/`.
 
 ## Complexity tracking
 
