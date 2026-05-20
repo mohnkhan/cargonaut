@@ -1,11 +1,11 @@
 // Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Cargonaut binary — argument parsing, config load, App boot, signal handlers.
+//! Cargonaut binary — clap CLI + config load + App boot + TUI launch.
 //!
-//! Phase 1 prototype: this is a runnable stub that prints the loaded
-//! config + a "hello, world" message. T1.21 wires real terminal init and
-//! event loop. T1.07+T1.17+T1.18+T1.19 fill in the UI.
+//! Phase 1: launches the dual-pane TUI for two given paths (defaulting
+//! to `$HOME` and `/tmp`). Subcommands (`list-plugins`, `audit`,
+//! `resume`) stub features that land in later phases.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -14,9 +14,9 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Path for the LEFT pane (default: $HOME)
+    /// Path for the LEFT pane (default: $HOME).
     left: Option<PathBuf>,
-    /// Path for the RIGHT pane (default: /tmp)
+    /// Path for the RIGHT pane (default: /tmp).
     right: Option<PathBuf>,
 
     /// Path to alternate config file.
@@ -49,81 +49,87 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum CargonautCommand {
-    /// List installed plugins + their granted capabilities.
+    /// List installed plugins + their granted capabilities (Phase 3).
     ListPlugins,
-    /// Dump or rotate the audit log.
+    /// Dump or rotate the audit log (Phase 4).
     Audit {
+        /// Rotate the audit log instead of dumping it.
         #[arg(long)]
         rotate: bool,
     },
-    /// List resumable transfers; optionally resume one.
+    /// List resumable transfers; optionally resume one by id.
     Resume {
+        /// Specific transfer id to resume.
         #[arg(long)]
         id: Option<String>,
     },
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    let _config = cargonaut_config::Config::default(); // T1.16 → Config::load(cli.config)
+    let config = match cli.config.as_deref() {
+        Some(path) => cargonaut_config::Config::load_from_path(path)?,
+        None => cargonaut_config::Config::load().unwrap_or_default(),
+    };
 
-    match cli.cmd {
-        Some(CargonautCommand::ListPlugins) => {
-            println!("Plugins: (none — Phase 3)");
-            return Ok(());
-        }
-        Some(CargonautCommand::Audit { rotate: _ }) => {
-            println!("Audit: (not yet — Phase 4)");
-            return Ok(());
-        }
-        Some(CargonautCommand::Resume { id: _ }) => {
-            println!("Resume: (not yet — Phase 1 T1.14)");
-            return Ok(());
-        }
-        None => {}
+    if let Some(sub) = cli.cmd {
+        return run_subcommand(sub).await;
     }
 
-    let left = cli
-        .left
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| "/".into()));
-    let right = cli.right.unwrap_or_else(|| "/tmp".into());
+    let left = path_arg(cli.left.clone(), home_dir());
+    let right = path_arg(cli.right.clone(), "/tmp".into());
 
-    println!(
-        "cargonaut {} — Phase 1 prototype stub",
-        env!("CARGO_PKG_VERSION")
-    );
-    println!("  left pane:  {}", left.display());
-    println!("  right pane: {}", right.display());
-    println!(
-        "  theme:      {}",
-        cli.theme.unwrap_or_else(|| "solarized-dark".into())
-    );
-    println!();
-    println!("UI not yet wired (see design/tasks.md T1.07+).");
+    let app =
+        cargonaut_core::App::new(config, &left.to_string_lossy(), &right.to_string_lossy()).await?;
 
-    // T1.19+T1.21: build App, run TUI event loop:
-    // let app = cargonaut_core::App::new(_config, &left.to_string_lossy(), &right.to_string_lossy());
-    // cargonaut_ui_tui::run(app).await?;
+    cargonaut_ui_tui::run(app).await?;
+    Ok(())
+}
+
+fn path_arg(p: Option<PathBuf>, default: PathBuf) -> PathBuf {
+    match p {
+        Some(p) if p.is_absolute() => p,
+        Some(p) => std::env::current_dir().unwrap_or_default().join(p),
+        None => default,
+    }
+}
+
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+async fn run_subcommand(sub: CargonautCommand) -> anyhow::Result<()> {
+    match sub {
+        CargonautCommand::ListPlugins => {
+            println!("Plugins: (none — Phase 3)");
+        }
+        CargonautCommand::Audit { rotate } => {
+            if rotate {
+                println!("Audit log rotation not implemented (Phase 4 — T4.x)");
+            } else {
+                println!("Audit log dump not implemented (Phase 4 — T4.x)");
+            }
+        }
+        CargonautCommand::Resume { id } => match id {
+            Some(id) => println!("Resume {id}: not yet implemented (Phase 1 polish)"),
+            None => println!("Resume listing: not yet implemented (Phase 1 polish)"),
+        },
+    }
     Ok(())
 }
 
 fn init_tracing(verbose: bool) {
-    let filter = if verbose { "debug" } else { "info" };
+    let default = if verbose { "debug" } else { "info" };
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| filter.into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default.into()),
         )
         .with_writer(std::io::stderr)
         .try_init();
-}
-
-// `dirs` crate is a small dep we'll add when we wire real home detection;
-// for the stub, use a fallback.
-mod dirs {
-    pub fn home_dir() -> Option<std::path::PathBuf> {
-        std::env::var_os("HOME").map(Into::into)
-    }
 }

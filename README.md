@@ -2,7 +2,7 @@
 
 > Rust-native, terminal, keyboard-first dual-pane file manager — Midnight Commander reimagined for 2026.
 
-**Status**: Phase 1 — foundational VFS types landed (T1.04). VFS trait + `LocalFs` impl + config loader in flight.
+**Status**: Phase 1 — runnable dual-pane TUI (`cargonaut <LEFT> <RIGHT>`). VFS + transfer engine + config + keymap + dialogs all merged; T1.07/T1.08 integration tests + benches + MC-parity features still to come.
 
 ## At a Glance
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 018 — T1.21: binary main + event loop** (2026-05-20). `crates/cargonaut-bin/src/main.rs` becomes runnable: clap CLI (positional `LEFT`/`RIGHT` paths, `--config`, `--theme`, `--mc-keys`, `--enable-plugin`, `--a11y-output`, `-v`), `Config::load(--config)` or default, `App::new(config, left, right).await`, then `cargonaut_ui_tui::run(app).await`. Subcommands `list-plugins` / `audit` / `resume` stub future phases. The event loop (now in `cargonaut-ui-tui/src/lib.rs::run`) drives `tokio::select!` over `crossterm::EventStream` + `tokio::signal::ctrl_c` + a 100ms redraw tick; routes keys through the keymap (with multi-chord `Pending` state), maps `keymap::Command` → `core::Command`, dispatches into `App`, handles `DialogRequested` via `ConfirmDialog`, calls `App::confirm_copy` on Confirm. Terminal teardown (raw-mode off + leave alternate-screen + show cursor) always runs even on error. Branch `018-t1.21-bin-and-event-loop` → PR #N.
 
 - **Feature 017 — T1.19: App event loop core** (2026-05-20). `crates/cargonaut-core/src/lib.rs` adds `App` (config + 2× `PaneState` + active-pane id + transfer registry + status). `PaneState` holds the pure data (cwd, listing, cursor, selected, show_hidden, filter) — ratatui-free so ui-tui can render from `&PaneState` per frame without circular deps. `Command` enum, `Event` enum, `DialogKind` for modal requests. `dispatch(Command).await -> Result<Vec<Event>, _>` covers cursor/focus/selection/toggle-hidden and async ops (descend/ascend via VFS list, copy via `submit_transfer` after `confirm_copy`). Destructive ops (`Copy/Move/Delete`) emit `DialogRequested` rather than acting directly. `CancelCurrentTransfer` triggers the latest transfer's `CancellationToken`. 12 tokio tests via `TempDir`+`LocalFs`. The full `tokio::select!` event loop (input ↔ transfer progress polling) is T1.21's job. Branch `017-t1.19-app` → PR #N.
 
