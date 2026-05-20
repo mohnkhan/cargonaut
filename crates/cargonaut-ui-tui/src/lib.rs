@@ -6,8 +6,12 @@
 
 #![warn(missing_docs)]
 
+pub mod dialog;
 pub mod keymap;
 pub mod pane;
+pub use dialog::{
+    ConfirmDialog, ConfirmOutcome, ResumableSummary, ResumeChoice, ResumePromptDialog,
+};
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
     SeqLookup,
