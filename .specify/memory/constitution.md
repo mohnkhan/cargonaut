@@ -1,147 +1,60 @@
-<!--
-SYNC IMPACT REPORT
-==================
-Version change:  0.0.0 (uninitialized placeholder) → 1.0.0
-Bump type:       MAJOR — first substantive ratification; all placeholder tokens replaced.
-
-Principles added:
-  - I.  Code Quality              (new)
-  - II. Test-First Discipline     (new)
-  - III. User Experience Consistency (new)
-  - IV. Performance Requirements  (new)
-
-Sections added:
-  - Quality Gates       (new)
-  - Development Workflow (new)
-  - Governance          (populated from template stub)
-
-Templates requiring updates:
-  ✅ .specify/templates/plan-template.md
-       Constitution Check gates are now derivable from the four Core Principles and
-       the Quality Gates section. No structural edits needed; agents fill the gate
-       list at plan-generation time.
-  ✅ .specify/templates/spec-template.md
-       Success Criteria section already requires measurable metrics — aligns with
-       Principle IV. No structural changes needed.
-  ✅ .specify/templates/tasks-template.md
-       TDD task ordering (tests before implementation) already reflected in template
-       phase structure. No changes needed.
-
-Deferred TODOs:
-  None — all placeholders resolved.
--->
-
 # Cargonaut Constitution
 
 ## Core Principles
 
-### I. Code Quality
+### I. Code Quality (NON-NEGOTIABLE)
 
-Every line of code MUST be readable, maintainable, and purposeful. Complexity MUST be
-justified; if a simpler path exists, take it. Code MUST pass static analysis and linting
-gates with zero warnings before peer review. Reviewers MUST reject code that introduces
-unnecessary abstraction, duplicate logic, or opaque naming. Dead code MUST be deleted,
-not commented out.
+- CI MUST run `cargo clippy --workspace --all-targets -- -D warnings` and fail on warnings.
+- Every published `cargonaut-*` crate MUST carry `#![warn(missing_docs)]`.
+- `unsafe` code is forbidden in `cargonaut-core`, `cargonaut-vfs`, `cargonaut-ui-tui`, `cargonaut-transfer`, and `cargonaut-config` unless each block carries a `// SAFETY:` comment documenting the invariant AND is covered by a unit test exercising that invariant (per NFR-008).
+- `cargo fmt --check` MUST pass on every PR.
+- Public APIs MUST build clean under `RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links"`.
 
-**Non-negotiables**:
-- Lint and static analysis MUST pass with zero warnings before PR submission.
-- Functions and modules MUST have a single, clear responsibility.
-- No code is merged without at least one peer-review approval from a domain owner.
-- All public APIs MUST carry type annotations or equivalent contract definitions.
+### II. Test-First (NON-NEGOTIABLE)
 
-### II. Test-First Discipline (NON-NEGOTIABLE)
+- TDD applies to every functional requirement (FR-###). Tests are authored and committed in a failing state before the implementation that makes them pass. Per-task git history MUST show the red commit preceding the green commit (e.g. `T1.04 (red): …` → `T1.04 (green): …`).
+- Each Success Criterion (SC-###) MUST have a CI gate — a bench, integration test, or fuzz target — that fails the build on regression.
+- Coverage on core crates MUST stay ≥80% per NFR-007, verified by `cargo tarpaulin --lcov` in CI.
+- Pure-doc tasks (e.g. trait-shape passes where no behavior changes) MAY ship in a single commit, provided they still add an object-safety or contract smoke test.
 
-Tests MUST be written before implementation. No implementation code is accepted without
-a failing test that first justifies it. The Red-Green-Refactor cycle is mandatory on
-every feature. Test coverage for critical paths MUST reach 80% or above; overall
-coverage below 60% is a hard merge blocker.
+### III. UX Consistency
 
-**Non-negotiables**:
-- Unit tests MUST be written and confirmed failing before implementation begins.
-- Integration tests MUST cover all inter-component contracts.
-- Contract tests MUST exist for every public API boundary.
-- All tests MUST pass in CI before merge; flaky tests MUST be fixed, not skipped.
-- Performance regression tests MUST be included when a feature touches a hot path.
+- All TUI dialogs reuse the shared `dialog!` macro / shared widgets — no ad-hoc layouts in feature code.
+- Keymap is defined in one source of truth: `design/contracts/keymap.toml` (loaded at startup; per-user override via config). New bindings MUST land in that file first.
+- Theme variables are typed; no hardcoded ANSI escapes in feature code.
+- **A11y commitment**: Cargonaut is a TUI without DOM/ARIA semantics, so WCAG 2.1 AA does not apply literally. FR-403's `--a11y-output text` mode (a plain-text event stream consumable by screen readers) is the concrete a11y deliverable that honors the spirit of this principle.
 
-### III. User Experience Consistency
+### IV. Performance (NON-NEGOTIABLE)
 
-All user-facing surfaces MUST adhere to the Cargonaut design system. Interaction
-patterns, terminology, error messages, and visual hierarchy MUST remain uniform across
-the OS. No new UX pattern is introduced without cross-team design review. Accessibility
-to WCAG 2.1 AA standard MUST be met for every shipped UI component.
-
-**Non-negotiables**:
-- New UI components MUST reuse existing design-system primitives; new primitives require
-  explicit design review sign-off before implementation begins.
-- Error messages MUST be actionable: state what failed and what the user can do next.
-- Keyboard navigation and screen-reader support MUST be verified before merge for all
-  interactive components.
-- UX copy (labels, tooltips, confirmations) MUST be reviewed for tone and consistency
-  against the Cargonaut writing guide before merge.
-
-### IV. Performance Requirements
-
-Every feature MUST define measurable performance targets in its specification before
-implementation begins. Features that degrade p95 response time, resident memory
-footprint, or frame rate below defined thresholds MUST NOT be merged. Performance
-budgets are set per-component in the feature spec and are enforced by automated
-benchmarks in CI.
-
-**Non-negotiables**:
-- Features MUST declare performance goals in `spec.md` Success Criteria before planning
-  begins (e.g., `<200ms p95 latency`, `<50MB resident memory`, `60 fps steady-state`).
-- CI MUST run benchmark suites; a regression of >10% on any tracked metric is a merge
-  blocker.
-- Hot paths MUST be profiled before and after implementation; results MUST be attached
-  to the PR.
-- No polling loops, unbounded allocations, or synchronous I/O on the main/UI thread
-  without explicit written justification reviewed by a domain owner.
+- The four Phase-1 success criteria MUST be enforced by criterion benches in CI:
+  - SC-001: ≥80% `cp(1)` throughput on local-to-local copies ≥100 MiB
+  - SC-002: resume from SIGKILL within one checkpoint interval
+  - SC-003: ≤64 MiB RSS for the canonical session
+  - SC-004: ≤150 ms cold-cache startup
+- Performance regressions >10% on any tracked bench MUST block merge.
+- NFR-002 (≤16 ms keypress→first-paint, 60 Hz frame budget) is enforced by `benches/keypress-latency.rs` (T1.22b).
+- NFR-001 (≤8 MiB stripped release binary) is enforced by `scripts/check-binary-size.sh` (T1.22a).
 
 ## Quality Gates
 
-Every feature branch MUST clear all gates below before merging to main:
-
-1. **Lint & Static Analysis** — zero warnings, zero type errors.
-2. **Test Suite** — all unit, integration, and contract tests pass in CI.
-3. **Coverage** — critical-path coverage ≥ 80%; overall coverage ≥ 60%.
-4. **Performance Benchmarks** — no regression >10% on any tracked metric.
-5. **UX Review** — design-system compliance confirmed; accessibility verified.
-6. **Peer Review** — at least one approval from a domain owner; no unresolved comments.
-7. **Constitution Check** — plan.md and spec.md reviewed against all four Core Principles
-   before Phase 0 research proceeds and again after Phase 1 design.
+- **Per-PR**: fmt, clippy, build, test, doc build (with strict intra-doc-link checking), binary-size check, coverage threshold.
+- **Per-phase release**: every SC whose priority ≤ phase.priority MUST PASS (per spec §4.2). No phase ships without its gate SCs green.
+- **Plugin host (Phase 3+)**: the sandbox-escape fuzzer (SC-006) MUST complete 100k iterations with zero successful escapes before plugin host GA.
+- **Audit log (Phase 4+)**: tamper-detection (SC-008) MUST pass before audit-dependent features (FR-206 user-menu logging) are advertised as audited.
 
 ## Development Workflow
 
-1. Write or update `spec.md` — define user stories, requirements, and performance
-   targets (Principle IV requires targets before planning).
-2. Run `/speckit-clarify` to resolve ambiguities before planning begins.
-3. Run `/speckit-plan` — Constitution Check (Quality Gate 7) MUST pass before
-   Phase 0 research proceeds.
-4. Run `/speckit-tasks` — task ordering MUST reflect TDD discipline: tests written
-   and confirmed failing before any implementation task for that story begins.
-5. Implement via `/speckit-implement`, enforcing Red-Green-Refactor on every cycle.
-6. Open PR; all seven Quality Gates MUST pass before merge.
-7. Post-merge: run performance benchmark suite on main; alert on-call if any metric
-   degrades from the pre-merge baseline.
+- Default branch: `main`. Broader phase-level work whose design lives under `design/` may proceed directly on `main`; per-feature work uses the speckit feature-branch flow (`/speckit-specify` → `001-feature-name` etc.).
+- Every destructive operation surfaced to users MUST require confirmation by default (per FR-005); a `--no-confirm` opt-out is permitted but MUST default to OFF.
+- Plugins default to disabled. No plugin may be auto-enabled by config alone — explicit `--enable-plugin <NAME>` flag or interactive capability grant is required (per FR-201, FR-206).
+- Credentials MUST NOT touch plaintext disk (per FR-102): SSH agent → OS keychain → interactive prompt, in that order; secrets MUST be redacted (`***`) in the audit log.
+- Macro expansion in user-supplied commands (FR-205 / FR-206 / FR-207) MUST shell-quote every substitution via the `shell-quote` crate; where possible, prefer `Command::new(prog).arg(arg)` over `sh -c` to bypass the shell entirely.
 
 ## Governance
 
-This constitution supersedes all other practices, style guides, and ad-hoc conventions.
-Amendments require:
+- This constitution supersedes ad-hoc conventions. Conflicts between this document and `plan.md` or an individual PR are resolved in favor of this document.
+- Amendments require: (1) a PR editing this file, (2) corresponding updates to `plan.md §Constitution Check` and any dependent templates, (3) explicit reviewer sign-off referencing the changed principle in the PR body.
+- Complexity that violates a principle MUST be justified in `plan.md §Complexity tracking` with the simpler alternative considered and the reason for rejection recorded.
+- Use `CLAUDE.md` for runtime development guidance (commit conventions, test/CI ergonomics, working-directory rules).
 
-1. A written rationale identifying which principle(s) are affected and why the change
-   is necessary.
-2. A semantic version bump (see policy below) applied before the amendment is merged.
-3. A migration plan for any in-flight features affected by the change.
-4. Approval from at least two domain owners before the amended constitution is merged.
-
-**Versioning policy**:
-- **MAJOR**: A principle is removed, redefined, or made incompatible with prior guidance.
-- **MINOR**: A new principle or section is added; existing guidance is materially expanded.
-- **PATCH**: Clarifications, wording improvements, or typo fixes with no semantic change.
-
-All PRs and reviews MUST verify compliance with the current version of this constitution.
-Complexity violations MUST be documented in the plan's Complexity Tracking table with a
-clear justification and an explanation of why a simpler alternative was rejected.
-
-**Version**: 1.0.0 | **Ratified**: 2026-04-26 | **Last Amended**: 2026-04-26
+**Version**: 1.0.0 | **Ratified**: 2026-05-20 | **Last Amended**: 2026-05-20
