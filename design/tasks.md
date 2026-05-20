@@ -18,9 +18,9 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 ### Setup (Phase 1)
 
-- [ ] T1.01  Initialize cargo workspace at `cargonaut/Cargo.toml` with members: cargonaut-bin, cargonaut-core, cargonaut-ui-tui, cargonaut-vfs, cargonaut-transfer, cargonaut-config. Shared deps in `[workspace.dependencies]`. MSRV pin `rust-version = "1.76"`.  **(0.5 owner-week)**
-- [ ] T1.02 [P] Add `.github/workflows/ci.yml` skeleton (lint + test). Wire `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`.  **(0.25)**
-- [ ] T1.03 [P] Initial README.md + CONTRIBUTING.md + LICENSE (MIT OR Apache-2.0).  **(0.25)**
+- [X] T1.01  Initialize cargo workspace at `cargonaut/Cargo.toml` with members: cargonaut-bin, cargonaut-core, cargonaut-ui-tui, cargonaut-vfs, cargonaut-transfer, cargonaut-config. Shared deps in `[workspace.dependencies]`. MSRV pin `rust-version = "1.76"`. (Done by initial scaffold + #3.)  **(0.5 owner-week)**
+- [X] T1.02 [P] Add `.github/workflows/ci.yml` skeleton (lint + test). Wire `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`. (Done by bootstrap merge + #3; T1.22a added the binary-size gate.)  **(0.25)**
+- [X] T1.03 [P] Initial README.md + CONTRIBUTING.md + LICENSE (MIT OR Apache-2.0). (Done by bootstrap merge.)  **(0.25)**
 
 ### Foundational (Phase 1)
 
@@ -72,7 +72,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [ ] T1.22c [P] [US1] Bench `benches/large-dir-scroll.rs`: synthesize a 1M-entry tempdir, open it in one pane, scroll cursor j 10k times, sample RSS at each 100k. Assert RSS stays ≤64 MiB (per FR-009). **Covers NFR-003.**  **(0.25)**
 - [ ] T1.22d [P] [US1] Integration test `tests/integration/concurrent_transfers.rs`: submit 8 simultaneous LocalFs→LocalFs 100 MiB copies; assert all complete; assert no UI render frame exceeded 16 ms during the burst (via tracing-subscriber latency probe). **Covers NFR-004.**  **(0.5)**
 
-- [ ] T1.22  Docs: README quick-start (10 lines + screenshot), `docs/architecture.md` (link to spec architecture/), per-crate `lib.rs` rustdoc.  **(0.5)**
+- [X] T1.22  Docs: README quick-start (10 lines + screenshot), `docs/architecture.md` (link to spec architecture/), per-crate `lib.rs` rustdoc. (Per-crate rustdoc was completed inline during each impl task; README quick-start refreshed; docs/architecture.md added as a thin pointer to design/.)  **(0.5)**
 - [ ] T1.23  Phase 1 release: bump to 0.1.0, GitHub release with linux-x86_64 binary + sha256, demo recording.  **(0.5)**
 
 ---

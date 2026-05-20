@@ -178,3 +178,11 @@ The audience is your future self (and any future contributor). Write what you'd 
 - **`include_str!("../../../design/contracts/keymap.toml")` at the crate root pins the default keymap to the canonical file at compile time.** The binary doesn't need a runtime keymap-file lookup; `cargonaut_ui_tui::run` embeds the bundled `keymap.toml` and uses it as the base. User overrides at `~/.config/cargonaut/keymap.toml` would `Keymap::merge` on top (not implemented yet — Phase 1 polish or T1.18 follow-up). The compile-time embed means the test in `keymap.rs::tests::parses_full_default_keymap_without_error` and the production binary parse exactly the same bytes.
 
 - **Periodic 100ms redraw tick keeps the UI responsive to transfer-progress changes without a per-transfer subscriber dance.** First instinct was to spawn one watcher per transfer that pushes events into an mpsc to wake the select. Rejected because (a) the App already owns the `watch::Receiver`s, (b) the tick is cheap relative to render cost, and (c) FR-008's 500ms cancellation budget gives the tick plenty of headroom even if redraws sometimes skip (`set_missed_tick_behavior(Skip)`). Re-evaluate when there are 8+ concurrent transfers per NFR-004 — but until the bench shows a problem, simple tick wins.
+
+---
+
+## Feature 019 (T1.22: docs polish + setup-task marks — #N)
+
+- **Per-task Learnings entries + Feature History in README beat a separate ARCHITECTURE.md.** Each PR already documents its non-obvious decisions in `Learnings.md` as `Feature NNN` entries; bumping a one-line README "Feature History" row per merge gives a chronological changelog without a separate doc. `docs/architecture.md` ended up as a single ASCII top-level diagram + pointers — discoverable, not duplicative. Avoid documents that duplicate the per-PR docs; they always rot first.
+
+- **Marking the Setup tasks (T1.01-T1.03) [X] retroactively when the scaffold + bootstrap merge clearly closed them keeps `tasks.md` honest.** First instinct was "they were never on a PR I authored, leave them [ ]". But `tasks.md` is the source-of-truth for "is Phase 1 done?", and leaving done work as [ ] both falsely understates progress and makes the `[X]` count meaningless. Better: mark with the closing PR number/route inline ("Done by initial scaffold + #3") so the audit trail survives.
