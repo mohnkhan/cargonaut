@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **127/127** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 11 PaneView + 13 dialogs) |
+| Unit tests | All pass | **139/139** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 11 PaneView + 13 dialogs + 12 App) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 017 — T1.19: App event loop core** (2026-05-20). `crates/cargonaut-core/src/lib.rs` adds `App` (config + 2× `PaneState` + active-pane id + transfer registry + status). `PaneState` holds the pure data (cwd, listing, cursor, selected, show_hidden, filter) — ratatui-free so ui-tui can render from `&PaneState` per frame without circular deps. `Command` enum, `Event` enum, `DialogKind` for modal requests. `dispatch(Command).await -> Result<Vec<Event>, _>` covers cursor/focus/selection/toggle-hidden and async ops (descend/ascend via VFS list, copy via `submit_transfer` after `confirm_copy`). Destructive ops (`Copy/Move/Delete`) emit `DialogRequested` rather than acting directly. `CancelCurrentTransfer` triggers the latest transfer's `CancellationToken`. 12 tokio tests via `TempDir`+`LocalFs`. The full `tokio::select!` event loop (input ↔ transfer progress polling) is T1.21's job. Branch `017-t1.19-app` → PR #N.
 
 - **Feature 016 — T1.20: dialogs (confirm + resume-prompt)** (2026-05-20). `crates/cargonaut-ui-tui/src/dialog.rs` adds `ConfirmDialog` (modal yes/no with Cancel-as-default-focus per FR-005 destructive-op safety; handles Esc/Enter/Tab/y/n) and `ResumePromptDialog` (list of resumable transfers, per-row `[r]esume/[s]tart over/[c]ancel` driven by `ResumableSummary` derived from `cargonaut_transfer::ResumableTransfer`). Both render via `Clear` (modal overlay) + `Block` + ratatui widgets. 13 tests cover focus default, key shortcuts, navigation, dismiss outcomes, and `TestBackend` rendering. Branch `016-t1.20-dialogs` → PR #N.
 

@@ -193,6 +193,7 @@ dependencies = [
  "cargonaut-transfer",
  "cargonaut-vfs",
  "serde",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
