@@ -10,8 +10,10 @@ description = "ratatui-based renderer for Cargonaut."
 cargonaut-core = { path = "../cargonaut-core" }
 cargonaut-vfs = { path = "../cargonaut-vfs" }
 ratatui = { workspace = true }
-crossterm = { workspace = true }
+crossterm = { workspace = true, features = ["event-stream"] }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
