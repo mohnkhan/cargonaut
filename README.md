@@ -11,7 +11,7 @@
 | Cold launch | < 150 ms | _pending impl_ |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | _pending impl_ |
 | Resident memory | ≤ 64 MiB | _pending impl_ |
-| Unit tests | All pass | **29/29** (15 VfsPath + 10 Config + 4 VfsBackend dyn-dispatch) |
+| Unit tests | All pass | **64/64** (15 VfsPath + 10 Config + 4 VfsBackend dyn-dispatch + 35 LocalFs) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | `make ci-local` green | lint + build + unit-test **green**; docs-gate per-PR |
 
@@ -20,6 +20,8 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 002 — T1.06: implement LocalFs over tokio::fs** (2026-05-20). Lands the concrete `LocalFs: VfsBackend` (red + green commits): 35 per-method tempdir tests across `list` / `stat` / `read_stream` / `write_stream` / `unlink` / `rmdir` / `rename` / `mkdir`. Bridges tokio's `AsyncRead`/`Write` to the trait's `futures::` return types via `tokio_util::compat` (the `compat` cargo feature). Symlink-correct (`stat`/`list`/`unlink` all use `symlink_metadata` so symlinks stay reported as `Symlink`, never silently followed). `read_stream` clamps past-EOF starts to file size (yields at-EOF reader per spec, not error). `write_stream::AppendAtOffset` opens without create/truncate and seeks; file must exist (resume contract). `rename` rejects cross-authority moves with `Unsupported`. Branch `002-localfs-vfs-backend` → PR #6.
 
 - **Feature 004 — T1.05: VfsBackend trait docs + dyn-dispatch smoke test** (2026-05-20). Expands every `VfsBackend` method's docs with semantics + invariants + error contract (`crates/cargonaut-vfs/src/traits.rs`); adds `tests/dyn_dispatch.rs` pinning trait object-safety + `Send + Sync` bounds at compile time + `Arc<dyn VfsBackend>` construction at runtime, guarding the load-bearing `VfsRef` invariant against accidental regression. Introduces `ByteRange::FULL` for the whole-file invariant. Branch `004-t1.05-vfsbackend-docs` → PR #5.
 
