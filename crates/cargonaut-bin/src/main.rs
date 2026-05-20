@@ -49,9 +49,15 @@ enum CargonautCommand {
     /// List installed plugins + their granted capabilities.
     ListPlugins,
     /// Dump or rotate the audit log.
-    Audit { #[arg(long)] rotate: bool },
+    Audit {
+        #[arg(long)]
+        rotate: bool,
+    },
     /// List resumable transfers; optionally resume one.
-    Resume { #[arg(long)] id: Option<String> },
+    Resume {
+        #[arg(long)]
+        id: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -77,14 +83,21 @@ async fn main() -> anyhow::Result<()> {
         None => {}
     }
 
-    let left = cli.left.unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| "/".into()));
+    let left = cli
+        .left
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| "/".into()));
     let right = cli.right.unwrap_or_else(|| "/tmp".into());
 
-    println!("cargonaut {} — Phase 1 prototype stub",
-             env!("CARGO_PKG_VERSION"));
+    println!(
+        "cargonaut {} — Phase 1 prototype stub",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("  left pane:  {}", left.display());
     println!("  right pane: {}", right.display());
-    println!("  theme:      {}", cli.theme.unwrap_or_else(|| "solarized-dark".into()));
+    println!(
+        "  theme:      {}",
+        cli.theme.unwrap_or_else(|| "solarized-dark".into())
+    );
     println!();
     println!("UI not yet wired (see design/tasks.md T1.07+).");
 
@@ -97,7 +110,9 @@ async fn main() -> anyhow::Result<()> {
 fn init_tracing(verbose: bool) {
     let filter = if verbose { "debug" } else { "info" };
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| filter.into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| filter.into()),
+        )
         .with_writer(std::io::stderr)
         .try_init();
 }
