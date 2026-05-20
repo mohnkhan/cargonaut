@@ -24,8 +24,8 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 ### Foundational (Phase 1)
 
-- [ ] T1.04 [US1] Define `VfsPath`, `VfsMetadata`, `DirListing`, `VfsKind`, `VfsCaps` types in `cargonaut-vfs/src/types.rs`. Round-trip property test for `VfsPath::display(parse(s))`.  **(0.5)**
-- [ ] T1.05 [US1] Define `VfsBackend` trait in `cargonaut-vfs/src/traits.rs`. Async-trait. Doc every method with semantics + invariants.  **(0.25)**
+- [X] T1.04 [US1] Define `VfsPath`, `VfsMetadata`, `DirListing`, `VfsKind`, `VfsCaps` types in `cargonaut-vfs/src/types.rs`. Round-trip property test for `VfsPath::display(parse(s))`.  **(0.5)**
+- [X] T1.05 [US1] Define `VfsBackend` trait in `cargonaut-vfs/src/traits.rs`. Async-trait. Doc every method with semantics + invariants.  **(0.25)**
 - [ ] T1.06 [US1] Implement `LocalFs: VfsBackend` in `cargonaut-vfs/src/local.rs` using `tokio::fs`. **TDD: write the per-method tempdir tests in `local.rs::tests` first and confirm failing before implementing each method body** (Principle II). Unit tests cover: list (empty, populated, large), stat (file/dir/symlink/missing), read_stream (range + whole), write_stream (truncate/append/create-new), unlink, rename.  **(1.0)**
 
 ### US1 — Two-pane local navigation + resumable copy (P1 MVP — 7 tasks, 8.5 owner-weeks)
