@@ -303,6 +303,10 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::MoveOrRenameSelection => AppCommand::Move,
         U::DeleteSelection => AppCommand::Delete,
         U::CancelCurrentOperation => AppCommand::CancelCurrentTransfer,
+        U::TogglePanelFilter => AppCommand::TogglePanelFilter,
+        U::SyncOtherPanelPath => AppCommand::SyncOtherPanelPath,
+        U::ShowFocusedInOtherPanel => AppCommand::ShowFocusedInOtherPanel,
+        U::ToggleSplitOrientation => AppCommand::ToggleSplitOrientation,
         _ => return None,
     })
 }

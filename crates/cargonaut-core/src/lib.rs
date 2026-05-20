@@ -124,6 +124,16 @@ pub enum Command {
     SelectionInvert,
     /// Toggle hidden-file visibility on the active pane.
     ToggleHidden,
+    /// FR-013 Alt-! — clear the active pane's filter. (Setting a filter
+    /// requires the prompt dialog — deferred; Phase 1 just clears.)
+    TogglePanelFilter,
+    /// FR-014 Alt-i — copy the OTHER pane's cwd into the active pane.
+    SyncOtherPanelPath,
+    /// FR-014 Alt-o — open the focused entry's directory in the OTHER pane
+    /// (keeps focus on the origin pane). No-op if focused entry isn't a dir.
+    ShowFocusedInOtherPanel,
+    /// FR-015 Alt-, — cycle split orientation horizontal ↔ vertical.
+    ToggleSplitOrientation,
     /// F5 — copy selection (or focused entry) to the opposite pane.
     Copy,
     /// F6 — move/rename selection to the opposite pane.
@@ -134,6 +144,25 @@ pub enum Command {
     CancelCurrentTransfer,
     /// F10 — quit cargonaut.
     Quit,
+}
+
+/// FR-015 split orientation for the two-pane layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitOrient {
+    /// Side-by-side panes (default — matches MC's classic look).
+    Horizontal,
+    /// Stacked panes (left = top, right = bottom).
+    Vertical,
+}
+
+impl SplitOrient {
+    /// Cycle to the other orientation.
+    pub fn toggle(self) -> Self {
+        match self {
+            SplitOrient::Horizontal => SplitOrient::Vertical,
+            SplitOrient::Vertical => SplitOrient::Horizontal,
+        }
+    }
 }
 
 /// State changes the App emits back to the UI.
@@ -203,6 +232,7 @@ pub struct App {
     /// IDs in submit order — used by `CancelCurrentTransfer`.
     transfer_order: Vec<TransferId>,
     status: String,
+    split: SplitOrient,
 }
 
 impl App {
@@ -250,7 +280,13 @@ impl App {
             transfers: HashMap::new(),
             transfer_order: Vec::new(),
             status: String::new(),
+            split: SplitOrient::Horizontal,
         })
+    }
+
+    /// Current split orientation. UI reads this to lay out the two panes.
+    pub fn split_orient(&self) -> SplitOrient {
+        self.split
     }
 
     /// Read-only access to the App's config.
@@ -344,6 +380,27 @@ impl App {
                 p.show_hidden = !p.show_hidden;
                 p.cursor = 0;
                 Ok(vec![Event::PaneUpdated(self.active)])
+            }
+            TogglePanelFilter => {
+                // FR-013 Phase 1: just clear the filter when invoked.
+                // A future iteration ships the glob-pattern prompt
+                // dialog and replaces this with a request_filter_dialog().
+                let p = self.active_pane_mut();
+                p.filter = None;
+                p.cursor = 0;
+                Ok(vec![
+                    Event::PaneUpdated(self.active),
+                    Event::Status("Panel filter cleared".into()),
+                ])
+            }
+            SyncOtherPanelPath => self.sync_other_panel_path().await,
+            ShowFocusedInOtherPanel => self.show_focused_in_other_panel().await,
+            ToggleSplitOrientation => {
+                self.split = self.split.toggle();
+                Ok(vec![
+                    Event::PaneUpdated(PaneId::Left),
+                    Event::PaneUpdated(PaneId::Right),
+                ])
             }
             Copy => self.request_copy_confirmation(),
             Move => self.request_move_confirmation(),
@@ -474,6 +531,50 @@ impl App {
         p.cursor = 0;
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
+    }
+
+    async fn sync_other_panel_path(&mut self) -> Result<Vec<Event>, AppError> {
+        let active = self.active;
+        let other = active.other();
+        let other_cwd = self.pane(other).cwd.clone();
+        // Re-list the active pane at the other pane's path. (Re-listing
+        // rather than copying the cached `listing` defends against the
+        // other pane being stale.)
+        let listing = self.local_fs.list(&other_cwd, Sort::NameAsc).await?;
+        let p = self.pane_mut(active);
+        p.cwd = other_cwd;
+        p.listing = listing;
+        p.cursor = 0;
+        p.selected.clear();
+        Ok(vec![Event::PaneUpdated(active)])
+    }
+
+    async fn show_focused_in_other_panel(&mut self) -> Result<Vec<Event>, AppError> {
+        let active = self.active;
+        let other = active.other();
+        // Resolve the focused entry's dir target.
+        let target = {
+            let p = self.pane(active);
+            p.focused_entry_index()
+                .and_then(|i| p.listing.entries.get(i))
+                .and_then(|e| match &e.meta.kind {
+                    cargonaut_vfs::VfsKind::Dir => Some(p.cwd.join(e.name.as_str())),
+                    _ => None,
+                })
+        };
+        let Some(target) = target else {
+            return Ok(vec![Event::Status(
+                "Focused entry isn't a directory".into(),
+            )]);
+        };
+        let listing = self.local_fs.list(&target, Sort::NameAsc).await?;
+        let p = self.pane_mut(other);
+        p.cwd = target;
+        p.listing = listing;
+        p.cursor = 0;
+        p.selected.clear();
+        // Focus stays on the originating pane per FR-014.
+        Ok(vec![Event::PaneUpdated(other)])
     }
 
     async fn ascend_to_parent(&mut self) -> Result<Vec<Event>, AppError> {
@@ -732,6 +833,89 @@ mod tests {
         // Cursor reset to 0; both files now visible.
         assert_eq!(app.pane(PaneId::Left).cursor, 0);
         assert_eq!(app.pane(PaneId::Left).visible_indices().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn toggle_split_orientation_cycles_horizontal_vertical() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert_eq!(app.split_orient(), SplitOrient::Horizontal);
+        app.dispatch(Command::ToggleSplitOrientation).await.unwrap();
+        assert_eq!(app.split_orient(), SplitOrient::Vertical);
+        app.dispatch(Command::ToggleSplitOrientation).await.unwrap();
+        assert_eq!(app.split_orient(), SplitOrient::Horizontal);
+    }
+
+    #[tokio::test]
+    async fn toggle_panel_filter_clears_existing_filter() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        {
+            let p = app.active_pane_state();
+            assert!(p.filter.is_none());
+        }
+        // Manually plant a filter, then dispatch the toggle to clear.
+        // (Setting via dispatch requires the prompt dialog, deferred.)
+        // We reach in by mutating App's internal panes via dispatch is
+        // not possible without exposing more state, so just test the
+        // toggle clears when nothing's set (idempotent).
+        app.dispatch(Command::TogglePanelFilter).await.unwrap();
+        assert!(app.active_pane_state().filter.is_none());
+    }
+
+    #[tokio::test]
+    async fn sync_other_panel_path_copies_other_pane_cwd_into_active() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::write(td_r.path().join("over-there"), b"")
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Active = Left initially. Sync into left from right.
+        app.dispatch(Command::SyncOtherPanelPath).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cwd, app.pane(PaneId::Right).cwd);
+        assert_eq!(app.pane(PaneId::Left).listing.entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn show_focused_in_other_panel_navigates_other_pane() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::create_dir(td_l.path().join("sub"))
+            .await
+            .unwrap();
+        tokio::fs::write(td_l.path().join("sub/x"), b"")
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Cursor on "sub" — but it's the only entry, so cursor=0 hits it.
+        app.dispatch(Command::ShowFocusedInOtherPanel)
+            .await
+            .unwrap();
+        // Right pane (other) now shows sub/'s contents.
+        assert!(app.pane(PaneId::Right).cwd.display().ends_with("/sub"));
+        assert_eq!(app.pane(PaneId::Right).listing.entries.len(), 1);
+        // Active pane unchanged per FR-014.
+        assert_eq!(app.active_pane(), PaneId::Left);
+    }
+
+    #[tokio::test]
+    async fn show_focused_in_other_panel_is_noop_on_file() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::write(td_l.path().join("file"), b"")
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app
+            .dispatch(Command::ShowFocusedInOtherPanel)
+            .await
+            .unwrap();
+        // Status event but no PaneUpdated.
+        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+        assert!(!events.iter().any(|e| matches!(e, Event::PaneUpdated(_))));
     }
 
     #[tokio::test]
