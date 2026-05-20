@@ -34,7 +34,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 - [ ] T1.07 [US1] Integration test `tests/integration/local_navigation.rs`: launch cargonaut with two tempdir args, simulate keypresses (Tab, j, Enter, Backspace, :cd), assert pane state evolves correctly. Use `crossterm-test` or similar input-injection helper.  **(0.5)**
 - [ ] T1.08 [US1] Integration test `tests/integration/resume_sigkill.rs`: create 4 GiB random file, spawn cargonaut subprocess to F5 copy, wait 1 s, SIGKILL, relaunch, automate the `[r]esume` prompt, wait for completion, assert SHA-256 match. **SC-002 gate.**  **(0.75)**
-- [ ] T1.09 [US1] Property test `cargonaut-transfer/src/checkpoint.rs::tests::roundtrip`: random `TransferCheckpoint` serializes + deserializes equal.  **(0.25)**
+- [X] T1.09 [US1] Property test `cargonaut-transfer/src/checkpoint.rs::tests::roundtrip`: random `TransferCheckpoint` serializes + deserializes equal.  **(0.25)**
 - [ ] T1.10 [US1] Bench `benches/local-copy-vs-cp.rs`: criterion bench comparing cargonaut's copy throughput to `cp(1)` for 100 MiB, 1 GiB. **SC-001 gate (≥80%).**  **(0.5)**
 - [ ] T1.11 [US1] Bench `benches/startup.rs`: hyperfine wrapper measuring cold + warm startup. **SC-004 gate (≤150 ms cold).**  **(0.25)**
 - [ ] T1.12 [US1] Bench `benches/rss-headroom.rs`: spawn cargonaut, drive it into 3 panes × 10k-entry-each session, sample RSS. **SC-003 gate (≤64 MiB).**  **(0.25)**
