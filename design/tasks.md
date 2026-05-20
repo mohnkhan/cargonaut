@@ -67,7 +67,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 ### Polish (Phase 1)
 
-- [ ] T1.22a [P] [US1] CI check `scripts/check-binary-size.sh`: cargo build --release, run `strip`, fail if size > 8 MiB. Wire into `.github/workflows/ci.yml`. **Covers NFR-001.**  **(0.1)**
+- [X] T1.22a [P] [US1] CI check `scripts/check-binary-size.sh`: cargo build --release, run `strip`, fail if size > 8 MiB. Wire into `.github/workflows/ci.yml`. **Covers NFR-001.**  **(0.1)**
 - [ ] T1.22b [P] [US1] Bench `benches/keypress-latency.rs`: criterion harness that simulates one keypress through the dispatch loop, measures dispatch → first-paint render latency. Fail >16 ms p95. **Covers NFR-002.**  **(0.25)**
 - [ ] T1.22c [P] [US1] Bench `benches/large-dir-scroll.rs`: synthesize a 1M-entry tempdir, open it in one pane, scroll cursor j 10k times, sample RSS at each 100k. Assert RSS stays ≤64 MiB (per FR-009). **Covers NFR-003.**  **(0.25)**
 - [ ] T1.22d [P] [US1] Integration test `tests/integration/concurrent_transfers.rs`: submit 8 simultaneous LocalFs→LocalFs 100 MiB copies; assert all complete; assert no UI render frame exceeded 16 ms during the burst (via tracing-subscriber latency probe). **Covers NFR-004.**  **(0.5)**
