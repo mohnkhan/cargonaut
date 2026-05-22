@@ -35,6 +35,48 @@
 - NFR-002 (≤16 ms keypress→first-paint, 60 Hz frame budget) is enforced by `benches/keypress-latency.rs` (T1.22b).
 - NFR-001 (≤8 MiB stripped release binary) is enforced by `scripts/check-binary-size.sh` (T1.22a).
 
+### V. SSD Preservation (NON-NEGOTIABLE — dev-host; CI exempt)
+
+The development host is a single-user box with finite-write-life SSD storage,
+backed by a zram-compressed tmpfs (`/dev/zram0`, lzo-rle, 16 GiB compressed
+swap; `/tmp` mounted `tmpfs size=16G`). A typical hour of Cargo iteration
+rewrites several GiB of incremental artifacts — measurable SSD wear within a
+quarter if left to land on disk. All write-heavy build artifact trees
+therefore MUST live in tmpfs, not on the host SSD.
+
+- **Required redirection**: `target/` (and any future large gitignored
+  build/output directory) MUST be a symlink to `/tmp/cargonaut/<hash>/...`,
+  established once per checkout via `make tmpfs-setup`. `make tmpfs-status`
+  is the audit command. The zram backing means the 16 GiB nominal tmpfs cap
+  decompresses to ~3-4× that capacity in practice; wall-clock ENOSPC is
+  recoverable by clearing the *contents* (`rm -rf "$(readlink -f target)"/{debug,release}`).
+
+- **Forbidden commands** (they delete the symlink itself, causing the next
+  build to materialize `target/` as a real on-SSD directory):
+  - `cargo clean` — use `make clean` instead (symlink-aware: empties the
+    tmpfs contents, leaves the symlink intact).
+  - `rm -rf target` — use `rm -rf "$(readlink -f target)"/{debug,release}`
+    if you need to clear contents.
+
+- **Enforcement**: `make check-tmpfs` errors loudly when `target/` is not a
+  tmpfs symlink. Every `make build` / `make test` / `make bench` target
+  invokes it as a prerequisite. Direct `cargo build` invocations are NOT
+  guarded by the Make wrapper — discipline lives with the developer there;
+  `make check-tmpfs` can be run at any time to audit current state.
+
+- **Exemptions**:
+  - **CI** is automatically exempt via a `$CI=true` short-circuit in
+    `make check-tmpfs`. CI runners are ephemeral containers; there is no
+    persistent SSD to protect.
+  - **Per-session waiver**: setting `CARGONAUT_ALLOW_SSD_TARGET=1` bypasses
+    the guard. This is for genuinely-justified situations only — low-RAM
+    hosts where 16 GiB tmpfs isn't viable, reproducing a tmpfs-specific
+    bug, or container/VM dev environments where `/tmp` isn't tmpfs-backed.
+    Any session that exercises the waiver MUST record the justification in
+    `Learnings.md` (or in the PR body that introduces it). "I just want to
+    skip this step" is NOT a valid reason — it's how the SSD got hammered
+    in the first place.
+
 ## Quality Gates
 
 - **Per-PR**: fmt, clippy, build, test, doc build (with strict intra-doc-link checking), binary-size check, coverage threshold.
@@ -57,4 +99,4 @@
 - Complexity that violates a principle MUST be justified in `plan.md §Complexity tracking` with the simpler alternative considered and the reason for rejection recorded.
 - Use `CLAUDE.md` for runtime development guidance (commit conventions, test/CI ergonomics, working-directory rules).
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-20 | **Last Amended**: 2026-05-20
+**Version**: 1.1.0 | **Ratified**: 2026-05-20 | **Last Amended**: 2026-05-21

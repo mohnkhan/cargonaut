@@ -52,9 +52,9 @@ All PRs targeting `main` MUST pass the `ci` GitHub Actions check before merging.
 - Failed runs upload an artifact named `ci-failure-<run-id>-<job>.zip` to the PR's Checks tab; retained 30 days.
 - Concurrency: a newer push to the same non-main branch auto-cancels the prior in-progress run (saves runner minutes on rapid iteration). Runs on `main` are never auto-cancelled.
 
-## SSD preservation via tmpfs — MANDATORY for local dev
+## SSD preservation via tmpfs — Constitution §V (NON-NEGOTIABLE)
 
-This is a single-user dev machine where the SSD is finite write-life. **All build artifact trees MUST live in tmpfs (`/tmp/...`), not on disk.**
+**This is a constitutional rule.** See [`.specify/memory/constitution.md`](.specify/memory/constitution.md) §V (SSD Preservation). All build artifact trees MUST live in tmpfs (`/tmp/cargonaut/<hash>/...`), not on the host SSD. The dev host runs `/tmp` as `tmpfs size=16G` backed by zram (`/dev/zram0`, lzo-rle, ~3-4× effective capacity).
 
 The pattern is borrowed from the sibling MyOS2026 project (where it cut SSD writes by ~3 GB/day during heavy iteration). For Cargo projects, the only large gitignored output tree is `target/` — `cargo build` rewrites multi-hundred-MB of incremental artifacts on every change.
 
@@ -62,7 +62,10 @@ The pattern is borrowed from the sibling MyOS2026 project (where it cut SSD writ
 - **`make tmpfs-status`** — show what's linked, where, and tmpfs usage.
 - **`make tmpfs-teardown`** — remove the symlink; recreate empty real `target/`. Build artifacts in tmpfs are kept by default; pass `WIPE=1` to also `rm -rf` the tmpfs subdir.
 - **`make clean`** is symlink-aware: empties tmpfs contents, leaves the symlinks intact so the tmpfs association survives.
+- **`make check-tmpfs`** — the enforcement guard. Every `make build` / `test` / `bench` / `clippy` runs it as a prereq; errors loudly if `target/` is a real on-SSD directory.
 - **Skipped on CI** via `$CI=true` short-circuit — the GitHub runner is ephemeral, no SSD to protect.
+- **Forbidden**: `cargo clean` (deletes the symlink; next build materializes `target/` on SSD) and `rm -rf target` (same shape). Use `make clean` / `rm -rf "$(readlink -f target)"/{debug,release}` instead.
+- **Waiver**: `CARGONAUT_ALLOW_SSD_TARGET=1 make build` bypasses the guard for justified situations (low-RAM hosts, container dev environments, tmpfs-specific bug repro). Constitution §V requires the reason be recorded in Learnings.md or the PR body.
 - `/tmp` is tmpfs → wiped on reboot. After reboot, the symlink remains but its target is gone; the next `cargo build` rebuilds from scratch (~1–3 min cold). This is the price; the benefit is your SSD lasts 3× longer.
 
 **When asked "is the SSD getting hammered?" or "where do build artifacts live?", confirm `make tmpfs-status` shows the link is active. If it isn't, set it up.**
