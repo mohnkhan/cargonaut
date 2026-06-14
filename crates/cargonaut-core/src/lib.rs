@@ -20,7 +20,8 @@
 #![warn(missing_docs)]
 
 use cargonaut_transfer::{
-    submit_transfer, TransferError, TransferId, TransferJob, TransferOptions, TransferState,
+    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError, TransferId,
+    TransferJob, TransferOptions, TransferState,
 };
 use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath};
 use std::collections::{BTreeSet, HashMap};
@@ -209,6 +210,28 @@ pub struct ProgressView {
     pub throughput_mibs: f32,
 }
 
+/// Feature 037 — UI-agnostic projection of one resumable transfer found
+/// on launch. Lets the UI build its resume prompt without depending on
+/// the transfer crate's types (mirrors [`ProgressView`]). The UI maps
+/// this onto its own per-row summary widget.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResumeOfferView {
+    /// Source URI/path, as recorded in the checkpoint.
+    pub src: String,
+    /// Destination URI/path, as recorded in the checkpoint.
+    pub dst: String,
+    /// Bytes already written, expressed in MiB.
+    pub bytes_written_mib: f32,
+    /// Source size, expressed in MiB.
+    pub src_size_mib: f32,
+    /// True if the source's content fingerprint is unchanged since the
+    /// checkpoint was written.
+    pub source_unchanged: bool,
+    /// True if the partial destination still matches the checkpoint's
+    /// integrity chain.
+    pub dest_intact: bool,
+}
+
 impl ViewMode {
     /// Cycle Brief → Full → QuickView → Brief.
     pub fn next(self) -> Self {
@@ -305,6 +328,9 @@ pub struct App {
     transfers: HashMap<TransferId, TransferJob>,
     /// IDs in submit order — used by `CancelCurrentTransfer`.
     transfer_order: Vec<TransferId>,
+    /// Feature 037 — resumable transfers discovered on launch, in scan
+    /// order. Drained one at a time as the user answers the resume prompt.
+    pending_resumes: Vec<ResumableTransfer>,
     status: String,
     split: SplitOrient,
     view_mode: ViewMode,
@@ -360,6 +386,7 @@ impl App {
             local_fs,
             transfers: HashMap::new(),
             transfer_order: Vec::new(),
+            pending_resumes: Vec::new(),
             status: String::new(),
             split: SplitOrient::Horizontal,
             view_mode: ViewMode::Full,
@@ -708,13 +735,7 @@ impl App {
             return Ok(vec![Event::Status("Nothing selected".into())]);
         }
         let dst_cwd = self.pane(dst_pane).cwd.clone();
-        let opts = TransferOptions {
-            checkpoint_interval_bytes: u64::from(self.config.transfer.checkpoint_interval_mib)
-                * 1024
-                * 1024,
-            verify_after_copy: self.config.transfer.verify_after_copy,
-            ..Default::default()
-        };
+        let opts = self.transfer_opts();
         let mut events = Vec::new();
         for entry_name in entries {
             let src_path = self.pane(src_pane).cwd.join(&entry_name);
@@ -733,6 +754,124 @@ impl App {
             events.push(Event::TransferProgressed(id));
         }
         Ok(events)
+    }
+
+    /// Transfer options derived from the active config (checkpoint
+    /// interval + post-copy verification). Shared by fresh copies and
+    /// resumed/started-over transfers so they behave identically.
+    fn transfer_opts(&self) -> TransferOptions {
+        TransferOptions {
+            checkpoint_interval_bytes: u64::from(self.config.transfer.checkpoint_interval_mib)
+                * 1024
+                * 1024,
+            verify_after_copy: self.config.transfer.verify_after_copy,
+            ..Default::default()
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Feature 037 — resume-on-launch seam.
+    //
+    // The binary calls `scan_resume_offers` once on startup; the UI
+    // renders the returned views, then routes the user's choice back into
+    // `resume_offer` / `start_over_offer` / `skip_offer` by index. After
+    // each choice the UI rebuilds its dialog from `pending_resume_views`
+    // (so indices never drift). All transfer-crate interaction stays here.
+    // -----------------------------------------------------------------
+
+    /// Scan both pane directories (non-recursively, de-duplicated) for
+    /// orphan checkpoint sidecars and remember any found as pending resume
+    /// offers. Returns UI-friendly projections in scan order. Safe to call
+    /// once on launch; an empty result means "nothing to resume" (the hot
+    /// path — no prompt). (FR-001/002/003)
+    pub async fn scan_resume_offers(&mut self) -> Result<Vec<ResumeOfferView>, AppError> {
+        self.pending_resumes.clear();
+        let mut scanned: Vec<VfsPath> = Vec::new();
+        for id in [PaneId::Left, PaneId::Right] {
+            let dir = self.pane(id).cwd.clone();
+            if scanned.contains(&dir) {
+                continue;
+            }
+            scanned.push(dir.clone());
+            let found = scan_resumable(Arc::clone(&self.local_fs), dir).await?;
+            self.pending_resumes.extend(found);
+        }
+        Ok(self.pending_resume_views())
+    }
+
+    /// Project the current pending resume offers to UI views, in order.
+    /// Pure (no I/O). Used by the UI to rebuild its prompt after each
+    /// choice.
+    pub fn pending_resume_views(&self) -> Vec<ResumeOfferView> {
+        self.pending_resumes
+            .iter()
+            .map(resume_offer_view)
+            .collect()
+    }
+
+    /// Resume the offer at `index`: continue the transfer from its
+    /// checkpoint and register it like any other in-flight transfer. On a
+    /// validation failure (e.g. the destination changed) the offer is
+    /// dropped and a status message is returned — never a corrupt copy.
+    /// (FR-005/006/009, SC-005)
+    pub async fn resume_offer(&mut self, index: usize) -> Result<Vec<Event>, AppError> {
+        if index >= self.pending_resumes.len() {
+            return Ok(vec![Event::Status("No such resume offer".into())]);
+        }
+        let rt = self.pending_resumes.remove(index);
+        let opts = self.transfer_opts();
+        match resume_transfer(
+            Arc::clone(&self.local_fs),
+            Arc::clone(&self.local_fs),
+            rt.checkpoint,
+            opts,
+        )
+        .await
+        {
+            Ok(job) => {
+                let id = job.id;
+                self.transfers.insert(id, job);
+                self.transfer_order.push(id);
+                Ok(vec![Event::TransferProgressed(id)])
+            }
+            Err(e) => Ok(vec![Event::Status(format!("Cannot resume: {e}"))]),
+        }
+    }
+
+    /// Start the offer at `index` over from scratch: discard its
+    /// checkpoint sidecar and submit a fresh copy (which truncates the
+    /// partial destination). (FR-007)
+    pub async fn start_over_offer(&mut self, index: usize) -> Result<Vec<Event>, AppError> {
+        if index >= self.pending_resumes.len() {
+            return Ok(vec![Event::Status("No such resume offer".into())]);
+        }
+        let rt = self.pending_resumes.remove(index);
+        // Discard the stale checkpoint so a future scan won't re-offer it.
+        let _ = std::fs::remove_file(&rt.checkpoint_path);
+        let src = parse_path(&rt.checkpoint.src_uri)?;
+        let dst = parse_path(&rt.checkpoint.dst_uri)?;
+        let opts = self.transfer_opts();
+        let job = submit_transfer(
+            Arc::clone(&self.local_fs),
+            src,
+            Arc::clone(&self.local_fs),
+            dst,
+            opts,
+        )
+        .await?;
+        let id = job.id;
+        self.transfers.insert(id, job);
+        self.transfer_order.push(id);
+        Ok(vec![Event::TransferProgressed(id)])
+    }
+
+    /// Skip the offer at `index`: start no transfer and leave the
+    /// checkpoint sidecar on disk so it is offered again next launch.
+    /// (FR-008)
+    pub fn skip_offer(&mut self, index: usize) {
+        if index < self.pending_resumes.len() {
+            self.pending_resumes.remove(index);
+        }
     }
 
     /// Reload the active pane's listing from disk. Cursor + selection are
@@ -999,6 +1138,19 @@ pub fn glob_match(pattern: &str, name: &str) -> bool {
         pi += 1;
     }
     pi == p.len()
+}
+
+/// Project a [`ResumableTransfer`] into the UI-facing [`ResumeOfferView`].
+fn resume_offer_view(rt: &ResumableTransfer) -> ResumeOfferView {
+    const MIB: f32 = 1024.0 * 1024.0;
+    ResumeOfferView {
+        src: rt.checkpoint.src_uri.clone(),
+        dst: rt.checkpoint.dst_uri.clone(),
+        bytes_written_mib: rt.checkpoint.bytes_written as f32 / MIB,
+        src_size_mib: rt.checkpoint.src_size as f32 / MIB,
+        source_unchanged: rt.source_unchanged,
+        dest_intact: rt.dest_intact,
+    }
 }
 
 fn parse_path(s: &str) -> Result<VfsPath, AppError> {
@@ -1555,5 +1707,246 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
         // The cancellation token must be triggered.
         assert!(app.transfer(id).unwrap().cancel.is_cancelled());
+    }
+
+    // =================================================================
+    // Feature 037 — resume-on-launch seam (T005, T007, T008, T013, T014)
+    // =================================================================
+
+    use sha2::{Digest, Sha256};
+
+    fn file_uri(p: &std::path::Path) -> String {
+        format!("file://{}", p.to_str().unwrap())
+    }
+
+    /// Stage a genuinely-resumable checkpoint: write the full source, a
+    /// partial destination (first `bytes_written` bytes), and a matching
+    /// sidecar in `dst_dir`. Returns the destination file path. The
+    /// resulting offer validates (`source_unchanged` + `dest_intact`).
+    async fn stage_checkpoint(
+        src_dir: &std::path::Path,
+        dst_dir: &std::path::Path,
+        name: &str,
+        full: &[u8],
+        bytes_written: usize,
+        interval: usize,
+    ) -> std::path::PathBuf {
+        assert!(bytes_written % interval == 0, "checkpoint at interval boundary");
+        let src = src_dir.join(name);
+        let dst = dst_dir.join(name);
+        fs::write(&src, full).await.unwrap();
+        fs::write(&dst, &full[..bytes_written]).await.unwrap();
+
+        let prefix_len = full.len().min(1024 * 1024);
+        let mut h = Sha256::new();
+        h.update(&full[..prefix_len]);
+        let src_sha256_prefix: [u8; 32] = h.finalize().into();
+
+        let chunk_crcs: Vec<u32> = full[..bytes_written]
+            .chunks(interval)
+            .map(crc32fast::hash)
+            .collect();
+
+        let cp = cargonaut_transfer::TransferCheckpoint {
+            version: cargonaut_transfer::TransferCheckpoint::VERSION,
+            job_id: "11111111-1111-4111-8111-111111111111".into(),
+            src_uri: file_uri(&src),
+            src_size: full.len() as u64,
+            src_sha256_prefix,
+            dst_uri: file_uri(&dst),
+            bytes_written: bytes_written as u64,
+            chunk_crcs,
+            chunk_size_bytes: interval as u64,
+            created_at: 0,
+            last_update_at: 0,
+        };
+        let sidecar = dst_dir.join(format!(".cargonaut-transfer-{}.json", cp.job_id));
+        fs::write(&sidecar, serde_json::to_vec(&cp).unwrap())
+            .await
+            .unwrap();
+        dst
+    }
+
+    async fn wait_completed(app: &App, id: TransferId) -> TransferState {
+        let mut rx = app.transfer(id).unwrap().state.clone();
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                {
+                    let s = rx.borrow();
+                    if matches!(
+                        *s,
+                        TransferState::Completed { .. }
+                            | TransferState::Failed { .. }
+                            | TransferState::Canceled
+                    ) {
+                        return s.clone();
+                    }
+                }
+                if rx.changed().await.is_err() {
+                    return TransferState::Failed {
+                        error: "sender dropped".into(),
+                        resumable: false,
+                    };
+                }
+            }
+        })
+        .await
+        .expect("transfer did not terminate in 30s")
+    }
+
+    // ---- T005: projection scaffolding ----
+
+    #[tokio::test]
+    async fn pending_resume_views_empty_on_fresh_app() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        assert!(app.pending_resume_views().is_empty());
+    }
+
+    // ---- T007: scan_resume_offers ----
+
+    #[tokio::test]
+    async fn scan_finds_offer_in_a_pane_dir() {
+        let td_src = TempDir::new().unwrap();
+        let td_dst = TempDir::new().unwrap();
+        let full = vec![0xABu8; 4096];
+        stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 2048, 1024).await;
+        // Right pane is the destination dir holding the sidecar.
+        let mut app = make_app(&td_src, &td_dst).await;
+        let offers = app.scan_resume_offers().await.unwrap();
+        assert_eq!(offers.len(), 1, "expected one resumable offer");
+        assert_eq!(app.pending_resume_views().len(), 1);
+        assert!(offers[0].source_unchanged && offers[0].dest_intact);
+    }
+
+    #[tokio::test]
+    async fn scan_finds_nothing_when_no_sidecars() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("plain.txt"), b"hi").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let offers = app.scan_resume_offers().await.unwrap();
+        assert!(offers.is_empty());
+        assert!(app.pending_resume_views().is_empty());
+    }
+
+    #[tokio::test]
+    async fn scan_ignores_malformed_sidecar() {
+        // FR-010: a garbage sidecar must not error or appear as an offer.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(
+            td_r.path().join(".cargonaut-transfer-bogus.json"),
+            b"{ not valid json ",
+        )
+        .await
+        .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let offers = app.scan_resume_offers().await.unwrap();
+        assert!(offers.is_empty(), "malformed sidecar must not yield an offer");
+    }
+
+    // ---- T008: resume_offer ----
+
+    #[tokio::test]
+    async fn resume_offer_completes_and_matches_source() {
+        let td_src = TempDir::new().unwrap();
+        let td_dst = TempDir::new().unwrap();
+        let full: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
+        let dst = stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
+
+        let mut app = make_app(&td_src, &td_dst).await;
+        app.scan_resume_offers().await.unwrap();
+        let events = app.resume_offer(0).await.unwrap();
+        let id = match events.first() {
+            Some(Event::TransferProgressed(id)) => *id,
+            other => panic!("expected TransferProgressed, got {other:?}"),
+        };
+        assert!(app.pending_resume_views().is_empty(), "offer consumed");
+
+        let final_state = wait_completed(&app, id).await;
+        assert!(
+            matches!(final_state, TransferState::Completed { sha256_match: true }),
+            "expected Completed{{sha256_match:true}}, got {final_state:?}"
+        );
+        assert_eq!(fs::read(&dst).await.unwrap(), full, "dst must equal src");
+    }
+
+    #[tokio::test]
+    async fn resume_offer_fails_safe_on_changed_destination() {
+        // FR-009 / SC-005: if the partial destination no longer matches the
+        // checkpoint, resume must refuse rather than corrupt it.
+        let td_src = TempDir::new().unwrap();
+        let td_dst = TempDir::new().unwrap();
+        let full: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
+        let dst = stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
+        // Corrupt the partial destination after staging.
+        fs::write(&dst, vec![0xFFu8; 4096]).await.unwrap();
+
+        let mut app = make_app(&td_src, &td_dst).await;
+        app.scan_resume_offers().await.unwrap();
+        let events = app.resume_offer(0).await.unwrap();
+        // No successful transfer was registered; a status explains why.
+        assert!(
+            app.transfer_ids().is_empty(),
+            "no transfer should be registered on a fail-safe refusal"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Status(_))),
+            "expected a status message, got {events:?}"
+        );
+    }
+
+    // ---- T013: start_over_offer ----
+
+    #[tokio::test]
+    async fn start_over_discards_checkpoint_and_copies_fresh() {
+        let td_src = TempDir::new().unwrap();
+        let td_dst = TempDir::new().unwrap();
+        let full: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
+        let dst = stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
+        let sidecar = td_dst
+            .path()
+            .join(".cargonaut-transfer-11111111-1111-4111-8111-111111111111.json");
+        assert!(sidecar.exists());
+
+        let mut app = make_app(&td_src, &td_dst).await;
+        app.scan_resume_offers().await.unwrap();
+        let events = app.start_over_offer(0).await.unwrap();
+        let id = match events.first() {
+            Some(Event::TransferProgressed(id)) => *id,
+            other => panic!("expected TransferProgressed, got {other:?}"),
+        };
+        assert!(!sidecar.exists(), "start over must remove the stale sidecar");
+        assert!(app.pending_resume_views().is_empty());
+
+        let final_state = wait_completed(&app, id).await;
+        assert!(matches!(final_state, TransferState::Completed { .. }));
+        assert_eq!(fs::read(&dst).await.unwrap(), full);
+    }
+
+    // ---- T014: skip_offer ----
+
+    #[tokio::test]
+    async fn skip_offer_starts_nothing_and_keeps_sidecar() {
+        let td_src = TempDir::new().unwrap();
+        let td_dst = TempDir::new().unwrap();
+        let full = vec![0x33u8; 4096];
+        stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 2048, 1024).await;
+        let sidecar = td_dst
+            .path()
+            .join(".cargonaut-transfer-11111111-1111-4111-8111-111111111111.json");
+
+        let mut app = make_app(&td_src, &td_dst).await;
+        app.scan_resume_offers().await.unwrap();
+        app.skip_offer(0);
+        assert!(app.transfer_ids().is_empty(), "skip starts no transfer");
+        assert!(app.pending_resume_views().is_empty(), "offer dropped from memory");
+        assert!(sidecar.exists(), "skip leaves the sidecar on disk");
+
+        // A fresh scan re-discovers the skipped transfer.
+        let offers = app.scan_resume_offers().await.unwrap();
+        assert_eq!(offers.len(), 1, "skipped transfer is offered again next launch");
     }
 }
