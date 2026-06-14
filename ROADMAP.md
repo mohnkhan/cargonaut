@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-14 (Feature 031 visual & interactive parity layer shipped US1–US5; deferrals #37–#50 populated below).
+**Last updated**: 2026-06-14 (Feature 031 visual & interactive parity layer shipped US1–US5, deferrals #37–#50 added; Phase 1.1 polish follow-ups #29–#33 from Feature 028 also tracked).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -12,7 +12,9 @@ Every item below has a corresponding GitHub issue with: a problem statement, a s
 
 Pick from here first. These are issues whose fix unblocks downstream work or whose investigation has already been substantially done.
 
-_(empty — populate as features ship and deferrals accumulate)_
+| Issue | Title | Effort | Origin |
+|---|---|---|---|
+| [#29](https://github.com/mohnkhan/cargonaut/issues/29) | T1.08 — binary-level SIGKILL-resume PTY test (SC-002 gate) | 0.75 ew | Feature 028 — SC-002 currently proven only at transfer-crate level; binary-level gate is `#[ignore]`d. Closes a NON-NEGOTIABLE perf-gate hole (Constitution §IV). |
 
 ---
 
@@ -21,6 +23,8 @@ _(empty — populate as features ship and deferrals accumulate)_
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
 | [#37](https://github.com/mohnkhan/cargonaut/issues/37) | Panel: `..` parent entry as first row (FR-020) | S | Feature 031 — ascent works via key/menu/mouse; needs an index model separating the synthetic row from real entries |
+| [#31](https://github.com/mohnkhan/cargonaut/issues/31) | T1.25 — full quick-cd popup w/ tab-completion (FR-012) | 0.25–0.5 ew | Feature 028 — ships as status-bar placeholder; needs shared text-input dialog (also unblocks #32/#33). |
+| [#32](https://github.com/mohnkhan/cargonaut/issues/32) | T1.29 — tasks/jobs panel popup (FR-016, NFR-004) | 1.0 ew | Feature 028 — ships as status-bar placeholder; registry data already in `App`, needs list dialog + pause/resume wiring. |
 
 ---
 
@@ -34,6 +38,8 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 | [#42](https://github.com/mohnkhan/cargonaut/issues/42) | Directory hotlist / bookmarks | M | Feature 031 §Out of Scope |
 | [#46](https://github.com/mohnkhan/cargonaut/issues/46) | File attributes: chmod/chown + sym/hardlink | M | Feature 031 §Out of Scope — needs new VFS ops |
 | [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
+| [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
+| [#33](https://github.com/mohnkhan/cargonaut/issues/33) | FR-013 — panel filter prompt dialog (currently clear-only) | 0.25 ew | Feature 022 — `globset` plumbing present; prompt deferred pending shared input dialog (#31). |
 
 ---
 
