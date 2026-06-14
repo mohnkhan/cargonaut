@@ -5,6 +5,7 @@
 #   Build / test:
 #     build             cargo build --workspace
 #     build-release     cargo build --release --workspace
+#     run               cargo run -p cargonaut -- $(ARGS)
 #     test              cargo test --workspace --all-targets
 #     clippy            cargo clippy --workspace --all-targets -- -D warnings
 #     fmt               cargo fmt --all
@@ -22,7 +23,7 @@
 #   Help:
 #     help              Show this help
 
-.PHONY: help build build-release test clippy fmt fmt-check clean \
+.PHONY: help build build-release run test clippy fmt fmt-check clean \
         ci-local tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
 
 # Default goal: print help instead of building, so a user who types `make`
@@ -35,6 +36,7 @@ help:
 	@echo "Build / test (all gated by check-tmpfs per Constitution §V):"
 	@echo "  build             cargo build --workspace"
 	@echo "  build-release     cargo build --release --workspace"
+	@echo "  run               cargo run -p cargonaut -- \$$(ARGS)  (e.g. make run ARGS='~ /tmp')"
 	@echo "  test              cargo test --workspace --lib --tests"
 	@echo "  bench             cargo bench --workspace"
 	@echo "  clippy            cargo clippy --workspace --all-targets -- -D warnings"
@@ -64,6 +66,12 @@ build: check-tmpfs
 
 build-release: check-tmpfs
 	cargo build --release --workspace
+
+# Build + launch the TUI. Pass pane paths (and any other CLI flags) via ARGS,
+# e.g. `make run ARGS="~ /tmp"`. With no ARGS the binary's own defaults apply
+# (LEFT=$HOME, RIGHT=/tmp). Gated by check-tmpfs per Constitution §V — it builds.
+run: check-tmpfs
+	cargo run -p cargonaut -- $(ARGS)
 
 test: check-tmpfs
 	cargo test --workspace --lib --tests
