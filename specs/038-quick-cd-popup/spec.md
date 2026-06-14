@@ -4,9 +4,28 @@
 
 **Created**: 2026-06-15
 
-**Status**: Draft
+**Status**: Clarified
 
 **Input**: User description: "Full quick-cd popup with tab-completion (FR-012, issue #31, follow-up to Feature 028). Today Alt-c only shows a status-bar placeholder plus a keymap binding — the actual feature is not implemented. Build the full inline quick-cd prompt: Alt-c opens an inline text-input dialog; Tab completes against the focused pane's VFS plus its recent-directory history; Enter navigates via the existing :cd dispatch path; Escape cancels. Requires a reusable text-input dialog widget (shared dialog widgets per Constitution §III) that also unblocks #32 and #33. Include an injected-input test per the original T1.25."
+
+## Clarifications
+
+### Session 2026-06-15
+
+- Q: On Enter with a path that does not resolve to a reachable directory, should
+  the prompt stay open or close? → A: **Keep the prompt open**, show an inline
+  error, and preserve the typed text so the user can correct it (FR-006).
+- Q: What should the prompt contain when it first opens? → A: **Prefill the
+  active pane's current directory path** with the cursor at the end, so the user
+  edits from their current location (FR-014).
+- Q: When several directories match the typed prefix, how should Tab behave? →
+  A (default, not user-selected): **Cycle through candidates**, one per Tab,
+  wrapping after the last (FR-007). Longest-common-prefix expansion is a possible
+  future enhancement (Out of Scope).
+- Q: When both filesystem children and recent-visited directories match, how are
+  candidates ordered? → A (default, not user-selected): **Recent-visited
+  directories first** (most-recent first), then remaining filesystem children in
+  the backend's normal sort order, de-duplicated (FR-008).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -30,9 +49,10 @@ application state, with no dependency on tab-completion.
 **Acceptance Scenarios**:
 
 1. **Given** the active pane is showing directory A, **When** the user presses
-   Alt-c, types the path of an existing directory B, and presses Enter, **Then**
-   the active pane navigates to B, the prompt closes, and the inactive pane is
-   unchanged.
+   Alt-c, **Then** the prompt opens prefilled with A's path and the cursor at the
+   end; **When** the user clears it, types the path of an existing directory B,
+   and presses Enter, **Then** the active pane navigates to B, the prompt closes,
+   and the inactive pane is unchanged.
 2. **Given** the quick-cd prompt is open, **When** the user types characters and
    uses Backspace, **Then** the prompt's visible text reflects the edits
    in order.
@@ -105,10 +125,11 @@ informed.
    presses Escape, **Then** the prompt closes, no navigation occurs, and neither
    pane's current directory or history is modified.
 2. **Given** the prompt contains a path that does not exist or is not a
-   directory, **When** the user presses Enter, **Then** no navigation occurs and
-   the user is shown an error message; the user is not left in a broken state.
-3. **Given** the prompt is empty, **When** the user presses Enter, **Then**
-   nothing is navigated and the prompt either stays open or closes without error
+   directory, **When** the user presses Enter, **Then** no navigation occurs, the
+   prompt stays open with the typed text preserved, and an inline error is shown;
+   the user is not left in a broken state.
+3. **Given** the prompt has been cleared to empty, **When** the user presses
+   Enter, **Then** nothing is navigated and the prompt stays open without error
    (no spurious navigation).
 
 ---
@@ -156,8 +177,9 @@ informed.
   recent-directory history identically to any other directory change.
 - **FR-006**: On accept with a path that does not resolve to a reachable
   directory (non-existent, not a directory, or permission denied), the system
-  MUST NOT navigate, MUST inform the user of the error, and MUST NOT leave the
-  application in a broken or inconsistent state.
+  MUST NOT navigate, MUST keep the prompt open with the typed text preserved,
+  MUST display an inline error indicating the path is invalid, and MUST NOT
+  leave the application in a broken or inconsistent state.
 - **FR-007**: Pressing Tab MUST complete the final segment of the typed path
   against candidate directories; when the segment uniquely matches one candidate
   the text MUST be completed to it, and when it matches several, repeated Tab
@@ -166,7 +188,9 @@ informed.
 - **FR-008**: Completion candidates MUST be drawn from (a) the directories that
   exist under the directory implied by the typed path within the active pane's
   filesystem, and (b) the active pane's recent-directory history; non-directory
-  entries MUST be excluded.
+  entries MUST be excluded. Candidates MUST be ordered with recent-visited
+  directories first (most-recent first), then remaining filesystem children in
+  the backend's normal sort order, with duplicates removed.
 - **FR-009**: When Tab is pressed and there are no matching candidates, the
   system MUST leave the typed text unchanged and give a non-disruptive
   indication that there is nothing to complete.
@@ -180,6 +204,8 @@ informed.
 - **FR-013**: The quick-cd prompt MUST operate only on the active pane; the
   inactive pane MUST be unaffected by opening, completing in, accepting, or
   cancelling the prompt.
+- **FR-014**: When the prompt opens, it MUST be prefilled with the active pane's
+  current directory path with the edit cursor positioned at the end of the text.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -240,6 +266,8 @@ informed.
   the shared input building block they will reuse is delivered here.
 - Fuzzy / substring matching of completion candidates beyond prefix matching of
   the final path segment (may be a future enhancement).
+- Longest-common-prefix expansion on the first Tab (the prompt cycles candidates
+  instead; LCP expansion may be a future enhancement).
 - Persisting quick-cd input history across application restarts.
 - Bookmark/alias expansion (e.g. named shortcuts) within the prompt.
 - Completion against remote or archive filesystem backends.
