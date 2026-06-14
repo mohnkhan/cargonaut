@@ -9,8 +9,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "theme": { "type": "string", "default": "solarized-dark" },
-        "mouse": { "type": "boolean", "default": false },
+        "theme": { "type": "string", "default": "commander-dark" },
+        "mouse": { "type": "boolean", "default": true },
         "mc_keys": { "type": "boolean", "default": false,
                      "description": "Load the MC-compat keymap layer on top of defaults." },
         "show_hidden": { "type": "boolean", "default": false },

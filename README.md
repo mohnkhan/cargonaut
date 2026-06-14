@@ -11,10 +11,10 @@
 | Cold launch | < 150 ms | **in-process ~2.5 ms** (binary cold-launch via hyperfine TBD) |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | **bench available** (`cargo bench -p cargonaut-transfer --bench local_copy_vs_cp`); release-mode result host-dependent |
 | Resident memory | ≤ 64 MiB | **bench available** (`cargo bench -p cargonaut-core --bench rss_headroom`, Linux only) |
-| Unit tests | All pass | **151/151** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 11 PaneView + 13 dialogs + 24 App) |
+| Unit tests | All pass | **186/186** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 12 PaneView + 15 dialogs + 7 theme + 9 chrome + 5 mouse + 35 App) |
 | Integration tests | All pass | **3/3** (2 cancellation + 1 concurrent-transfers); 2 `#[ignore]` PTY stubs for T1.07/T1.08 |
-| Benches | Build clean | 5 benches across transfer/core/ui-tui (all `harness=false`; env-overridable gates) |
-| Binary size | ≤ 8 MiB stripped (NFR-001) | **1.91 MiB** (CI-gated) |
+| Benches | Build clean | 5 benches across transfer/core/ui-tui (all `harness=false`; env-overridable gates); NFR-002 keymap lookup 0.2 µs |
+| Binary size | ≤ 8 MiB stripped (NFR-001) | **1.96 MiB** (CI-gated) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | green | lint + build + unit-test + docs-gate + binary-size all **green** |
 
@@ -23,6 +23,14 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 ## Feature History
 
 Most recent first.
+
+- **Feature 031 — Visual & interactive parity layer (US1–US5)** (2026-06-14). Gap-analysis-driven parity work closing the "doesn't look/feel like the reference orthodox file manager" gap; all five user stories landed (with a small set of tracked deferrals):
+  - **US1 theme**: typed color `Theme` (`cargonaut-ui-tui::theme`) with `commander-dark` (new default — signature blue-panel/bright-directory/cyan-selection look) and `monochrome` (16-color-safe). Per-row coloring by kind/mode/hidden/marked; themed borders, status line, dialogs; `--theme` now applies; unknown names fall back with a notice (FR-001..007).
+  - **US2 chrome** (`cargonaut-ui-tui::chrome`): top pull-down **menu bar** (Left/File/Command/Options/Right, openable + navigable), bottom **function-key bar** (`1Help…10Quit`), per-pane **mini-status** (perms/size/mtime/name), and an F1 help overlay. Deferred actions report "not yet available" rather than doing nothing (FR-008..012, FR-011).
+  - **US3 mouse** (default on; `--no-mouse` disables): click a row to focus the pane + move the cursor, double-click to enter a directory, wheel to scroll, click F-key buttons / menu titles to invoke them; `EnableMouseCapture` on start, restored on exit; new `App::Command::CursorTo` keeps a clicked cursor authoritative (FR-013..018).
+  - **US4 listing**: `Brief`/`Full` column layouts (name + size + mtime + permissions), **quick-view** (the passive pane previews the highlighted file, bounded 64 KiB), **sort** cycling (name → ext → size → mtime, `CycleSortKey`) + reverse, and recursive **directory size** (`RecursiveDirSize`, bounded walk). (FR-019, FR-021..023)
+  - **US5 operations**: **mkdir** (F7 → name dialog), **select/unselect by pattern** (`+`/`-` → glob dialog, dependency-free matcher), a live **transfer progress** overlay (bytes/throughput/ETA from the engine), and **F3/F4** shelling out to `$PAGER`/`$EDITOR` (TUI suspended/restored around the child). (FR-024..027, FR-030/031)
+  - Deferred (tracked in `specs/031-visual-interactive-parity/tasks.md`): the `..`-as-first-row affordance (FR-020 — ascent works via key/menu/mouse), a live in-session mouse-toggle key, and the heavier OFM subsystems (internal viewer/editor, find-file, hotlist, subshell, VFS archive/remote). +35 unit tests this feature; workspace green (186 unit + 3 integration); 1.96 MiB binary; NFR-001/002 gates green.
 
 - **Feature 029 — Constitution §V (SSD preservation) + `make check-tmpfs` guard** (2026-05-21). Elevates the "MANDATORY: target/ in tmpfs" prose rule from CLAUDE.md to constitutional Principle V (NON-NEGOTIABLE, dev-host scope; CI exempt via `$CI=true`); bumps the constitution to v1.1.0. New `scripts/check-tmpfs.sh` errors loudly when `target/` is a real on-SSD directory; wired as a prereq of `make build` / `test` / `bench` / `clippy`. Per-session waiver via `CARGONAUT_ALLOW_SSD_TARGET=1` (requires Learnings.md entry per §V). Triggered by ~2.8 GB of SSD writes caused by a stray `cargo clean` invocation that bypassed `make clean`'s symlink-aware logic.
 

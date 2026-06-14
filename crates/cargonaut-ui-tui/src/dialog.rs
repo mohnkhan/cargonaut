@@ -9,9 +9,9 @@
 //! [`Dialog::render`]. The App's event loop (T1.19) routes keys to the
 //! active dialog when `Mode::Dialog` is the active input mode.
 
+use crate::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{
     Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
 };
@@ -74,11 +74,12 @@ impl ConfirmDialog {
 
     /// Render the dialog. Clears the rect first (modal — covers the
     /// underlying pane).
-    pub fn render(&self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         Clear.render(area, buf);
         let block = Block::default()
             .title(self.title.as_str())
-            .borders(Borders::ALL);
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
         let body_with_buttons = format!(
             "{}\n\n{}  {}",
             self.body,
@@ -95,6 +96,7 @@ impl ConfirmDialog {
         );
         let para = Paragraph::new(body_with_buttons)
             .block(block)
+            .style(theme.dialog_style())
             .wrap(Wrap { trim: false });
         Widget::render(para, area, buf);
     }
@@ -103,6 +105,75 @@ impl ConfirmDialog {
     /// 1 = Cancel.
     pub fn focus(&self) -> usize {
         self.focus
+    }
+}
+
+// =====================================================================
+// TextInputDialog (mkdir name, select-by-pattern)
+// =====================================================================
+
+/// What the user did in a text-input dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputOutcome {
+    /// Enter pressed — carries the entered text.
+    Submit(String),
+    /// Esc pressed — cancelled.
+    Cancel,
+}
+
+/// A single-line modal text-input dialog (FR-024 mkdir, FR-025 pattern).
+#[derive(Debug, Clone)]
+pub struct TextInputDialog {
+    title: String,
+    prompt: String,
+    buffer: String,
+}
+
+impl TextInputDialog {
+    /// New dialog with a title and an inline prompt.
+    pub fn new(title: impl Into<String>, prompt: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            prompt: prompt.into(),
+            buffer: String::new(),
+        }
+    }
+
+    /// Current entered text (mostly for tests).
+    pub fn value(&self) -> &str {
+        &self.buffer
+    }
+
+    /// Handle a key. Returns `Some(outcome)` when the dialog dismisses.
+    pub fn handle_key(&mut self, code: KeyCode) -> Option<InputOutcome> {
+        match code {
+            KeyCode::Esc => Some(InputOutcome::Cancel),
+            KeyCode::Enter => Some(InputOutcome::Submit(self.buffer.clone())),
+            KeyCode::Backspace => {
+                self.buffer.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                self.buffer.push(c);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Render the dialog (modal, clears its rect first).
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title(self.title.as_str())
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        let body = format!("{}\n> {}_", self.prompt, self.buffer);
+        Paragraph::new(body)
+            .block(block)
+            .style(theme.dialog_style())
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
     }
 }
 
@@ -207,7 +278,7 @@ impl ResumePromptDialog {
     }
 
     /// Render the dialog. Clears its rect first (modal).
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         Clear.render(area, buf);
         let items: Vec<ListItem<'_>> = self
             .offers
@@ -232,10 +303,16 @@ impl ResumePromptDialog {
                 "Resumable transfers ({}) — [r]esume / [s]tart over / [c]ancel",
                 self.offers.len()
             ))
-            .borders(Borders::ALL);
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
         let list = List::new(items)
             .block(block)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .style(theme.dialog_style())
+            .highlight_style(
+                ratatui::style::Style::default()
+                    .fg(theme.dialog_sel_fg)
+                    .bg(theme.dialog_sel_bg),
+            )
             .highlight_symbol("▶ ");
         StatefulWidget::render(list, area, buf, &mut self.state);
     }
@@ -308,7 +385,7 @@ mod tests {
         let backend = TestBackend::new(60, 8);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| {
-            d.render(f.size(), f.buffer_mut());
+            d.render(f.size(), f.buffer_mut(), &Theme::default());
         })
         .unwrap();
         let buf = term.backend().buffer();
@@ -395,7 +472,7 @@ mod tests {
         let backend = TestBackend::new(80, 8);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| {
-            d.render(f.size(), f.buffer_mut());
+            d.render(f.size(), f.buffer_mut(), &Theme::default());
         })
         .unwrap();
         let buf = term.backend().buffer();
@@ -413,6 +490,29 @@ mod tests {
             rendered.contains("large.bin"),
             "summary missing: {rendered:?}"
         );
+    }
+
+    // ---------- TextInputDialog ----------
+
+    #[test]
+    fn text_input_collects_and_submits() {
+        let mut d = TextInputDialog::new("Make directory", "Name:");
+        for c in "newdir".chars() {
+            assert_eq!(d.handle_key(KeyCode::Char(c)), None);
+        }
+        assert_eq!(d.value(), "newdir");
+        d.handle_key(KeyCode::Backspace);
+        assert_eq!(d.value(), "newdi");
+        assert_eq!(
+            d.handle_key(KeyCode::Enter),
+            Some(InputOutcome::Submit("newdi".into()))
+        );
+    }
+
+    #[test]
+    fn text_input_esc_cancels() {
+        let mut d = TextInputDialog::new("t", "p");
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(InputOutcome::Cancel));
     }
 
     #[test]

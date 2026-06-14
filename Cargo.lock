@@ -224,6 +224,7 @@ dependencies = [
 name = "cargonaut-ui-tui"
 version = "0.1.0"
 dependencies = [
+ "cargonaut-config",
  "cargonaut-core",
  "cargonaut-vfs",
  "crossterm 0.28.1",
@@ -232,6 +233,7 @@ dependencies = [
  "ratatui",
  "serde",
  "smol_str",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",

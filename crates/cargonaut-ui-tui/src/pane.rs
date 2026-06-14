@@ -17,12 +17,23 @@
 //! - Cursor movement via [`PaneView::cursor_down`] / [`PaneView::cursor_up`]
 //!   that respects the visible (filtered + hidden-masked) subset.
 
+use crate::theme::Theme;
 use cargonaut_vfs::{DirListing, VfsKind, VfsPath};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, StatefulWidget};
 use std::collections::BTreeSet;
+
+/// How a pane lays out each row (FR-022). `Brief` shows names only;
+/// `Full` adds size, mtime, and permission columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneLayout {
+    /// Names only (compact).
+    Brief,
+    /// Name + size + mtime + permissions.
+    Full,
+}
 
 /// One pane's view state: the directory + cursor + selection + display
 /// toggles. The `App` owns one per pane.
@@ -152,6 +163,13 @@ impl PaneView {
         }
     }
 
+    /// The visible-subset index at the top of the rendered viewport
+    /// (ratatui's scroll offset). Used by mouse hit-testing (US3) to map a
+    /// clicked screen row to an absolute visible index.
+    pub fn viewport_top(&self) -> usize {
+        self.list_state.offset()
+    }
+
     /// Index into `listing.entries` of the cursor's current entry, or
     /// `None` if no visible entry is focused.
     pub fn focused_entry_index(&self) -> Option<usize> {
@@ -165,30 +183,61 @@ impl PaneView {
     /// `area.height` controls how many entries fit; entries outside the
     /// viewport are skipped, and `list_state` tracks the scroll offset
     /// implicitly via the selected index.
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme, layout: PaneLayout) {
         let items: Vec<ListItem<'_>> = self
             .visible_indices()
             .into_iter()
             .map(|i| {
                 let entry = &self.listing.entries[i];
-                let prefix = if self.selected.contains(&i) { '*' } else { ' ' };
+                let marked = self.selected.contains(&i);
+                let prefix = if marked { '*' } else { ' ' };
                 let kind_suffix = match &entry.meta.kind {
                     VfsKind::Dir => "/",
                     VfsKind::Symlink { .. } => "@",
                     _ => "",
                 };
-                let size = if matches!(entry.meta.kind, VfsKind::Dir) {
-                    String::from("      <DIR>")
-                } else {
-                    format!("{:>10}", entry.meta.size)
+                let line = match layout {
+                    PaneLayout::Brief => {
+                        format!("{prefix} {}{}", entry.name.as_str(), kind_suffix)
+                    }
+                    PaneLayout::Full => {
+                        // US4 (FR-019): name + size + mtime + perms columns.
+                        let size = if matches!(entry.meta.kind, VfsKind::Dir) {
+                            String::from("   <DIR>")
+                        } else {
+                            format!("{:>8}", entry.meta.size)
+                        };
+                        let mtime = crate::chrome::format_mtime(entry.meta.mtime);
+                        let perms = entry
+                            .meta
+                            .mode
+                            .as_ref()
+                            .map(|m| crate::chrome::perms_string(m.bits, &entry.meta.kind))
+                            .unwrap_or_else(|| "----------".to_string());
+                        format!(
+                            "{prefix}{} {} {}  {}{}",
+                            perms,
+                            size,
+                            mtime,
+                            entry.name.as_str(),
+                            kind_suffix
+                        )
+                    }
                 };
-                let line = format!("{prefix} {}{}  {}", entry.name.as_str(), kind_suffix, size);
-                ListItem::new(line)
+                // US1 (FR-003): per-entry color keyed on kind / mode /
+                // hidden / marked, on the theme's panel background.
+                let style = theme.entry_style(
+                    &entry.meta.kind,
+                    entry.meta.mode.as_ref(),
+                    entry.meta.is_hidden,
+                    marked,
+                );
+                ListItem::new(Line::from(Span::styled(line, style)))
             })
             .collect();
 
         let list = List::new(items)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_style(theme.cursor_style())
             .highlight_symbol(" ");
         StatefulWidget::render(list, area, buf, &mut self.list_state);
     }
@@ -362,7 +411,8 @@ mod tests {
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| {
             let area = f.size();
-            p.render(area, f.buffer_mut());
+            // Brief layout keeps the name first so a 40-wide buffer shows it.
+            p.render(area, f.buffer_mut(), &Theme::default(), PaneLayout::Brief);
         })
         .unwrap();
 
@@ -396,11 +446,42 @@ mod tests {
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| {
             let area = f.size();
-            p.render(area, f.buffer_mut());
+            p.render(area, f.buffer_mut(), &Theme::default(), PaneLayout::Full);
         })
         .unwrap();
         // No panic = pass; assert focused index is what we expected.
         assert_eq!(p.focused_entry_index(), Some(5000));
+    }
+
+    // T010 (US1): a directory row renders in the theme's directory color
+    // and the cursor row carries the theme's cursor background.
+    #[test]
+    fn render_applies_theme_colors() {
+        let mut p = PaneView::new(
+            vfs_path(),
+            listing(vec![
+                entry("adir", VfsKind::Dir, 0, false),
+                entry("afile", VfsKind::File, 10, false),
+            ]),
+        );
+        let theme = Theme::commander_dark();
+        let backend = TestBackend::new(40, 5);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| {
+            let area = f.size();
+            p.render(area, f.buffer_mut(), &theme, PaneLayout::Full);
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        // Row 0 is the cursor row (selected index 0) → cursor bg.
+        let cursor_cell = buf.get(1, 0);
+        assert_eq!(cursor_cell.style().bg, Some(theme.cursor_bg));
+        // Row 1 ("afile") is a regular file → panel_fg, panel_bg.
+        let file_cell = buf.get(1, 1);
+        assert_eq!(file_cell.style().fg, Some(theme.panel_fg));
+        assert_eq!(file_cell.style().bg, Some(theme.panel_bg));
+        // The directory color is distinct from the regular-file color.
+        assert_ne!(theme.dir_fg, theme.panel_fg);
     }
 
     #[test]

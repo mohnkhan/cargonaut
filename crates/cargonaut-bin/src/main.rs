@@ -31,6 +31,10 @@ struct Cli {
     #[arg(long)]
     mc_keys: bool,
 
+    /// Disable mouse capture for this session (mouse is on by default).
+    #[arg(long)]
+    no_mouse: bool,
+
     /// Enable a plugin for this session only (repeatable).
     #[arg(long)]
     enable_plugin: Vec<String>,
@@ -70,10 +74,23 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    let config = match cli.config.as_deref() {
+    let mut config = match cli.config.as_deref() {
         Some(path) => cargonaut_config::Config::load_from_path(path)?,
         None => cargonaut_config::Config::load().unwrap_or_default(),
     };
+
+    // Feature 031 (FR-005): apply CLI overrides that were previously
+    // parsed but dropped. `--theme` now takes effect; `--mc-keys` and
+    // `--no-mouse` likewise merge into the effective config.
+    if let Some(theme) = cli.theme.clone() {
+        config.ui.theme = theme;
+    }
+    if cli.mc_keys {
+        config.ui.mc_keys = true;
+    }
+    if cli.no_mouse {
+        config.ui.mouse = false;
+    }
 
     if let Some(sub) = cli.cmd {
         return run_subcommand(sub).await;

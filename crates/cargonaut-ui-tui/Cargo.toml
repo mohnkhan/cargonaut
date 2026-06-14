@@ -21,6 +21,8 @@ thiserror = { workspace = true }
 [dev-dependencies]
 smol_str = { workspace = true }
 humantime = "2"
+tempfile = { workspace = true }
+cargonaut-config = { path = "../cargonaut-config" }
 
 [[bench]]
 name = "keypress_latency"

@@ -59,7 +59,12 @@ fn main() {
         view.cursor_down();
         let start = Instant::now();
         term.draw(|f| {
-            view.render(f.size(), f.buffer_mut());
+            view.render(
+                f.size(),
+                f.buffer_mut(),
+                &cargonaut_ui_tui::Theme::default(),
+                cargonaut_ui_tui::pane::PaneLayout::Full,
+            );
         })
         .unwrap();
         total_render_ns += start.elapsed().as_nanos() as u64;

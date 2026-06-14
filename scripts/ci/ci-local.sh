@@ -68,7 +68,12 @@ run_step "fmt"       "2m"  "fmt"       "none" -- cargo fmt --all -- --check
 run_step "clippy"    "10m" "clippy"    "none" -- cargo clippy --workspace --all-targets -- -D warnings
 
 # 3. unit tests
-run_step "unit-test" "15m" "unit-test" "none" -- cargo test --workspace --all-targets
+# Mirror the authoritative GitHub `ci` check (.github/workflows/ci.yml) and
+# `make test`: `--lib --tests`, NOT `--all-targets`. `--all-targets` pulls in
+# `--benches`, which runs the release-only throughput benches (e.g.
+# local_copy_vs_cp) in debug mode where they always miss their SC gates.
+# Those gates belong to `cargo bench` (release), not the per-PR test step.
+run_step "unit-test" "15m" "unit-test" "none" -- cargo test --workspace --lib --tests
 
 # 4. release build (compile-time gate; catches release-only issues)
 run_step "build"     "15m" "build"     "none" -- cargo build --release --workspace

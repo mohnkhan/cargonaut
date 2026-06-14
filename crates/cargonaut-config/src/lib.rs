@@ -72,8 +72,12 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            theme: "solarized-dark".into(),
-            mouse: false,
+            // Feature 031 US1: a built-in palette evoking the reference
+            // manager's signature look (was the inert "solarized-dark").
+            theme: "commander-dark".into(),
+            // Feature 031 US3: mouse on by default so the headline defect
+            // is visible on first launch; `--no-mouse` / config disables it.
+            mouse: true,
             mc_keys: false,
             show_hidden: false,
             date_format: "%Y-%m-%d %H:%M".into(),
@@ -561,8 +565,8 @@ mod tests {
     fn defaults_have_documented_values() {
         let c = Config::default();
         // UI
-        assert_eq!(c.ui.theme, "solarized-dark");
-        assert!(!c.ui.mouse);
+        assert_eq!(c.ui.theme, "commander-dark");
+        assert!(c.ui.mouse);
         assert!(!c.ui.mc_keys);
         assert!(!c.ui.show_hidden);
         assert_eq!(c.ui.date_format, "%Y-%m-%d %H:%M");
@@ -637,7 +641,8 @@ parallelism = 8
         let c = Config::load_from_str(toml_text).unwrap();
         assert_eq!(c.ui.theme, "dracula");
         assert!(c.ui.mc_keys);
-        assert!(!c.ui.mouse);
+        // Feature 031: mouse now defaults ON; partial TOML leaves it unset → true.
+        assert!(c.ui.mouse);
         assert_eq!(c.transfer.parallelism, 8);
         assert_eq!(c.transfer.checkpoint_interval_mib, 8);
     }

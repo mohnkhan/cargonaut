@@ -65,6 +65,8 @@ pub struct PaneState {
     pub selected: BTreeSet<usize>,
     /// Show Unix dotfiles in the listing.
     pub show_hidden: bool,
+    /// Active sort order for this pane's listing (FR-021).
+    pub sort: Sort,
     /// Substring filter (placeholder for FR-013 globset).
     pub filter: Option<String>,
     /// FR-011 back history: cwds visited before the current one, most
@@ -114,6 +116,10 @@ pub enum Command {
     CursorDown,
     /// Move active pane's cursor up one visible entry.
     CursorUp,
+    /// FR-014 — set the active pane's cursor to an absolute position in
+    /// the visible subset (used by mouse clicks; clamps to range). Lives
+    /// in core so a clicked cursor survives the per-frame `sync_from`.
+    CursorTo(usize),
     /// Descend into the focused directory (or open the focused file).
     Descend,
     /// Ascend to the parent directory.
@@ -161,8 +167,57 @@ pub enum Command {
     Delete,
     /// Ctrl-c — cancel the most recently submitted transfer.
     CancelCurrentTransfer,
+    /// FR-021 — cycle the active pane's sort key (name → ext → size → mtime).
+    CycleSortKey,
+    /// FR-021 — flip the active pane's sort direction.
+    ToggleSortReverse,
+    /// FR-022 — cycle the global listing view (brief → full → quick-view).
+    CycleListingMode,
+    /// FR-023 — compute the recursive size of the focused directory.
+    RecursiveDirSize,
+    /// FR-024 — create a directory with the given name in the active pane.
+    Mkdir(String),
+    /// FR-025 — tag visible entries whose name matches the glob.
+    SelectByPattern(String),
+    /// FR-025 — untag visible entries whose name matches the glob.
+    UnselectByPattern(String),
     /// F10 — quit cargonaut.
     Quit,
+}
+
+/// FR-022 — the global listing/preview view mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    /// Names only (compact).
+    Brief,
+    /// Name + size + mtime + permissions.
+    Full,
+    /// The passive panel previews the active panel's highlighted file.
+    QuickView,
+}
+
+/// FR-026 — user-facing snapshot of an in-flight transfer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressView {
+    /// Bytes copied so far.
+    pub bytes_done: u64,
+    /// Total bytes to copy.
+    pub bytes_total: u64,
+    /// Estimated seconds remaining.
+    pub eta_secs: u32,
+    /// Current throughput in MiB/s.
+    pub throughput_mibs: f32,
+}
+
+impl ViewMode {
+    /// Cycle Brief → Full → QuickView → Brief.
+    pub fn next(self) -> Self {
+        match self {
+            ViewMode::Brief => ViewMode::Full,
+            ViewMode::Full => ViewMode::QuickView,
+            ViewMode::QuickView => ViewMode::Brief,
+        }
+    }
 }
 
 /// FR-015 split orientation for the two-pane layout.
@@ -252,6 +307,7 @@ pub struct App {
     transfer_order: Vec<TransferId>,
     status: String,
     split: SplitOrient,
+    view_mode: ViewMode,
 }
 
 impl App {
@@ -279,6 +335,7 @@ impl App {
                 cursor: 0,
                 selected: BTreeSet::new(),
                 show_hidden,
+                sort: Sort::NameAsc,
                 filter: None,
                 dir_history_back: Vec::new(),
                 dir_history_fwd: Vec::new(),
@@ -289,6 +346,7 @@ impl App {
                 cursor: 0,
                 selected: BTreeSet::new(),
                 show_hidden,
+                sort: Sort::NameAsc,
                 filter: None,
                 dir_history_back: Vec::new(),
                 dir_history_fwd: Vec::new(),
@@ -304,7 +362,38 @@ impl App {
             transfer_order: Vec::new(),
             status: String::new(),
             split: SplitOrient::Horizontal,
+            view_mode: ViewMode::Full,
         })
+    }
+
+    /// The current global listing/preview view mode (FR-022).
+    pub fn view_mode(&self) -> ViewMode {
+        self.view_mode
+    }
+
+    /// FR-026 — a UI-friendly projection of the most recent in-flight
+    /// transfer, or `None` if nothing is running. Lets the UI render a
+    /// progress dialog without depending on the transfer crate's types.
+    pub fn active_progress(&self) -> Option<ProgressView> {
+        for id in self.transfer_order.iter().rev() {
+            if let Some(job) = self.transfers.get(id) {
+                if let TransferState::Running {
+                    bytes_done,
+                    bytes_total,
+                    eta_secs,
+                    throughput_mibs,
+                } = transfer_state_snapshot(job)
+                {
+                    return Some(ProgressView {
+                        bytes_done,
+                        bytes_total,
+                        eta_secs,
+                        throughput_mibs,
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// Current split orientation. UI reads this to lay out the two panes.
@@ -365,6 +454,16 @@ impl App {
             CursorUp => {
                 let p = self.active_pane_mut();
                 p.cursor = p.cursor.saturating_sub(1);
+                Ok(vec![Event::PaneUpdated(self.active)])
+            }
+            CursorTo(n) => {
+                let p = self.active_pane_mut();
+                let v = p.visible_indices();
+                if v.is_empty() {
+                    p.cursor = 0;
+                } else {
+                    p.cursor = n.min(v.len() - 1);
+                }
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
             Descend => self.descend_into_focused().await,
@@ -451,8 +550,151 @@ impl App {
                     Ok(vec![Event::Status("No active transfer to cancel".into())])
                 }
             }
+            CycleSortKey => {
+                let p = self.active_pane_mut();
+                p.sort = next_sort_key(p.sort);
+                let label = sort_label(p.sort);
+                let mut evs = self.relist_active().await?;
+                evs.push(Event::Status(format!("Sort: {label}")));
+                Ok(evs)
+            }
+            ToggleSortReverse => {
+                let p = self.active_pane_mut();
+                p.sort = match p.sort {
+                    Sort::NameAsc => Sort::NameDesc,
+                    Sort::NameDesc => Sort::NameAsc,
+                    other => other,
+                };
+                let label = sort_label(p.sort);
+                let mut evs = self.relist_active().await?;
+                evs.push(Event::Status(format!("Sort: {label}")));
+                Ok(evs)
+            }
+            CycleListingMode => {
+                self.view_mode = self.view_mode.next();
+                Ok(vec![Event::Status(format!("View: {:?}", self.view_mode))])
+            }
+            RecursiveDirSize => self.recursive_dir_size().await,
+            Mkdir(name) => self.mkdir(&name).await,
+            SelectByPattern(pat) => Ok(self.select_by_pattern(&pat, true)),
+            UnselectByPattern(pat) => Ok(self.select_by_pattern(&pat, false)),
             Quit => Ok(vec![Event::QuitRequested]),
         }
+    }
+
+    /// Re-list the active pane's cwd with its current sort; clamp cursor.
+    async fn relist_active(&mut self) -> Result<Vec<Event>, AppError> {
+        let id = self.active;
+        let (cwd, sort) = {
+            let p = self.pane(id);
+            (p.cwd.clone(), p.sort)
+        };
+        let listing = self.local_fs.list(&cwd, sort).await?;
+        let p = self.pane_mut(id);
+        p.listing = listing;
+        let v = p.visible_indices();
+        p.cursor = if v.is_empty() {
+            0
+        } else {
+            p.cursor.min(v.len() - 1)
+        };
+        Ok(vec![Event::PaneUpdated(id)])
+    }
+
+    /// FR-024 — create a directory in the active pane's cwd; refresh.
+    async fn mkdir(&mut self, name: &str) -> Result<Vec<Event>, AppError> {
+        let name = name.trim();
+        if name.is_empty() || name.contains('/') {
+            return Ok(vec![Event::Status(format!(
+                "Invalid directory name {name:?}"
+            ))]);
+        }
+        let target = self.active_pane_state().cwd.join(name);
+        match self.local_fs.mkdir(&target, false).await {
+            Ok(()) => {
+                let mut evs = self.refresh_active_pane().await?;
+                evs.push(Event::Status(format!("Created {name}")));
+                Ok(evs)
+            }
+            Err(e) => Ok(vec![Event::Status(format!("mkdir failed: {e}"))]),
+        }
+    }
+
+    /// FR-025 — tag (or untag) visible entries whose name matches `pat`.
+    fn select_by_pattern(&mut self, pat: &str, add: bool) -> Vec<Event> {
+        let id = self.active;
+        let visible = self.pane(id).visible_indices();
+        let mut matched = 0usize;
+        let p = self.pane_mut(id);
+        for i in visible {
+            let name = p.listing.entries[i].name.to_string();
+            if glob_match(pat, &name) {
+                matched += 1;
+                if add {
+                    p.selected.insert(i);
+                } else {
+                    p.selected.remove(&i);
+                }
+            }
+        }
+        let verb = if add { "Tagged" } else { "Untagged" };
+        vec![
+            Event::PaneUpdated(id),
+            Event::Status(format!(
+                "{verb} {matched} entr{}",
+                if matched == 1 { "y" } else { "ies" }
+            )),
+        ]
+    }
+
+    /// FR-023 — recursive size of the focused directory (bounded walk).
+    async fn recursive_dir_size(&mut self) -> Result<Vec<Event>, AppError> {
+        let id = self.active;
+        let target = {
+            let p = self.pane(id);
+            p.focused_entry_index()
+                .and_then(|i| p.listing.entries.get(i))
+                .and_then(|e| match &e.meta.kind {
+                    cargonaut_vfs::VfsKind::Dir => {
+                        Some((e.name.to_string(), p.cwd.join(e.name.as_str())))
+                    }
+                    _ => None,
+                })
+        };
+        let Some((name, path)) = target else {
+            return Ok(vec![Event::Status("Not a directory".into())]);
+        };
+        // Bounded breadth-first walk; cap node count so a huge tree can't
+        // wedge the UI (FR-023).
+        const NODE_CAP: usize = 200_000;
+        let mut total: u64 = 0;
+        let mut nodes = 0usize;
+        let mut stack = vec![path];
+        let mut truncated = false;
+        while let Some(dir) = stack.pop() {
+            let listing = match self.local_fs.list(&dir, Sort::NameAsc).await {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            for e in listing.entries {
+                nodes += 1;
+                if nodes > NODE_CAP {
+                    truncated = true;
+                    break;
+                }
+                match e.meta.kind {
+                    cargonaut_vfs::VfsKind::Dir => stack.push(dir.join(e.name.as_str())),
+                    _ => total += e.meta.size,
+                }
+            }
+            if truncated {
+                break;
+            }
+        }
+        let suffix = if truncated { " (truncated)" } else { "" };
+        Ok(vec![Event::Status(format!(
+            "{name}: {total} bytes{suffix}"
+        ))])
     }
 
     /// Actually start a copy from the active pane's selection (or focused
@@ -707,6 +949,58 @@ fn pane_idx(id: PaneId) -> usize {
     }
 }
 
+/// Cycle the sort *key* (FR-021): name → ext → size → mtime → name.
+/// Reverse direction is a separate toggle.
+fn next_sort_key(s: Sort) -> Sort {
+    match s {
+        Sort::NameAsc | Sort::NameDesc => Sort::ExtAsc,
+        Sort::ExtAsc => Sort::SizeDesc,
+        Sort::SizeDesc => Sort::MtimeDesc,
+        Sort::MtimeDesc => Sort::NameAsc,
+    }
+}
+
+/// Human-facing label for a sort order (surfaced in the status bar).
+fn sort_label(s: Sort) -> &'static str {
+    match s {
+        Sort::NameAsc => "name",
+        Sort::NameDesc => "name (reverse)",
+        Sort::ExtAsc => "extension",
+        Sort::SizeDesc => "size",
+        Sort::MtimeDesc => "modified",
+    }
+}
+
+/// Minimal shell-glob matcher supporting `*` (any run) and `?` (one char).
+/// Dependency-free (avoids pulling regex/globset for FR-025).
+pub fn glob_match(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    // Iterative backtracking matcher.
+    let (mut pi, mut ni) = (0usize, 0usize);
+    let (mut star, mut mark): (Option<usize>, usize) = (None, 0);
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ni;
+            pi += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            mark += 1;
+            ni = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
 fn parse_path(s: &str) -> Result<VfsPath, AppError> {
     if let Some(rest) = s.strip_prefix("file://") {
         return VfsPath::parse(&format!("file://{}", rest))
@@ -781,6 +1075,35 @@ mod tests {
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
         app.dispatch(Command::CursorDown).await.unwrap();
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
+    }
+
+    #[tokio::test]
+    async fn cursor_to_sets_absolute_position_and_clamps() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::CursorTo(2)).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+        // Out-of-range clamps to last visible entry.
+        app.dispatch(Command::CursorTo(99)).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+    }
+
+    #[tokio::test]
+    async fn cursor_to_survives_resync_via_pane_state() {
+        // A clicked cursor must be authoritative: reading pane state back
+        // reflects it (the UI's PaneView::sync_from copies state.cursor).
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c", "d"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::CursorTo(3)).await.unwrap();
+        assert_eq!(app.active_pane_state().cursor, 3);
     }
 
     #[tokio::test]
@@ -867,6 +1190,142 @@ mod tests {
             .iter()
             .any(|e| matches!(e, Event::TransferProgressed(_))));
         assert_eq!(app.transfer_ids().len(), 1);
+    }
+
+    #[test]
+    fn glob_match_basic() {
+        assert!(glob_match("*.rs", "lib.rs"));
+        assert!(glob_match("*.rs", ".rs"));
+        assert!(!glob_match("*.rs", "lib.toml"));
+        assert!(glob_match("a?c", "abc"));
+        assert!(!glob_match("a?c", "ac"));
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("read*e", "readme"));
+        assert!(glob_match("read*e", "readsome"));
+        assert!(glob_match("exact", "exact"));
+        assert!(!glob_match("exact", "exactly"));
+    }
+
+    #[tokio::test]
+    async fn cycle_sort_key_reorders_listing() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Names ascending: a, b, z; sizes: a=3, b=1, z=2.
+        fs::write(td_l.path().join("a"), b"xxx").await.unwrap();
+        fs::write(td_l.path().join("b"), b"x").await.unwrap();
+        fs::write(td_l.path().join("z"), b"xx").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::NameAsc);
+        // name -> ext
+        app.dispatch(Command::CycleSortKey).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::ExtAsc);
+        // ext -> size (desc): largest first = a(3), z(2), b(1)
+        app.dispatch(Command::CycleSortKey).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::SizeDesc);
+        assert_eq!(app.pane(PaneId::Left).listing.entries[0].name.as_str(), "a");
+    }
+
+    #[tokio::test]
+    async fn toggle_sort_reverse_flips_name_order() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::ToggleSortReverse).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::NameDesc);
+        assert_eq!(app.pane(PaneId::Left).listing.entries[0].name.as_str(), "c");
+    }
+
+    #[tokio::test]
+    async fn cycle_listing_mode_rotates_view() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert_eq!(app.view_mode(), ViewMode::Full);
+        app.dispatch(Command::CycleListingMode).await.unwrap();
+        assert_eq!(app.view_mode(), ViewMode::QuickView);
+        app.dispatch(Command::CycleListingMode).await.unwrap();
+        assert_eq!(app.view_mode(), ViewMode::Brief);
+    }
+
+    #[tokio::test]
+    async fn mkdir_creates_directory_and_refreshes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::Mkdir("newdir".into())).await.unwrap();
+        assert!(td_l.path().join("newdir").is_dir());
+        assert!(app
+            .pane(PaneId::Left)
+            .listing
+            .entries
+            .iter()
+            .any(|e| e.name.as_str() == "newdir"));
+    }
+
+    #[tokio::test]
+    async fn mkdir_rejects_invalid_name_without_crash() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let evs = app.dispatch(Command::Mkdir("a/b".into())).await.unwrap();
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Invalid"))));
+        assert!(!td_l.path().join("a").exists());
+    }
+
+    #[tokio::test]
+    async fn select_by_pattern_tags_matches_and_unselect_removes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["one.rs", "two.rs", "note.txt"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::SelectByPattern("*.rs".into()))
+            .await
+            .unwrap();
+        assert_eq!(app.pane(PaneId::Left).selected.len(), 2);
+        app.dispatch(Command::UnselectByPattern("*.rs".into()))
+            .await
+            .unwrap();
+        assert_eq!(app.pane(PaneId::Left).selected.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn select_by_pattern_zero_match_reports_zero() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("x.txt"), b"").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let evs = app
+            .dispatch(Command::SelectByPattern("*.rs".into()))
+            .await
+            .unwrap();
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Tagged 0"))));
+    }
+
+    #[tokio::test]
+    async fn recursive_dir_size_sums_tree() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("d")).await.unwrap();
+        fs::write(td_l.path().join("d/a"), b"hello").await.unwrap(); // 5
+        fs::create_dir(td_l.path().join("d/sub")).await.unwrap();
+        fs::write(td_l.path().join("d/sub/b"), b"hi").await.unwrap(); // 2
+        let mut app = make_app(&td_l, &td_r).await;
+        // Cursor on "d" (only dir; NameAsc → first entry).
+        let evs = app.dispatch(Command::RecursiveDirSize).await.unwrap();
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::Status(s) if s.contains("7 bytes"))),
+            "expected 7 bytes total, got {evs:?}"
+        );
     }
 
     #[tokio::test]

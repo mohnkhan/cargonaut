@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-14 (Phase 1.1 polish follow-ups logged — T1.07/08/25/29 + FR-013 filter prompt, deferred at Phase 1 closure / Feature 028).
+**Last updated**: 2026-06-14 (Feature 031 visual & interactive parity layer shipped US1–US5, deferrals #37–#50 added; Phase 1.1 polish follow-ups #29–#33 from Feature 028 also tracked).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -22,6 +22,7 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
+| [#37](https://github.com/mohnkhan/cargonaut/issues/37) | Panel: `..` parent entry as first row (FR-020) | S | Feature 031 — ascent works via key/menu/mouse; needs an index model separating the synthetic row from real entries |
 | [#31](https://github.com/mohnkhan/cargonaut/issues/31) | T1.25 — full quick-cd popup w/ tab-completion (FR-012) | 0.25–0.5 ew | Feature 028 — ships as status-bar placeholder; needs shared text-input dialog (also unblocks #32/#33). |
 | [#32](https://github.com/mohnkhan/cargonaut/issues/32) | T1.29 — tasks/jobs panel popup (FR-016, NFR-004) | 1.0 ew | Feature 028 — ships as status-bar placeholder; registry data already in `App`, needs list dialog + pause/resume wiring. |
 
@@ -33,6 +34,10 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
+| [#38](https://github.com/mohnkhan/cargonaut/issues/38) | Mouse: in-session toggle key (FR-013) | XS | Feature 031 — `--no-mouse`/config disable already ship |
+| [#42](https://github.com/mohnkhan/cargonaut/issues/42) | Directory hotlist / bookmarks | M | Feature 031 §Out of Scope |
+| [#46](https://github.com/mohnkhan/cargonaut/issues/46) | File attributes: chmod/chown + sym/hardlink | M | Feature 031 §Out of Scope — needs new VFS ops |
+| [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
 | [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
 | [#33](https://github.com/mohnkhan/cargonaut/issues/33) | FR-013 — panel filter prompt dialog (currently clear-only) | 0.25 ew | Feature 022 — `globset` plumbing present; prompt deferred pending shared input dialog (#31). |
 
@@ -44,7 +49,15 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| _(empty)_ | | | |
+| [#39](https://github.com/mohnkhan/cargonaut/issues/39) | Internal file viewer F3 (text + hex + search) | L | Feature 031 — F3 external-pager shell-out ships |
+| [#40](https://github.com/mohnkhan/cargonaut/issues/40) | Internal full-screen editor F4 | XL | Feature 031 — F4 `$EDITOR` shell-out ships |
+| [#41](https://github.com/mohnkhan/cargonaut/issues/41) | Find-file (name + content) + external panelize | L | Feature 031 §Out of Scope |
+| [#43](https://github.com/mohnkhan/cargonaut/issues/43) | Compare directories + diff two tagged files | M | Feature 031 §Out of Scope |
+| [#44](https://github.com/mohnkhan/cargonaut/issues/44) | Persistent subshell integration (Ctrl-o) | L | Feature 031 §Out of Scope |
+| [#45](https://github.com/mohnkhan/cargonaut/issues/45) | Tabs: multiple panels per side | L | Feature 031 §Out of Scope |
+| [#47](https://github.com/mohnkhan/cargonaut/issues/47) | Bulk rename via editor + undo of file ops | M | Feature 031 §Out of Scope |
+| [#48](https://github.com/mohnkhan/cargonaut/issues/48) | VFS backends: archives + remote (SFTP/FTP/sh) | XL | Feature 031 §Out of Scope — already Phase 2+ roadmapped |
+| [#50](https://github.com/mohnkhan/cargonaut/issues/50) | User menu (F2) + hypertext help content | M | Feature 031 — minimal F1 overlay + F2 placeholder ship |
 
 ---
 
