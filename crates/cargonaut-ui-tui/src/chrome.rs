@@ -19,7 +19,9 @@ use cargonaut_vfs::VfsKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Widget};
+use ratatui::widgets::{
+    Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Widget,
+};
 use std::time::SystemTime;
 
 // =====================================================================
@@ -53,16 +55,56 @@ impl FunctionKeyBar {
     /// The canonical reference-manager default bar.
     pub fn new() -> Self {
         let keys = vec![
-            FKey { n: 1, label: "Help", command: Command::ShowHelp },
-            FKey { n: 2, label: "Menu", command: Command::ShowUserMenu },
-            FKey { n: 3, label: "View", command: Command::Preview },
-            FKey { n: 4, label: "Edit", command: Command::Edit },
-            FKey { n: 5, label: "Copy", command: Command::CopySelection },
-            FKey { n: 6, label: "RenMov", command: Command::MoveOrRenameSelection },
-            FKey { n: 7, label: "Mkdir", command: Command::Mkdir },
-            FKey { n: 8, label: "Delete", command: Command::DeleteSelection },
-            FKey { n: 9, label: "PullDn", command: Command::OpenMenuBar },
-            FKey { n: 10, label: "Quit", command: Command::Quit },
+            FKey {
+                n: 1,
+                label: "Help",
+                command: Command::ShowHelp,
+            },
+            FKey {
+                n: 2,
+                label: "Menu",
+                command: Command::ShowUserMenu,
+            },
+            FKey {
+                n: 3,
+                label: "View",
+                command: Command::Preview,
+            },
+            FKey {
+                n: 4,
+                label: "Edit",
+                command: Command::Edit,
+            },
+            FKey {
+                n: 5,
+                label: "Copy",
+                command: Command::CopySelection,
+            },
+            FKey {
+                n: 6,
+                label: "RenMov",
+                command: Command::MoveOrRenameSelection,
+            },
+            FKey {
+                n: 7,
+                label: "Mkdir",
+                command: Command::Mkdir,
+            },
+            FKey {
+                n: 8,
+                label: "Delete",
+                command: Command::DeleteSelection,
+            },
+            FKey {
+                n: 9,
+                label: "PullDn",
+                command: Command::OpenMenuBar,
+            },
+            FKey {
+                n: 10,
+                label: "Quit",
+                command: Command::Quit,
+            },
         ];
         Self { keys }
     }
@@ -74,8 +116,9 @@ impl FunctionKeyBar {
 
     /// Per-button rects for a given bar area (left→right, equal width).
     fn button_rects(&self, area: Rect) -> Vec<Rect> {
-        let constraints: Vec<Constraint> =
-            (0..self.keys.len()).map(|_| Constraint::Ratio(1, self.keys.len() as u32)).collect();
+        let constraints: Vec<Constraint> = (0..self.keys.len())
+            .map(|_| Constraint::Ratio(1, self.keys.len() as u32))
+            .collect();
         Layout::default()
             .direction(Direction::Horizontal)
             .constraints(constraints)
@@ -106,11 +149,15 @@ impl FunctionKeyBar {
             let k = &self.keys[i];
             let num = Span::styled(
                 format!("{}", k.n),
-                ratatui::style::Style::default().fg(theme.fkey_num_fg).bg(theme.fkey_num_bg),
+                ratatui::style::Style::default()
+                    .fg(theme.fkey_num_fg)
+                    .bg(theme.fkey_num_bg),
             );
             let label = Span::styled(
                 format!("{} ", k.label),
-                ratatui::style::Style::default().fg(theme.fkey_label_fg).bg(theme.fkey_label_bg),
+                ratatui::style::Style::default()
+                    .fg(theme.fkey_label_fg)
+                    .bg(theme.fkey_label_bg),
             );
             let para = Paragraph::new(Line::from(vec![num, label]))
                 .style(ratatui::style::Style::default().bg(theme.fkey_label_bg));
@@ -189,7 +236,11 @@ impl MenuBar {
                 ],
             },
         ];
-        Self { menus, open: None, item_sel: 0 }
+        Self {
+            menus,
+            open: None,
+            item_sel: 0,
+        }
     }
 
     /// Menu titles, in order.
@@ -266,7 +317,12 @@ impl MenuBar {
         for m in &self.menus {
             let w = (m.title.len() as u16) + 2;
             let w = w.min(area.x + area.width - x);
-            rects.push(Rect { x, y: area.y, width: w, height: 1 });
+            rects.push(Rect {
+                x,
+                y: area.y,
+                width: w,
+                height: 1,
+            });
             x = x.saturating_add(w);
             if x >= area.x + area.width {
                 break;
@@ -291,13 +347,17 @@ impl MenuBar {
     /// Render the title bar (and the open dropdown, if any).
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Bar background.
-        let bar_style = ratatui::style::Style::default().fg(theme.menu_fg).bg(theme.menu_bg);
+        let bar_style = ratatui::style::Style::default()
+            .fg(theme.menu_fg)
+            .bg(theme.menu_bg);
         Paragraph::new("").style(bar_style).render(area, buf);
         let rects = self.title_rects(area);
         for (i, r) in rects.iter().enumerate() {
             let selected = self.open == Some(i);
             let style = if selected {
-                ratatui::style::Style::default().fg(theme.menu_sel_fg).bg(theme.menu_sel_bg)
+                ratatui::style::Style::default()
+                    .fg(theme.menu_sel_fg)
+                    .bg(theme.menu_sel_bg)
             } else {
                 bar_style
             };
@@ -310,13 +370,7 @@ impl MenuBar {
         if let Some(i) = self.open {
             let menu = &self.menus[i];
             let title_x = rects.get(i).map(|r| r.x).unwrap_or(area.x);
-            let width = menu
-                .items
-                .iter()
-                .map(|(l, _)| l.len())
-                .max()
-                .unwrap_or(4) as u16
-                + 4;
+            let width = menu.items.iter().map(|(l, _)| l.len()).max().unwrap_or(4) as u16 + 4;
             let height = menu.items.len() as u16 + 2;
             let drop = Rect {
                 x: title_x,
@@ -325,16 +379,17 @@ impl MenuBar {
                 height,
             };
             Clear.render(drop, buf);
-            let items: Vec<ListItem<'_>> = menu
-                .items
-                .iter()
-                .map(|(l, _)| ListItem::new(*l))
-                .collect();
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .style(ratatui::style::Style::default().fg(theme.menu_fg).bg(theme.menu_bg));
+            let items: Vec<ListItem<'_>> =
+                menu.items.iter().map(|(l, _)| ListItem::new(*l)).collect();
+            let block = Block::default().borders(Borders::ALL).style(
+                ratatui::style::Style::default()
+                    .fg(theme.menu_fg)
+                    .bg(theme.menu_bg),
+            );
             let list = List::new(items).block(block).highlight_style(
-                ratatui::style::Style::default().fg(theme.menu_sel_fg).bg(theme.menu_sel_bg),
+                ratatui::style::Style::default()
+                    .fg(theme.menu_sel_fg)
+                    .bg(theme.menu_sel_bg),
             );
             let mut state = ListState::default();
             state.select(Some(self.item_sel));
@@ -383,9 +438,15 @@ pub fn perms_string(bits: u32, kind: &VfsKind) -> String {
     let mut s = String::with_capacity(10);
     s.push(type_ch);
     const FLAGS: [(u32, char); 9] = [
-        (0o400, 'r'), (0o200, 'w'), (0o100, 'x'),
-        (0o040, 'r'), (0o020, 'w'), (0o010, 'x'),
-        (0o004, 'r'), (0o002, 'w'), (0o001, 'x'),
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
     ];
     for (mask, ch) in FLAGS {
         s.push(if bits & mask != 0 { ch } else { '-' });
@@ -439,7 +500,8 @@ mod tests {
     fn render_to_string(w: u16, h: u16, f: impl FnOnce(Rect, &mut Buffer)) -> String {
         let backend = TestBackend::new(w, h);
         let mut term = Terminal::new(backend).unwrap();
-        term.draw(|frame| f(frame.size(), frame.buffer_mut())).unwrap();
+        term.draw(|frame| f(frame.size(), frame.buffer_mut()))
+            .unwrap();
         term.backend()
             .buffer()
             .content()
@@ -454,7 +516,10 @@ mod tests {
         let bar = FunctionKeyBar::new();
         assert_eq!(
             bar.labels(),
-            vec!["Help", "Menu", "View", "Edit", "Copy", "RenMov", "Mkdir", "Delete", "PullDn", "Quit"]
+            vec![
+                "Help", "Menu", "View", "Edit", "Copy", "RenMov", "Mkdir", "Delete", "PullDn",
+                "Quit"
+            ]
         );
         let theme = Theme::default();
         let rendered = render_to_string(120, 1, |area, buf| bar.render(area, buf, &theme));
@@ -466,7 +531,12 @@ mod tests {
     #[test]
     fn fkey_bar_hit_test_returns_button_command() {
         let bar = FunctionKeyBar::new();
-        let area = Rect { x: 0, y: 0, width: 100, height: 1 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 1,
+        };
         // Button 7 (Mkdir) occupies the 7th of 10 equal slots (x≈60..70).
         let cmd = bar.command_at(area, 65, 0);
         assert!(matches!(cmd, Some(Command::Mkdir)), "got {cmd:?}");
@@ -486,7 +556,10 @@ mod tests {
     #[test]
     fn menu_bar_open_navigate_select() {
         let mut mb = MenuBar::new();
-        assert_eq!(mb.titles(), vec!["Left", "File", "Command", "Options", "Right"]);
+        assert_eq!(
+            mb.titles(),
+            vec!["Left", "File", "Command", "Options", "Right"]
+        );
         assert!(!mb.is_open());
         mb.open(1); // File
         assert!(mb.is_open());
@@ -501,7 +574,12 @@ mod tests {
     #[test]
     fn menu_bar_title_hit_test() {
         let mb = MenuBar::new();
-        let area = Rect { x: 0, y: 0, width: 80, height: 1 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 1,
+        };
         // "Left" is the first title at x=0.
         assert_eq!(mb.title_at(area, 1, 0), Some(0));
         // y!=bar row misses.
@@ -514,7 +592,16 @@ mod tests {
         mb.open(1);
         let theme = Theme::default();
         let rendered = render_to_string(80, 10, |_area, buf| {
-            mb.render(Rect { x: 0, y: 0, width: 80, height: 1 }, buf, &theme);
+            mb.render(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 1,
+                },
+                buf,
+                &theme,
+            );
         });
         assert!(rendered.contains("File"), "title missing: {rendered:?}");
     }
@@ -527,14 +614,21 @@ mod tests {
             meta: VfsMetadata {
                 size: 4096,
                 mtime: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
-                mode: Some(FileMode { bits: 0o644, uid: None, gid: None }),
+                mode: Some(FileMode {
+                    bits: 0o644,
+                    uid: None,
+                    gid: None,
+                }),
                 kind: VfsKind::File,
                 is_hidden: false,
             },
         };
         let state = PaneState {
             cwd: VfsPath::parse("file:///tmp").unwrap(),
-            listing: DirListing { entries: vec![entry], sort: Sort::NameAsc },
+            listing: DirListing {
+                entries: vec![entry],
+                sort: Sort::NameAsc,
+            },
             cursor: 0,
             selected: BTreeSet::new(),
             show_hidden: false,

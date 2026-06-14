@@ -604,7 +604,12 @@ async fn handle_mouse(
             let hit = if rect_contains(ui.layout.left, x, y) {
                 Some((PaneId::Left, AppCommand::FocusLeft, left, ui.layout.left))
             } else if rect_contains(ui.layout.right, x, y) {
-                Some((PaneId::Right, AppCommand::FocusRight, right, ui.layout.right))
+                Some((
+                    PaneId::Right,
+                    AppCommand::FocusRight,
+                    right,
+                    ui.layout.right,
+                ))
             } else {
                 None
             };
@@ -826,12 +831,28 @@ fn draw_frame(
     let left_inner = if qv && active == PaneId::Right {
         draw_preview(f, pane_chunks[0], theme, qv_preview)
     } else {
-        draw_pane(f, left, pane_chunks[0], active == PaneId::Left, theme, ms_left, pane_layout)
+        draw_pane(
+            f,
+            left,
+            pane_chunks[0],
+            active == PaneId::Left,
+            theme,
+            ms_left,
+            pane_layout,
+        )
     };
     let right_inner = if qv && active == PaneId::Left {
         draw_preview(f, pane_chunks[1], theme, qv_preview)
     } else {
-        draw_pane(f, right, pane_chunks[1], active == PaneId::Right, theme, ms_right, pane_layout)
+        draw_pane(
+            f,
+            right,
+            pane_chunks[1],
+            active == PaneId::Right,
+            theme,
+            ms_right,
+            pane_layout,
+        )
     };
 
     // US1 (FR-002): status bar themed instead of bare reverse-video.
@@ -1007,10 +1028,20 @@ mod tests {
             menu: MenuBar::new(),
             fkeybar: FunctionKeyBar::new(),
             layout: FrameLayout {
-                menu: Rect { x: 0, y: 0, width: 80, height: 1 },
+                menu: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 1,
+                },
                 left: left_rect,
                 right: right_rect,
-                fkeys: Rect { x: 0, y: 23, width: 80, height: 1 },
+                fkeys: Rect {
+                    x: 0,
+                    y: 23,
+                    width: 80,
+                    height: 1,
+                },
             },
             last_click: None,
             help_open: false,
@@ -1039,8 +1070,14 @@ mod tests {
     }
 
     fn synced_views(app: &App) -> (PaneView, PaneView) {
-        let mut l = PaneView::new(app.pane(PaneId::Left).cwd.clone(), app.pane(PaneId::Left).listing.clone());
-        let mut r = PaneView::new(app.pane(PaneId::Right).cwd.clone(), app.pane(PaneId::Right).listing.clone());
+        let mut l = PaneView::new(
+            app.pane(PaneId::Left).cwd.clone(),
+            app.pane(PaneId::Left).listing.clone(),
+        );
+        let mut r = PaneView::new(
+            app.pane(PaneId::Right).cwd.clone(),
+            app.pane(PaneId::Right).listing.clone(),
+        );
         l.sync_from(app.pane(PaneId::Left));
         r.sync_from(app.pane(PaneId::Right));
         (l, r)
@@ -1048,14 +1085,30 @@ mod tests {
 
     /// Drive `handle_mouse` with throwaway mode/dialog/quit; return the
     /// resulting status string.
-    async fn mouse(m: MouseEvent, app: &mut App, ui: &mut UiState, l: &PaneView, r: &PaneView) -> String {
+    async fn mouse(
+        m: MouseEvent,
+        app: &mut App,
+        ui: &mut UiState,
+        l: &PaneView,
+        r: &PaneView,
+    ) -> String {
         let mut status = String::new();
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
         let mut quit = false;
-        handle_mouse(m, app, ui, l, r, &mut status, &mut mode, &mut dlg, &mut quit)
-            .await
-            .unwrap();
+        handle_mouse(
+            m,
+            app,
+            ui,
+            l,
+            r,
+            &mut status,
+            &mut mode,
+            &mut dlg,
+            &mut quit,
+        )
+        .await
+        .unwrap();
         status
     }
 
@@ -1069,8 +1122,22 @@ mod tests {
             std::fs::write(td_r.path().join(n), b"").unwrap();
         }
         let mut app = app_with(&td_l, &td_r).await;
-        let right_rect = Rect { x: 50, y: 1, width: 40, height: 10 };
-        let mut ui = fresh_ui(Rect { x: 0, y: 1, width: 40, height: 10 }, right_rect, true);
+        let right_rect = Rect {
+            x: 50,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            right_rect,
+            true,
+        );
         let (l, r) = synced_views(&app);
         // Click row 2 (y = rect.y + 2) in the right pane.
         let _ = mouse(left_click(55, 3), &mut app, &mut ui, &l, &r).await;
@@ -1085,8 +1152,22 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         std::fs::create_dir(td_l.path().join("sub")).unwrap();
         let mut app = app_with(&td_l, &td_r).await;
-        let left_rect = Rect { x: 0, y: 1, width: 40, height: 10 };
-        let mut ui = fresh_ui(left_rect, Rect { x: 50, y: 1, width: 40, height: 10 }, true);
+        let left_rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(
+            left_rect,
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
         let (l, r) = synced_views(&app);
         // First click on row 0 (the only entry, "sub").
         let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
@@ -1110,14 +1191,32 @@ mod tests {
         }
         let mut app = app_with(&td_l, &td_r).await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 10 },
-            Rect { x: 50, y: 1, width: 40, height: 10 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
             false, // mouse disabled
         );
         let (l, r) = synced_views(&app);
         let _ = mouse(left_click(55, 3), &mut app, &mut ui, &l, &r).await;
-        assert_eq!(app.active_pane(), PaneId::Left, "disabled mouse must not focus");
-        assert_eq!(app.pane(PaneId::Right).cursor, 0, "disabled mouse must not move cursor");
+        assert_eq!(
+            app.active_pane(),
+            PaneId::Left,
+            "disabled mouse must not focus"
+        );
+        assert_eq!(
+            app.pane(PaneId::Right).cursor,
+            0,
+            "disabled mouse must not move cursor"
+        );
     }
 
     // T-MOUSE-5 (FR-017): clicking a function-key button invokes its
@@ -1128,11 +1227,26 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = app_with(&td_l, &td_r).await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 10 },
-            Rect { x: 50, y: 1, width: 40, height: 10 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
             true,
         );
-        ui.layout.fkeys = Rect { x: 0, y: 23, width: 100, height: 1 };
+        ui.layout.fkeys = Rect {
+            x: 0,
+            y: 23,
+            width: 100,
+            height: 1,
+        };
         let (l, r) = synced_views(&app);
         // Button 2 (Menu = user menu) ≈ 2nd of 10 slots (x 10..20) → deferred.
         let status = mouse(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
@@ -1145,7 +1259,12 @@ mod tests {
     // T-MOUSE-6 (FR-018): a click outside any region is a no-op.
     #[test]
     fn rect_contains_bounds() {
-        let r = Rect { x: 10, y: 5, width: 4, height: 3 };
+        let r = Rect {
+            x: 10,
+            y: 5,
+            width: 4,
+            height: 3,
+        };
         assert!(rect_contains(r, 10, 5));
         assert!(rect_contains(r, 13, 7));
         assert!(!rect_contains(r, 14, 5)); // x past right edge

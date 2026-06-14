@@ -572,10 +572,7 @@ impl App {
             }
             CycleListingMode => {
                 self.view_mode = self.view_mode.next();
-                Ok(vec![Event::Status(format!(
-                    "View: {:?}",
-                    self.view_mode
-                ))])
+                Ok(vec![Event::Status(format!("View: {:?}", self.view_mode))])
             }
             RecursiveDirSize => self.recursive_dir_size().await,
             Mkdir(name) => self.mkdir(&name).await,
@@ -596,7 +593,11 @@ impl App {
         let p = self.pane_mut(id);
         p.listing = listing;
         let v = p.visible_indices();
-        p.cursor = if v.is_empty() { 0 } else { p.cursor.min(v.len() - 1) };
+        p.cursor = if v.is_empty() {
+            0
+        } else {
+            p.cursor.min(v.len() - 1)
+        };
         Ok(vec![Event::PaneUpdated(id)])
     }
 
@@ -604,7 +605,9 @@ impl App {
     async fn mkdir(&mut self, name: &str) -> Result<Vec<Event>, AppError> {
         let name = name.trim();
         if name.is_empty() || name.contains('/') {
-            return Ok(vec![Event::Status(format!("Invalid directory name {name:?}"))]);
+            return Ok(vec![Event::Status(format!(
+                "Invalid directory name {name:?}"
+            ))]);
         }
         let target = self.active_pane_state().cwd.join(name);
         match self.local_fs.mkdir(&target, false).await {
@@ -637,7 +640,10 @@ impl App {
         let verb = if add { "Tagged" } else { "Untagged" };
         vec![
             Event::PaneUpdated(id),
-            Event::Status(format!("{verb} {matched} entr{}", if matched == 1 { "y" } else { "ies" })),
+            Event::Status(format!(
+                "{verb} {matched} entr{}",
+                if matched == 1 { "y" } else { "ies" }
+            )),
         ]
     }
 
@@ -649,7 +655,9 @@ impl App {
             p.focused_entry_index()
                 .and_then(|i| p.listing.entries.get(i))
                 .and_then(|e| match &e.meta.kind {
-                    cargonaut_vfs::VfsKind::Dir => Some((e.name.to_string(), p.cwd.join(e.name.as_str()))),
+                    cargonaut_vfs::VfsKind::Dir => {
+                        Some((e.name.to_string(), p.cwd.join(e.name.as_str())))
+                    }
                     _ => None,
                 })
         };
@@ -1263,7 +1271,9 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let evs = app.dispatch(Command::Mkdir("a/b".into())).await.unwrap();
-        assert!(evs.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Invalid"))));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Invalid"))));
         assert!(!td_l.path().join("a").exists());
     }
 
@@ -1275,9 +1285,13 @@ mod tests {
             fs::write(td_l.path().join(n), b"").await.unwrap();
         }
         let mut app = make_app(&td_l, &td_r).await;
-        app.dispatch(Command::SelectByPattern("*.rs".into())).await.unwrap();
+        app.dispatch(Command::SelectByPattern("*.rs".into()))
+            .await
+            .unwrap();
         assert_eq!(app.pane(PaneId::Left).selected.len(), 2);
-        app.dispatch(Command::UnselectByPattern("*.rs".into())).await.unwrap();
+        app.dispatch(Command::UnselectByPattern("*.rs".into()))
+            .await
+            .unwrap();
         assert_eq!(app.pane(PaneId::Left).selected.len(), 0);
     }
 
@@ -1287,8 +1301,13 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         fs::write(td_l.path().join("x.txt"), b"").await.unwrap();
         let mut app = make_app(&td_l, &td_r).await;
-        let evs = app.dispatch(Command::SelectByPattern("*.rs".into())).await.unwrap();
-        assert!(evs.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Tagged 0"))));
+        let evs = app
+            .dispatch(Command::SelectByPattern("*.rs".into()))
+            .await
+            .unwrap();
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Tagged 0"))));
     }
 
     #[tokio::test]
@@ -1303,7 +1322,8 @@ mod tests {
         // Cursor on "d" (only dir; NameAsc → first entry).
         let evs = app.dispatch(Command::RecursiveDirSize).await.unwrap();
         assert!(
-            evs.iter().any(|e| matches!(e, Event::Status(s) if s.contains("7 bytes"))),
+            evs.iter()
+                .any(|e| matches!(e, Event::Status(s) if s.contains("7 bytes"))),
             "expected 7 bytes total, got {evs:?}"
         );
     }
