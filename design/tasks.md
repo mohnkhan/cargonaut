@@ -53,7 +53,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [X] T1.20 [US1] Implement dialogs: copy/move/delete confirmation (`cargonaut-ui-tui/src/dialog.rs`) + resume prompt on launch.  **(0.75)**
 - [X] T1.21 [US1] Implement `cargonaut-bin/src/main.rs`: parse CLI (`clap`), load config, build App, install SIGINT/SIGTERM handlers, run event loop. `--version`, `--help`, subcommands list-plugins/audit/resume.  **(0.5)**
 
-#### MC-parity panel ergonomics (Phase 1 additions from MC gap analysis)
+#### orthodox-FM parity panel ergonomics (Phase 1 additions from orthodox-FM gap analysis)
 
 > **TDD note (Constitution Principle II)**: each task below bundles test + impl into one line for brevity, BUT the per-task git history MUST show test-first ordering — commit the failing test SHA before merging the implementation. Same rule as T1.07-T1.12 in the original Phase 1 set.
 
@@ -107,7 +107,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 ---
 
-## Phase 3: Plugins + Preview/Editor + MC-killer features (22.0 owner-weeks)
+## Phase 3: Plugins + Preview/Editor + power features (22.0 owner-weeks)
 
 ### US3 — Built-in previewer + editor handoff (P2 → Phase 3, 5 owner-weeks)
 
@@ -136,7 +136,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 - [ ] T3.16 [US5] `cargonaut-search`: ripgrep subprocess wrapper + result parser; `globset` for instant filename glob.  **(1.0)**
 - [ ] T3.17 [US5] Search UI: Ctrl-f opens filter mode; `:find -name '*.rs' -size +10M` opens advanced-find dialog. Results = virtual directory.  **(1.0)**
 
-### MC-killer features + modern TUI niceties (Phase 3 additions from MC gap analysis, 5.25 owner-weeks)
+### Power features + modern TUI niceties (Phase 3 additions from orthodox-FM gap analysis, 5.25 owner-weeks)
 
 > **TDD note (Constitution Principle II)**: each task below bundles test + impl into one line for brevity, BUT the per-task git history MUST show test-first ordering — commit the failing test SHA before merging the implementation.
 
@@ -159,7 +159,7 @@ description: "Phase 1-3 task backlog for Cargonaut. Phases 4-6 sketched at end."
 
 ## Phases 4-6 (high-level)
 
-Each phase will run its own clarify+plan+tasks pass when picked up. Sketch entries below name the FRs each phase MUST cover but DO NOT enumerate per-FR tasks — that's the deliverable of the per-phase tasks pass. New FRs added by the MC gap analysis (FR-305 in Phase 4; FR-404, FR-405 in Phase 5) follow the same policy: their full task breakdown happens when the team picks up that phase.
+Each phase will run its own clarify+plan+tasks pass when picked up. Sketch entries below name the FRs each phase MUST cover but DO NOT enumerate per-FR tasks — that's the deliverable of the per-phase tasks pass. New FRs added by the orthodox-FM gap analysis (FR-305 in Phase 4; FR-404, FR-405 in Phase 5) follow the same policy: their full task breakdown happens when the team picks up that phase.
 
 Sketch:
 
@@ -176,16 +176,16 @@ Sketch:
 - T5.x: 6 bundled themes; `Ctrl-r` reload
 - T5.x: `fluent-rs` integration + 5 launch locales
 - T5.x: `--a11y-output text` mode (plain-text event stream)
-- T5.x: Menu bar (FR-404) — F9 top-line menu with File/Edit/View/Navigate/Tools/Help dropdowns; mouse + arrow-key navigable. Discoverability for MC migrants. ~1 ow.
+- T5.x: Menu bar (FR-404) — F9 top-line menu with File/Edit/View/Navigate/Tools/Help dropdowns; mouse + arrow-key navigable. Discoverability for orthodox-FM migrants. ~1 ow.
 - T5.x: Listing modes (FR-405) — Alt-t cycles Brief/Standard/Long/User-defined column layouts; user-defined block in `[ui.listing.user]` config. ~0.5 ow.
 - New SCs: usability test pass
 
-### Phase 6: security hardening + perf tuning + MC migration (12 owner-weeks)
+### Phase 6: security hardening + perf tuning + orthodox-FM migration (12 owner-weeks)
 - T6.x: seccomp + landlock filters; per-plugin stricter seccomp
 - T6.x: io_uring on Linux; SIMD-accelerated checksums
-- T6.x: MC bookmarks importer + `--mc-keys` verification (30-shortcut checklist)
+- T6.x: orthodox-FM bookmarks importer + `--mc-keys` verification (30-shortcut checklist)
 - T6.x: FISH backend (`sh://` over SSH for boxes without sftp-server) — ~2 ow per spec §15
-- New SCs: SC-009 (MC migration), SC-010 (coverage)
+- New SCs: SC-009 (orthodox-FM migration), SC-010 (coverage)
 
 ---
 

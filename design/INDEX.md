@@ -10,7 +10,7 @@ Phase 1 implementation.
 2. [`research.md`](./research.md) — 10 R-numbered decisions locked at Phase 1
 3. [`plan.md`](./plan.md) — tech context + Cargo workspace + constitution check
 4. [`data-model.md`](./data-model.md) — entities + invariants + storage layout
-5. [`milestones.md`](./milestones.md) — phased delivery + eng-week estimates + MC migration table
+5. [`milestones.md`](./milestones.md) — phased delivery + eng-week estimates + orthodox-FM migration table
 6. [`tasks.md`](./tasks.md) — Phase 1-3 task backlog (timeboxed; per-engineer parallelism noted)
 7. [`tests-plan.md`](./tests-plan.md) — unit/integration/fuzz/property + CI YAML
 8. [`checklists/requirements.md`](./checklists/requirements.md) — bundle completeness checklist (all PASS)
