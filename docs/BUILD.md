@@ -31,6 +31,84 @@ Useful flags:
 | `--config <path>` | Use an alternate config file |
 | `-v` | Debug logging to stderr |
 
+## Build profiles
+
+| Profile | Command (cargo) | Command (make) | Output |
+|---|---|---|---|
+| **Debug** (fast compile, unoptimized, asserts on) | `cargo build` | `make build` | `target/debug/cargonaut` |
+| **Release** (optimized, what you ship/run) | `cargo build --release` | `make build-release` | `target/release/cargonaut` |
+| **Static** (no libc dependency — Linux) | `cargo build --release --target x86_64-unknown-linux-musl -p cargonaut` | `make static` | `target/x86_64-unknown-linux-musl/release/cargonaut` |
+
+The **static** build produces a single self-contained executable (`ldd` reports
+`statically linked`) that runs on any Linux — old or new glibc, Alpine/musl,
+containers, rescue shells — with nothing to install. It uses the `musl` target;
+`make static` auto-adds it via `rustup target add x86_64-unknown-linux-musl` if
+missing (needs a musl linker such as `musl-gcc`, or Rust's bundled
+self-contained linking). The release binary is ~2 MiB stripped either way.
+
+`make dist` bundles the stripped static binary into
+`dist/cargonaut-<version>-<triple>.tar.gz` for publishing a release artifact.
+
+## Install
+
+Cargonaut isn't in distro package managers yet (tracked on the roadmap), so
+install from source or from the prebuilt static binary.
+
+### Any OS, via cargo (installs to `~/.cargo/bin`)
+
+```bash
+# from a clone:
+cargo install --path crates/cargonaut-bin
+# or straight from git:
+cargo install --git https://github.com/mohnkhan/cargonaut cargonaut
+```
+
+Ensure `~/.cargo/bin` is on your `PATH`. Uninstall with `cargo uninstall cargonaut`.
+
+### Linux — system or user prefix (via make)
+
+```bash
+sudo make install                     # -> /usr/local/bin/cargonaut
+make install PREFIX="$HOME/.local"    # user-local, no sudo (PATH must include ~/.local/bin)
+make install DESTDIR=/tmp/pkg PREFIX=/usr   # staged install for packaging
+make uninstall                        # remove (respects the same PREFIX/DESTDIR)
+```
+
+`make install` builds the optimized release binary and installs it stripped.
+`PREFIX`/`BINDIR`/`DESTDIR` follow the usual GNU conventions.
+
+### Linux — portable static binary (no toolchain on the target)
+
+```bash
+make static
+sudo install -m755 target/x86_64-unknown-linux-musl/release/cargonaut /usr/local/bin/cargonaut
+# …or just copy the binary anywhere on PATH; it has no dependencies.
+```
+
+### macOS
+
+No musl/static path (that's Linux-only), but the native build is a normal,
+portable Mach-O binary:
+
+```bash
+cargo build --release            # -> target/release/cargonaut
+cargo install --path crates/cargonaut-bin   # or install to ~/.cargo/bin
+# cross-compile for Apple Silicon / Intel if needed:
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+cargo build --release --target aarch64-apple-darwin -p cargonaut
+```
+
+### Windows
+
+```powershell
+cargo build --release            # -> target\release\cargonaut.exe
+cargo install --path crates\cargonaut-bin
+```
+
+Run it in Windows Terminal (or any ANSI-capable console). The `make` targets
+assume a Unix shell; use the `cargo` commands directly on native Windows, or use
+WSL for the full `make`/static workflow.
+
 ### Keys & mouse (today)
 
 `j`/`k`/arrows move · `Enter` enter dir · `Backspace`/`..` ascend · `Tab` switch pane ·
@@ -76,17 +154,21 @@ All build/test targets run `check-tmpfs` first (Constitution §V; auto-skipped o
 
 | Target | What it does |
 |---|---|
-| `make build` / `make build-release` | `cargo build [--release] --workspace` |
+| `make build` / `make build-release` | debug / optimized `cargo build --workspace` |
+| `make static` | fully static release binary via musl (Linux) |
 | `make run ARGS='~ /tmp'` | run the binary with args |
 | `make test` | `cargo test --workspace --lib --tests` |
 | `make bench` | `cargo bench --workspace` |
 | `make clippy` | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `make fmt` / `make fmt-check` | format / check formatting |
+| `make install` / `make uninstall` | install/remove release binary (`PREFIX`/`DESTDIR`) |
+| `make dist` | stripped static binary + `.tar.gz` under `dist/` |
 | `make clean` | symlink-aware clean (preserves the tmpfs association) |
 | `make ci-local` | the full CI pipeline locally (see below) |
 | `make tmpfs-setup` / `tmpfs-status` / `tmpfs-teardown` | SSD-preservation helpers |
 
-Run `make help` for the authoritative list.
+Override-able variables: `PREFIX` (default `/usr/local`), `BINDIR`, `DESTDIR`,
+`MUSL_TARGET`. Run `make help` for the authoritative list.
 
 ## SSD preservation (Constitution §V — dev host only)
 

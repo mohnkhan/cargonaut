@@ -104,12 +104,16 @@ The full per-feature history (Features 001 → 031) lives in
 ```bash
 git clone https://github.com/mohnkhan/cargonaut
 cd cargonaut
-cargo build --release
+cargo build --release                    # debug build: cargo build
 ./target/release/cargonaut ~ /tmp        # left pane, right pane
 ```
 
-Try `--theme monochrome` or `--no-mouse`. Full build/run/test instructions,
-shell integration, and the make-target reference are in
+**Install it:** `cargo install --git https://github.com/mohnkhan/cargonaut cargonaut`
+(to `~/.cargo/bin`), or `sudo make install` (to `/usr/local/bin`). For a
+dependency-free, runs-anywhere Linux binary: `make static`.
+
+Try `--theme monochrome` or `--no-mouse`. Full build profiles (debug / release /
+static), per-OS install, shell integration, and the make-target reference are in
 [`docs/BUILD.md`](./docs/BUILD.md).
 
 ## How it's engineered
