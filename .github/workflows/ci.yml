@@ -64,6 +64,12 @@ jobs:
         # in benches/*.rs are calibrated for release builds. Benches
         # are exercised by `cargo bench` ad-hoc (see Learnings Feature
         # 027 for the trap).
+        #
+        # CARGONAUT_PTY_TESTS=1 enables the binary-level SC-002
+        # SIGKILL-resume PTY gate (Feature 037 / issue #29), which
+        # otherwise self-skips so local `cargo test` stays fast.
+        env:
+          CARGONAUT_PTY_TESTS: "1"
         run: cargo test --workspace --lib --tests
       - name: Bundle failure artifacts
         if: failure()
