@@ -20,7 +20,7 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Confirm workspace builds clean before changes: `make build && make test` green; record baseline test count + binary size in the PR scratch notes.
+- [x] T001 Confirm workspace builds clean before changes: `make build && make test` green; record baseline test count + binary size in the PR scratch notes.
 - [ ] T002 [P] Add `globset` dependency to `crates/cargonaut-core/Cargo.toml` (and re-export path if needed) for pattern selection (US5); verify `cargo tree` shows it and binary-size headroom remains within NFR-001.
 - [ ] T003 [P] Add the `theme` and `chrome` module declarations as empty stubs in `crates/cargonaut-ui-tui/src/lib.rs` (`pub mod theme; pub mod chrome;`) with `#![warn(missing_docs)]`-compliant module docs so later phases compile incrementally.
 
@@ -30,8 +30,8 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 **Purpose**: structural changes every later story builds on. MUST complete before US1–US5.
 
-- [ ] T004 Flip `UiConfig::mouse` default to `true` in `crates/cargonaut-config/src/lib.rs` (US3 default-on); update the doc comment and `config.schema.json` default; add/adjust a config default unit test (red→green).
-- [ ] T005 Fix the dead CLI flags in `crates/cargonaut-bin/src/main.rs`: merge `cli.theme` → `config.ui.theme` and `cli.mc_keys` → `config.ui.mc_keys` before `App::new`; add a `--no-mouse` flag that sets `config.ui.mouse=false`. (red: test that `--theme X`/`--no-mouse` change the effective config; green: implement.)
+- [x] T004 Flip `UiConfig::mouse` default to `true` in `crates/cargonaut-config/src/lib.rs` (US3 default-on); update the doc comment and `config.schema.json` default; add/adjust a config default unit test (red→green).
+- [x] T005 Fix the dead CLI flags in `crates/cargonaut-bin/src/main.rs`: merge `cli.theme` → `config.ui.theme` and `cli.mc_keys` → `config.ui.mc_keys` before `App::new`; add a `--no-mouse` flag that sets `config.ui.mouse=false`. (red: test that `--theme X`/`--no-mouse` change the effective config; green: implement.)
 - [ ] T006 Introduce `FrameLayout { left, right, status, menu, fkeys, ministatus_left, ministatus_right }` in `crates/cargonaut-ui-tui/src/lib.rs` and make `draw_frame` RETURN it (lift the rects currently local at the old draw_frame body); store the latest in `run_loop`. (red: unit test asserting `draw_frame` yields the expected rects for a known terminal size via `TestBackend`; green: implement.) Blocks all mouse hit-testing.
 - [ ] T007 Add the new `Command` variants to `crates/cargonaut-core/src/lib.rs` `Command` enum: `CursorTo(usize)`, `Mkdir(String)`, `SelectByPattern(String)`, `UnselectByPattern(String)`, `CycleSortKey`, `ToggleSortReverse`, `CycleListingMode`, `RecursiveDirSize`, `ToggleQuickView`, `ViewExternal`, `EditExternal`, `OpenMenuBar`, `ShowHelp` (compile-only stubs returning a `Status("not yet implemented")` where behavior lands later). Keeps the crate compiling for parallel work.
 
@@ -47,19 +47,19 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 ### Tests (write first — red)
 
-- [ ] T008 [P] [US1] Theme resolution tests in `crates/cargonaut-ui-tui/src/theme.rs` (`#[cfg(test)]`): T-THEME-1 every element returns a concrete `Color`; T-THEME-2 `resolve("nope")` → default + notice; per contracts/themes.md.
-- [ ] T009 [P] [US1] Per-entry style test: directory/executable/symlink/regular/hidden produce distinct styles (T-THEME-3) and cursor vs marked vs normal are distinct (T-THEME-4), via a helper that maps `(VfsKind, mode, hidden, selected, cursor)` → `Style`.
-- [ ] T010 [P] [US1] `TestBackend` render test in `pane.rs` asserting a directory row uses `theme.dir_fg` and the cursor row uses `theme.cursor_bg` under `commander-dark`.
+- [x] T008 [P] [US1] Theme resolution tests in `crates/cargonaut-ui-tui/src/theme.rs` (`#[cfg(test)]`): T-THEME-1 every element returns a concrete `Color`; T-THEME-2 `resolve("nope")` → default + notice; per contracts/themes.md.
+- [x] T009 [P] [US1] Per-entry style test: directory/executable/symlink/regular/hidden produce distinct styles (T-THEME-3) and cursor vs marked vs normal are distinct (T-THEME-4), via a helper that maps `(VfsKind, mode, hidden, selected, cursor)` → `Style`.
+- [x] T010 [P] [US1] `TestBackend` render test in `pane.rs` asserting a directory row uses `theme.dir_fg` and the cursor row uses `theme.cursor_bg` under `commander-dark`.
 
 ### Implementation (green)
 
-- [ ] T011 [US1] Implement the `Theme` struct + fields in `crates/cargonaut-ui-tui/src/theme.rs` per data-model.md.
-- [ ] T012 [US1] Implement `Theme::builtin` / `Theme::resolve` with built-ins `commander-dark` (default) and `monochrome` per contracts/themes.md; unknown → default + status notice (FR-006).
-- [ ] T013 [US1] Thread `&Theme` through `draw_frame` → `draw_pane` in `crates/cargonaut-ui-tui/src/lib.rs`; build the `Theme` once in `run_loop` from `app.config().ui.theme`.
-- [ ] T014 [US1] Apply per-entry colors in `PaneView::render` (`crates/cargonaut-ui-tui/src/pane.rs`): style each `ListItem` by `entry.meta.kind`/mode/hidden; set highlight (cursor) style to `theme.cursor_*`; marked rows to `theme.marked_*` (replaces the bare `Modifier::REVERSED` at the old pane.rs:185/191).
-- [ ] T015 [US1] Apply theme to borders + status line in `draw_pane`/status render (focused vs unfocused border color; `theme.status_*` instead of `Modifier::REVERSED`).
-- [ ] T016 [US1] Apply theme to existing dialogs (`crates/cargonaut-ui-tui/src/dialog.rs` Confirm/Resume render) — `&Theme` param, `theme.dialog_*`.
-- [ ] T017 [US1] Low-color degrade check (FR-007): ensure `commander-dark` uses named/indexed colors that render on a 16-color `TestBackend`; add a render test at reduced color depth.
+- [x] T011 [US1] Implement the `Theme` struct + fields in `crates/cargonaut-ui-tui/src/theme.rs` per data-model.md.
+- [x] T012 [US1] Implement `Theme::builtin` / `Theme::resolve` with built-ins `commander-dark` (default) and `monochrome` per contracts/themes.md; unknown → default + status notice (FR-006).
+- [x] T013 [US1] Thread `&Theme` through `draw_frame` → `draw_pane` in `crates/cargonaut-ui-tui/src/lib.rs`; build the `Theme` once in `run_loop` from `app.config().ui.theme`.
+- [x] T014 [US1] Apply per-entry colors in `PaneView::render` (`crates/cargonaut-ui-tui/src/pane.rs`): style each `ListItem` by `entry.meta.kind`/mode/hidden; set highlight (cursor) style to `theme.cursor_*`; marked rows to `theme.marked_*` (replaces the bare `Modifier::REVERSED` at the old pane.rs:185/191).
+- [x] T015 [US1] Apply theme to borders + status line in `draw_pane`/status render (focused vs unfocused border color; `theme.status_*` instead of `Modifier::REVERSED`).
+- [x] T016 [US1] Apply theme to existing dialogs (`crates/cargonaut-ui-tui/src/dialog.rs` Confirm/Resume render) — `&Theme` param, `theme.dialog_*`.
+- [x] T017 [US1] Low-color degrade check (FR-007): ensure `commander-dark` uses named/indexed colors that render on a 16-color `TestBackend`; add a render test at reduced color depth.
 
 **Checkpoint**: US1 independently demoable — colored UI; theme switching works.
 

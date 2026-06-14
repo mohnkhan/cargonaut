@@ -17,10 +17,11 @@
 //! - Cursor movement via [`PaneView::cursor_down`] / [`PaneView::cursor_up`]
 //!   that respects the visible (filtered + hidden-masked) subset.
 
+use crate::theme::Theme;
 use cargonaut_vfs::{DirListing, VfsKind, VfsPath};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, StatefulWidget};
 use std::collections::BTreeSet;
 
@@ -165,13 +166,14 @@ impl PaneView {
     /// `area.height` controls how many entries fit; entries outside the
     /// viewport are skipped, and `list_state` tracks the scroll offset
     /// implicitly via the selected index.
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let items: Vec<ListItem<'_>> = self
             .visible_indices()
             .into_iter()
             .map(|i| {
                 let entry = &self.listing.entries[i];
-                let prefix = if self.selected.contains(&i) { '*' } else { ' ' };
+                let marked = self.selected.contains(&i);
+                let prefix = if marked { '*' } else { ' ' };
                 let kind_suffix = match &entry.meta.kind {
                     VfsKind::Dir => "/",
                     VfsKind::Symlink { .. } => "@",
@@ -183,12 +185,20 @@ impl PaneView {
                     format!("{:>10}", entry.meta.size)
                 };
                 let line = format!("{prefix} {}{}  {}", entry.name.as_str(), kind_suffix, size);
-                ListItem::new(line)
+                // US1 (FR-003): per-entry color keyed on kind / mode /
+                // hidden / marked, on the theme's panel background.
+                let style = theme.entry_style(
+                    &entry.meta.kind,
+                    entry.meta.mode.as_ref(),
+                    entry.meta.is_hidden,
+                    marked,
+                );
+                ListItem::new(Line::from(Span::styled(line, style)))
             })
             .collect();
 
         let list = List::new(items)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_style(theme.cursor_style())
             .highlight_symbol(" ");
         StatefulWidget::render(list, area, buf, &mut self.list_state);
     }
@@ -362,7 +372,7 @@ mod tests {
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| {
             let area = f.size();
-            p.render(area, f.buffer_mut());
+            p.render(area, f.buffer_mut(), &Theme::default());
         })
         .unwrap();
 
@@ -396,11 +406,42 @@ mod tests {
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| {
             let area = f.size();
-            p.render(area, f.buffer_mut());
+            p.render(area, f.buffer_mut(), &Theme::default());
         })
         .unwrap();
         // No panic = pass; assert focused index is what we expected.
         assert_eq!(p.focused_entry_index(), Some(5000));
+    }
+
+    // T010 (US1): a directory row renders in the theme's directory color
+    // and the cursor row carries the theme's cursor background.
+    #[test]
+    fn render_applies_theme_colors() {
+        let mut p = PaneView::new(
+            vfs_path(),
+            listing(vec![
+                entry("adir", VfsKind::Dir, 0, false),
+                entry("afile", VfsKind::File, 10, false),
+            ]),
+        );
+        let theme = Theme::commander_dark();
+        let backend = TestBackend::new(40, 5);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| {
+            let area = f.size();
+            p.render(area, f.buffer_mut(), &theme);
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        // Row 0 is the cursor row (selected index 0) → cursor bg.
+        let cursor_cell = buf.get(1, 0);
+        assert_eq!(cursor_cell.style().bg, Some(theme.cursor_bg));
+        // Row 1 ("afile") is a regular file → panel_fg, panel_bg.
+        let file_cell = buf.get(1, 1);
+        assert_eq!(file_cell.style().fg, Some(theme.panel_fg));
+        assert_eq!(file_cell.style().bg, Some(theme.panel_bg));
+        // The directory color is distinct from the regular-file color.
+        assert_ne!(theme.dir_fg, theme.panel_fg);
     }
 
     #[test]

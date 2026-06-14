@@ -9,6 +9,7 @@
 pub mod dialog;
 pub mod keymap;
 pub mod pane;
+pub mod theme;
 pub use dialog::{
     ConfirmDialog, ConfirmOutcome, ResumableSummary, ResumeChoice, ResumePromptDialog,
 };
@@ -17,6 +18,7 @@ pub use keymap::{
     SeqLookup,
 };
 pub use pane::PaneView;
+pub use theme::Theme;
 
 use cargonaut_core::{App, Command as AppCommand, DialogKind, Event as AppEvent, PaneId};
 use crossterm::event::{Event as CtEvent, EventStream, KeyEvent};
@@ -27,7 +29,7 @@ use crossterm::terminal::{
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use std::io::stdout;
@@ -75,6 +77,16 @@ async fn run_loop<B: ratatui::backend::Backend>(
     let keymap = Keymap::load(DEFAULT_KEYMAP).expect("bundled keymap.toml must parse");
     let mut events = EventStream::new();
 
+    // US1 (FR-001/005/006): resolve the configured theme once. An unknown
+    // name falls back to the built-in default with a non-fatal notice.
+    let theme_name = app.config().ui.theme.clone();
+    let theme = Theme::resolve(&theme_name);
+    let mut status: String = if Theme::builtin(&theme_name).is_none() {
+        format!("Unknown theme {theme_name:?} — using {}", theme.name)
+    } else {
+        String::new()
+    };
+
     // Per-pane PaneView, synced from App state once per frame.
     let mut left = PaneView::new(
         app.pane(PaneId::Left).cwd.clone(),
@@ -88,7 +100,6 @@ async fn run_loop<B: ratatui::backend::Backend>(
     let mut mode = Mode::Pane;
     let mut active_dialog: Option<ActiveDialog> = None;
     let mut chord_buf: Vec<KeyChord> = Vec::new();
-    let mut status: String = String::new();
     let mut quit = false;
 
     // Periodic re-render so transfer progress updates show even without
@@ -116,6 +127,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 mode,
                 &status_line,
                 dialog_ref,
+                &theme,
             );
         })
         .map_err(Error::Terminal)?;
@@ -315,6 +327,7 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_frame(
     f: &mut ratatui::Frame,
     left: &mut PaneView,
@@ -323,6 +336,7 @@ fn draw_frame(
     mode: Mode,
     status: &str,
     dialog: Option<&mut ActiveDialog>,
+    theme: &Theme,
 ) {
     let area = f.size();
     let main_chunks = Layout::default()
@@ -334,38 +348,36 @@ fn draw_frame(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[0]);
 
-    draw_pane(f, left, pane_chunks[0], active == PaneId::Left);
-    draw_pane(f, right, pane_chunks[1], active == PaneId::Right);
+    draw_pane(f, left, pane_chunks[0], active == PaneId::Left, theme);
+    draw_pane(f, right, pane_chunks[1], active == PaneId::Right, theme);
 
+    // US1 (FR-002): status bar themed instead of bare reverse-video.
     let status_text = format!(" [{mode:?}]  {status}");
-    let para = Paragraph::new(status_text).style(Style::default().add_modifier(Modifier::REVERSED));
+    let para = Paragraph::new(status_text).style(theme.status_style());
     use ratatui::widgets::Widget;
     para.render(main_chunks[1], f.buffer_mut());
 
     if let Some(d) = dialog {
         let darea = centered_rect(60, 30, area);
         match d {
-            ActiveDialog::Confirm { widget, .. } => widget.render(darea, f.buffer_mut()),
-            ActiveDialog::Resume(widget) => widget.render(darea, f.buffer_mut()),
+            ActiveDialog::Confirm { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::Resume(widget) => widget.render(darea, f.buffer_mut(), theme),
         }
     }
 }
 
-fn draw_pane(f: &mut ratatui::Frame, view: &mut PaneView, area: Rect, focused: bool) {
+fn draw_pane(f: &mut ratatui::Frame, view: &mut PaneView, area: Rect, focused: bool, theme: &Theme) {
     let title = view.cwd.display();
-    let border_style = if focused {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
+    // US1 (FR-002): panel background + focus-colored border from the theme.
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(border_style);
+        .border_style(theme.border_style(focused))
+        .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
     let inner = block.inner(area);
     use ratatui::widgets::Widget;
     block.render(area, f.buffer_mut());
-    view.render(inner, f.buffer_mut());
+    view.render(inner, f.buffer_mut(), theme);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
