@@ -15,7 +15,7 @@ software written this decade.
 | | |
 |---|---|
 | **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) |
-| **Tests** | 190 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Tests** | 191 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
 | **Binary** | 2.03 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |

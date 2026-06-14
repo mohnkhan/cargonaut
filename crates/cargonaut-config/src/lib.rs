@@ -511,7 +511,19 @@ fn base_figment() -> figment::Figment {
 }
 
 fn with_env(fig: figment::Figment) -> figment::Figment {
-    fig.merge(figment::providers::Env::prefixed(ENV_PREFIX).split("__"))
+    // Only section-qualified vars (`CARGONAUT_<SECTION>__<FIELD>`, i.e. those
+    // containing the `__` nesting separator) are config overrides. The
+    // top-level [`Config`] is composed entirely of sub-sections, so a
+    // `CARGONAUT_*` var without `__` can never map to a real field. Filtering
+    // them out keeps unrelated `CARGONAUT_*` env vars — e.g.
+    // `CARGONAUT_PTY_TESTS`, `CARGONAUT_TRANSFER_THROTTLE_MIBPS`,
+    // `CARGONAUT_EXIT_CWD_FILE`, `CARGONAUT_ALLOW_SSD_TARGET` — from tripping
+    // `deny_unknown_fields` and silently failing the whole config load.
+    fig.merge(
+        figment::providers::Env::prefixed(ENV_PREFIX)
+            .filter(|k| k.as_str().contains("__"))
+            .split("__"),
+    )
 }
 
 fn figment_err(e: figment::Error) -> ConfigError {
@@ -674,6 +686,23 @@ enabled = ["git-status"]
 theme = "dracula"
 "#;
             let c = Config::load_from_str_with_env(toml_text).unwrap();
+            assert_eq!(c.ui.theme, "monochrome");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn unrelated_cargonaut_env_var_does_not_break_load() {
+        // Regression (Feature 037): non-config `CARGONAUT_*` vars (no `__`
+        // section separator) must be ignored, not fed into the
+        // deny_unknown_fields extract. Setting CARGONAUT_PTY_TESTS used to
+        // make the whole config load fail.
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("CARGONAUT_PTY_TESTS", "1");
+            jail.set_env("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "24");
+            jail.set_env("CARGONAUT_UI__THEME", "monochrome");
+            let c = Config::load_from_str_with_env("").unwrap();
+            // The valid override still applies; the stray vars are ignored.
             assert_eq!(c.ui.theme, "monochrome");
             Ok(())
         });
