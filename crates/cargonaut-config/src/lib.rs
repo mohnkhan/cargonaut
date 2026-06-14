@@ -692,6 +692,9 @@ theme = "dracula"
     }
 
     #[test]
+    // The figment::Jail closure returns Result<(), figment::Error>; the Err
+    // size is irrelevant in a test harness.
+    #[allow(clippy::result_large_err)]
     fn unrelated_cargonaut_env_var_does_not_break_load() {
         // Regression (Feature 037): non-config `CARGONAUT_*` vars (no `__`
         // section separator) must be ignored, not fed into the
