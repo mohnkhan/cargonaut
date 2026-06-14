@@ -153,8 +153,11 @@ pub enum Command {
     /// FR-011 Alt-u — step to the next dir in the active pane's
     /// forward-history (populated only after `HistoryPrevDir`).
     HistoryNextDir,
-    /// FR-012 Alt-c — open the quick-cd popup. Phase 1: stub (status
-    /// message); the popup widget lands in the next polish PR.
+    /// FR-012 Alt-c — open the quick-cd popup. The popup is a UI-side
+    /// modal (Feature 038); the completion + navigation logic lives in
+    /// [`App::complete_cd`] / [`App::quick_cd`]. Dispatching this command
+    /// directly into core is a no-op — the TUI intercepts Alt-c to open
+    /// the dialog.
     QuickCdPopup,
     /// FR-016 F12 — show the in-flight transfers panel. Phase 1: stub
     /// (status message listing active transfer count); the panel
@@ -553,9 +556,9 @@ impl App {
             }
             HistoryPrevDir => self.history_prev_dir().await,
             HistoryNextDir => self.history_next_dir().await,
-            QuickCdPopup => Ok(vec![Event::Status(
-                "QuickCd popup not yet implemented (T1.25 stub)".into(),
-            )]),
+            // Feature 038: opened UI-side (the TUI builds the dialog and
+            // calls `complete_cd`/`quick_cd`). A direct dispatch is a no-op.
+            QuickCdPopup => Ok(vec![]),
             ShowTasksPanel => {
                 let n = self.transfer_order.len();
                 Ok(vec![Event::Status(format!(
@@ -995,6 +998,122 @@ impl App {
         p.cursor = 0;
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
+    }
+
+    /// Feature 038 (FR-012/R-003): resolve quick-cd input text to a
+    /// `VfsPath` relative to the active pane's cwd.
+    ///
+    /// - text containing `://` is parsed as a full URI;
+    /// - text starting with `/` is an absolute path under the active
+    ///   pane's scheme/authority (rooted at the active backend);
+    /// - otherwise it is relative to the active pane's cwd.
+    ///
+    /// `.` segments are skipped, `..` pops one segment (saturating at
+    /// root), empty segments (e.g. a trailing `/`) are ignored. The path
+    /// is not checked for existence here — that happens in `navigate_to`.
+    fn resolve_cd_target(&self, text: &str) -> Result<VfsPath, AppError> {
+        if text.contains("://") {
+            return VfsPath::parse(text).map_err(|e| AppError::BadPath(e.to_string()));
+        }
+        let active_cwd = &self.active_pane_state().cwd;
+        let (mut path, rest) = if let Some(stripped) = text.strip_prefix('/') {
+            // Absolute: walk to the root of the active backend, keeping
+            // its scheme + authority, then apply the typed segments.
+            let mut root = active_cwd.clone();
+            while let Some(parent) = root.parent() {
+                root = parent;
+            }
+            (root, stripped)
+        } else {
+            (active_cwd.clone(), text)
+        };
+        for seg in rest.split('/') {
+            match seg {
+                "" | "." => {}
+                ".." => {
+                    if let Some(parent) = path.parent() {
+                        path = parent;
+                    }
+                }
+                s => path = path.join(s),
+            }
+        }
+        Ok(path)
+    }
+
+    /// Feature 038 (FR-004/005/006/012/013): accept a quick-cd path for
+    /// the active pane. Resolves `path_text` relative to the active cwd
+    /// and navigates via the normal [`Self::navigate_to`] path (which
+    /// lists the target first, so a non-existent / non-directory /
+    /// permission-denied target returns `Err` with App state unchanged).
+    ///
+    /// Empty / whitespace-only input is a no-op (`Ok` with no events).
+    pub async fn quick_cd(&mut self, path_text: &str) -> Result<Vec<Event>, AppError> {
+        let trimmed = path_text.trim();
+        if trimmed.is_empty() {
+            return Ok(vec![]);
+        }
+        let target = self.resolve_cd_target(trimmed)?;
+        let id = self.active;
+        self.navigate_to(id, target).await
+    }
+
+    /// Feature 038 (FR-007/008/009): compute directory completion
+    /// candidates for the active pane from `partial` quick-cd input.
+    ///
+    /// The final path segment is the prefix to complete; earlier segments
+    /// name the directory to list (resolved relative to the active cwd).
+    /// Returns full path strings (URI form), ordered recent-visited
+    /// matches first (most-recent first), then filesystem children in
+    /// backend sort order, de-duplicated. Only directories are returned;
+    /// an empty result means "nothing to complete". Read-only.
+    pub async fn complete_cd(&self, partial: &str) -> Vec<String> {
+        let (dir_text, last) = match partial.rfind('/') {
+            Some(i) => (&partial[..=i], &partial[i + 1..]),
+            None => ("", partial),
+        };
+        let dir = if dir_text.is_empty() {
+            self.active_pane_state().cwd.clone()
+        } else {
+            match self.resolve_cd_target(dir_text) {
+                Ok(p) => p,
+                Err(_) => return Vec::new(),
+            }
+        };
+
+        // Recent-visited matches first (most-recent at the end of the
+        // history vec, so iterate in reverse): a recent dir matches when
+        // it lives directly under `dir` and its final segment shares the
+        // prefix.
+        let active = self.active_pane_state();
+        let mut out: Vec<String> = Vec::new();
+        for hist in active.dir_history_back.iter().rev() {
+            if hist.parent().as_ref() == Some(&dir) {
+                if let Some(name) = hist.segments.last() {
+                    if name.as_str().starts_with(last) {
+                        let s = hist.display();
+                        if !out.contains(&s) {
+                            out.push(s);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Then filesystem children that are directories and match.
+        if let Ok(listing) = self.local_fs.list(&dir, Sort::NameAsc).await {
+            for e in listing.entries {
+                if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir)
+                    && e.name.as_str().starts_with(last)
+                {
+                    let s = dir.join(e.name.as_str()).display();
+                    if !out.contains(&s) {
+                        out.push(s);
+                    }
+                }
+            }
+        }
+        out
     }
 
     async fn history_prev_dir(&mut self) -> Result<Vec<Event>, AppError> {
