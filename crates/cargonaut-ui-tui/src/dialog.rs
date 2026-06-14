@@ -178,6 +178,167 @@ impl TextInputDialog {
 }
 
 // =====================================================================
+// PathInputDialog (Feature 038 quick-cd; reusable text-input + completion)
+// =====================================================================
+
+/// What a key did to a [`PathInputDialog`]. Completion is asynchronous
+/// (the candidate directories come from the VFS), so the widget cannot
+/// fetch them itself — on a stale cache it asks the event loop to fetch
+/// via [`PathInputAction::RequestCompletions`] and receives the result
+/// through [`PathInputDialog::apply_completions`].
+///
+/// Designed to be reused by the deferred tasks panel (#32) and panel
+/// filter prompt (#33), which need the same "text input + caller-supplied
+/// completion/validation" shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathInputAction {
+    /// Key handled; nothing further for the event loop to do.
+    Consumed,
+    /// The buffer changed (any cached completions are now stale).
+    Edited,
+    /// Tab on a stale cache — the loop must fetch candidates for `text`
+    /// and feed them back via [`PathInputDialog::apply_completions`].
+    RequestCompletions {
+        /// The current buffer text to complete.
+        text: String,
+    },
+    /// Enter — accept this text.
+    Submit(String),
+    /// Esc — cancel.
+    Cancel,
+}
+
+/// A single-line modal text-input dialog with directory tab-completion
+/// (FR-012 quick-cd). Prefilled on open; Tab completes/cycles the buffer
+/// against caller-supplied candidates; Enter submits, Esc cancels.
+#[derive(Debug, Clone)]
+pub struct PathInputDialog {
+    title: String,
+    prompt: String,
+    buffer: String,
+    /// Cached completion candidates from the last fetch.
+    completions: Vec<String>,
+    /// The buffer value `completions` was computed for; when it differs
+    /// from `buffer` the cache is stale and Tab re-requests.
+    completion_for: String,
+    /// Position within `completions` for the current cycle.
+    cycle_idx: usize,
+    /// Inline error (failed accept); cleared on the next edit.
+    error: Option<String>,
+    /// Transient hint, e.g. "(no matches)"; cleared on the next edit.
+    note: Option<String>,
+}
+
+impl PathInputDialog {
+    /// New prompt prefilled with `initial`, cursor conceptually at end.
+    pub fn new(
+        title: impl Into<String>,
+        prompt: impl Into<String>,
+        initial: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            prompt: prompt.into(),
+            buffer: initial.into(),
+            completions: Vec::new(),
+            completion_for: String::new(),
+            cycle_idx: 0,
+            error: None,
+            note: None,
+        }
+    }
+
+    /// Current buffer text.
+    pub fn value(&self) -> &str {
+        &self.buffer
+    }
+
+    /// True when the cached completions still apply to the current buffer.
+    fn cache_fresh(&self) -> bool {
+        !self.completions.is_empty() && self.completion_for == self.buffer
+    }
+
+    /// Handle a key. See [`PathInputAction`].
+    pub fn handle_key(&mut self, code: KeyCode) -> PathInputAction {
+        match code {
+            KeyCode::Esc => PathInputAction::Cancel,
+            KeyCode::Enter => PathInputAction::Submit(self.buffer.clone()),
+            KeyCode::Backspace => {
+                self.buffer.pop();
+                self.error = None;
+                self.note = None;
+                PathInputAction::Edited
+            }
+            KeyCode::Char(c) => {
+                self.buffer.push(c);
+                self.error = None;
+                self.note = None;
+                PathInputAction::Edited
+            }
+            KeyCode::Tab => {
+                if self.cache_fresh() {
+                    // Cycle to the next candidate, wrapping.
+                    self.cycle_idx = (self.cycle_idx + 1) % self.completions.len();
+                    self.buffer = self.completions[self.cycle_idx].clone();
+                    self.completion_for = self.buffer.clone();
+                    PathInputAction::Consumed
+                } else {
+                    PathInputAction::RequestCompletions {
+                        text: self.buffer.clone(),
+                    }
+                }
+            }
+            _ => PathInputAction::Consumed,
+        }
+    }
+
+    /// Install freshly-fetched candidates (response to a
+    /// [`PathInputAction::RequestCompletions`]). Applies the first
+    /// candidate and marks the cache fresh; an empty list sets the
+    /// "(no matches)" note and leaves the buffer untouched (FR-009).
+    pub fn apply_completions(&mut self, candidates: Vec<String>) {
+        if candidates.is_empty() {
+            self.completions.clear();
+            self.note = Some("(no matches)".into());
+            return;
+        }
+        self.buffer = candidates[0].clone();
+        self.completion_for = self.buffer.clone();
+        self.cycle_idx = 0;
+        self.completions = candidates;
+        self.error = None;
+        self.note = None;
+    }
+
+    /// Show an inline error and keep the prompt open (failed accept,
+    /// FR-006). Cleared on the next edit.
+    pub fn set_error(&mut self, msg: impl Into<String>) {
+        self.error = Some(msg.into());
+    }
+
+    /// Render the dialog (modal, clears its rect first).
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title(self.title.as_str())
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        let mut body = format!("{}\n> {}_", self.prompt, self.buffer);
+        if let Some(note) = &self.note {
+            body.push_str(&format!("\n{note}"));
+        }
+        if let Some(err) = &self.error {
+            body.push_str(&format!("\n✗ {err}"));
+        }
+        Paragraph::new(body)
+            .block(block)
+            .style(theme.dialog_style())
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+}
+
+// =====================================================================
 // ResumePromptDialog (offered on launch when scan_resumable finds work)
 // =====================================================================
 
@@ -521,5 +682,104 @@ mod tests {
         assert_eq!(d.handle_key(KeyCode::Char('r')), None);
         assert_eq!(d.handle_key(KeyCode::Esc), None);
         assert!(d.is_empty());
+    }
+
+    // ---------- PathInputDialog (Feature 038 quick-cd) ----------
+
+    #[test]
+    fn path_input_prefills_and_edits() {
+        let mut d = PathInputDialog::new("cd", "Path:", "/home/u");
+        assert_eq!(d.value(), "/home/u");
+        assert_eq!(d.handle_key(KeyCode::Char('x')), PathInputAction::Edited);
+        assert_eq!(d.value(), "/home/ux");
+        assert_eq!(d.handle_key(KeyCode::Backspace), PathInputAction::Edited);
+        assert_eq!(d.value(), "/home/u");
+    }
+
+    #[test]
+    fn path_input_enter_submits_and_esc_cancels() {
+        let mut d = PathInputDialog::new("cd", "Path:", "/x");
+        assert_eq!(
+            d.handle_key(KeyCode::Enter),
+            PathInputAction::Submit("/x".into())
+        );
+        let mut d = PathInputDialog::new("cd", "Path:", "/x");
+        assert_eq!(d.handle_key(KeyCode::Esc), PathInputAction::Cancel);
+    }
+
+    #[test]
+    fn path_input_tab_requests_then_cycles() {
+        let mut d = PathInputDialog::new("cd", "Path:", "a");
+        // Stale cache → ask the loop to fetch.
+        assert_eq!(
+            d.handle_key(KeyCode::Tab),
+            PathInputAction::RequestCompletions { text: "a".into() }
+        );
+        d.apply_completions(vec!["a1".into(), "a2".into(), "a3".into()]);
+        assert_eq!(d.value(), "a1");
+        // Fresh cache → cycle in-widget, wrapping.
+        assert_eq!(d.handle_key(KeyCode::Tab), PathInputAction::Consumed);
+        assert_eq!(d.value(), "a2");
+        assert_eq!(d.handle_key(KeyCode::Tab), PathInputAction::Consumed);
+        assert_eq!(d.value(), "a3");
+        assert_eq!(d.handle_key(KeyCode::Tab), PathInputAction::Consumed);
+        assert_eq!(d.value(), "a1");
+    }
+
+    #[test]
+    fn path_input_edit_invalidates_completion_cache() {
+        let mut d = PathInputDialog::new("cd", "Path:", "a");
+        d.apply_completions(vec!["a1".into(), "a2".into()]);
+        assert_eq!(d.value(), "a1");
+        // Editing makes the cache stale → next Tab re-requests.
+        d.handle_key(KeyCode::Char('z'));
+        assert_eq!(
+            d.handle_key(KeyCode::Tab),
+            PathInputAction::RequestCompletions { text: "a1z".into() }
+        );
+    }
+
+    #[test]
+    fn path_input_empty_completions_sets_note_keeps_buffer() {
+        let mut d = PathInputDialog::new("cd", "Path:", "zzz");
+        d.handle_key(KeyCode::Tab);
+        d.apply_completions(vec![]);
+        assert_eq!(d.value(), "zzz", "buffer must be unchanged on no matches");
+    }
+
+    #[test]
+    fn path_input_set_error_renders_and_clears_on_edit() {
+        let mut d = PathInputDialog::new("cd", "Path:", "/nope");
+        d.set_error("not a directory");
+        let backend = TestBackend::new(60, 8);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &Theme::default()))
+            .unwrap();
+        let rendered: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(rendered.contains("not a directory"), "error missing");
+        assert!(rendered.contains("/nope"), "buffer missing");
+        // Editing clears the error.
+        d.handle_key(KeyCode::Backspace);
+        let mut term2 = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        term2
+            .draw(|f| d.render(f.size(), f.buffer_mut(), &Theme::default()))
+            .unwrap();
+        let rendered2: String = term2
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            !rendered2.contains("not a directory"),
+            "error should clear on edit"
+        );
     }
 }

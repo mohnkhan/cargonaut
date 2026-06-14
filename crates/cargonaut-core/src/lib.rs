@@ -153,8 +153,11 @@ pub enum Command {
     /// FR-011 Alt-u — step to the next dir in the active pane's
     /// forward-history (populated only after `HistoryPrevDir`).
     HistoryNextDir,
-    /// FR-012 Alt-c — open the quick-cd popup. Phase 1: stub (status
-    /// message); the popup widget lands in the next polish PR.
+    /// FR-012 Alt-c — open the quick-cd popup. The popup is a UI-side
+    /// modal (Feature 038); the completion + navigation logic lives in
+    /// [`App::complete_cd`] / [`App::quick_cd`]. Dispatching this command
+    /// directly into core is a no-op — the TUI intercepts Alt-c to open
+    /// the dialog.
     QuickCdPopup,
     /// FR-016 F12 — show the in-flight transfers panel. Phase 1: stub
     /// (status message listing active transfer count); the panel
@@ -553,9 +556,9 @@ impl App {
             }
             HistoryPrevDir => self.history_prev_dir().await,
             HistoryNextDir => self.history_next_dir().await,
-            QuickCdPopup => Ok(vec![Event::Status(
-                "QuickCd popup not yet implemented (T1.25 stub)".into(),
-            )]),
+            // Feature 038: opened UI-side (the TUI builds the dialog and
+            // calls `complete_cd`/`quick_cd`). A direct dispatch is a no-op.
+            QuickCdPopup => Ok(vec![]),
             ShowTasksPanel => {
                 let n = self.transfer_order.len();
                 Ok(vec![Event::Status(format!(
@@ -995,6 +998,122 @@ impl App {
         p.cursor = 0;
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
+    }
+
+    /// Feature 038 (FR-012/R-003): resolve quick-cd input text to a
+    /// `VfsPath` relative to the active pane's cwd.
+    ///
+    /// - text containing `://` is parsed as a full URI;
+    /// - text starting with `/` is an absolute path under the active
+    ///   pane's scheme/authority (rooted at the active backend);
+    /// - otherwise it is relative to the active pane's cwd.
+    ///
+    /// `.` segments are skipped, `..` pops one segment (saturating at
+    /// root), empty segments (e.g. a trailing `/`) are ignored. The path
+    /// is not checked for existence here — that happens in `navigate_to`.
+    fn resolve_cd_target(&self, text: &str) -> Result<VfsPath, AppError> {
+        if text.contains("://") {
+            return VfsPath::parse(text).map_err(|e| AppError::BadPath(e.to_string()));
+        }
+        let active_cwd = &self.active_pane_state().cwd;
+        let (mut path, rest) = if let Some(stripped) = text.strip_prefix('/') {
+            // Absolute: walk to the root of the active backend, keeping
+            // its scheme + authority, then apply the typed segments.
+            let mut root = active_cwd.clone();
+            while let Some(parent) = root.parent() {
+                root = parent;
+            }
+            (root, stripped)
+        } else {
+            (active_cwd.clone(), text)
+        };
+        for seg in rest.split('/') {
+            match seg {
+                "" | "." => {}
+                ".." => {
+                    if let Some(parent) = path.parent() {
+                        path = parent;
+                    }
+                }
+                s => path = path.join(s),
+            }
+        }
+        Ok(path)
+    }
+
+    /// Feature 038 (FR-004/005/006/012/013): accept a quick-cd path for
+    /// the active pane. Resolves `path_text` relative to the active cwd
+    /// and navigates via the normal [`Self::navigate_to`] path (which
+    /// lists the target first, so a non-existent / non-directory /
+    /// permission-denied target returns `Err` with App state unchanged).
+    ///
+    /// Empty / whitespace-only input is a no-op (`Ok` with no events).
+    pub async fn quick_cd(&mut self, path_text: &str) -> Result<Vec<Event>, AppError> {
+        let trimmed = path_text.trim();
+        if trimmed.is_empty() {
+            return Ok(vec![]);
+        }
+        let target = self.resolve_cd_target(trimmed)?;
+        let id = self.active;
+        self.navigate_to(id, target).await
+    }
+
+    /// Feature 038 (FR-007/008/009): compute directory completion
+    /// candidates for the active pane from `partial` quick-cd input.
+    ///
+    /// The final path segment is the prefix to complete; earlier segments
+    /// name the directory to list (resolved relative to the active cwd).
+    /// Returns full path strings (URI form), ordered recent-visited
+    /// matches first (most-recent first), then filesystem children in
+    /// backend sort order, de-duplicated. Only directories are returned;
+    /// an empty result means "nothing to complete". Read-only.
+    pub async fn complete_cd(&self, partial: &str) -> Vec<String> {
+        let (dir_text, last) = match partial.rfind('/') {
+            Some(i) => (&partial[..=i], &partial[i + 1..]),
+            None => ("", partial),
+        };
+        let dir = if dir_text.is_empty() {
+            self.active_pane_state().cwd.clone()
+        } else {
+            match self.resolve_cd_target(dir_text) {
+                Ok(p) => p,
+                Err(_) => return Vec::new(),
+            }
+        };
+
+        // Recent-visited matches first (most-recent at the end of the
+        // history vec, so iterate in reverse): a recent dir matches when
+        // it lives directly under `dir` and its final segment shares the
+        // prefix.
+        let active = self.active_pane_state();
+        let mut out: Vec<String> = Vec::new();
+        for hist in active.dir_history_back.iter().rev() {
+            if hist.parent().as_ref() == Some(&dir) {
+                if let Some(name) = hist.segments.last() {
+                    if name.as_str().starts_with(last) {
+                        let s = hist.display();
+                        if !out.contains(&s) {
+                            out.push(s);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Then filesystem children that are directories and match.
+        if let Ok(listing) = self.local_fs.list(&dir, Sort::NameAsc).await {
+            for e in listing.entries {
+                if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir)
+                    && e.name.as_str().starts_with(last)
+                {
+                    let s = dir.join(e.name.as_str()).display();
+                    if !out.contains(&s) {
+                        out.push(s);
+                    }
+                }
+            }
+        }
+        out
     }
 
     async fn history_prev_dir(&mut self) -> Result<Vec<Event>, AppError> {
@@ -1665,12 +1784,218 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quick_cd_popup_emits_status_stub() {
+    async fn quick_cd_popup_dispatch_is_noop_in_core() {
+        // Feature 038: the UI intercepts Alt-c to open the dialog; reaching
+        // core's dispatch is a no-op (no status stub anymore).
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let events = app.dispatch(Command::QuickCdPopup).await.unwrap();
-        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+        assert!(events.is_empty());
+    }
+
+    // ---------- Feature 038: quick-cd resolution + navigation (US1) ----------
+
+    #[tokio::test]
+    async fn quick_cd_absolute_path_navigates_active_pane() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let target = format!("{}/sub", td_l.path().to_str().unwrap());
+        app.quick_cd(&target).await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+        // Inactive pane untouched (FR-013).
+        assert!(app
+            .pane(PaneId::Right)
+            .cwd
+            .display()
+            .ends_with(td_r.path().file_name().unwrap().to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn quick_cd_relative_path_resolves_against_cwd() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.quick_cd("sub").await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+    }
+
+    #[tokio::test]
+    async fn quick_cd_dotdot_ascends() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let base = app.pane(PaneId::Left).cwd.clone();
+        app.quick_cd("sub").await.unwrap();
+        app.quick_cd("..").await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cwd, base);
+    }
+
+    #[tokio::test]
+    async fn quick_cd_trailing_slash_ignored() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.quick_cd("sub/").await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+    }
+
+    #[tokio::test]
+    async fn quick_cd_records_history() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let base = app.pane(PaneId::Left).cwd.clone();
+        app.quick_cd("sub").await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).dir_history_back, vec![base]);
+    }
+
+    #[tokio::test]
+    async fn quick_cd_empty_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.pane(PaneId::Left).cwd.clone();
+        let evs = app.quick_cd("   ").await.unwrap();
+        assert!(evs.is_empty());
+        assert_eq!(app.pane(PaneId::Left).cwd, before);
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
+    }
+
+    #[tokio::test]
+    async fn quick_cd_nonexistent_errors_without_navigating() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.pane(PaneId::Left).cwd.clone();
+        let res = app.quick_cd("/no/such/place/xyz123").await;
+        assert!(res.is_err());
+        assert_eq!(app.pane(PaneId::Left).cwd, before);
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
+    }
+
+    #[tokio::test]
+    async fn quick_cd_file_target_errors_without_navigating() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("afile"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.pane(PaneId::Left).cwd.clone();
+        let res = app.quick_cd("afile").await;
+        assert!(res.is_err());
+        assert_eq!(app.pane(PaneId::Left).cwd, before);
+    }
+
+    // ---------- Feature 038: completion (US2) ----------
+
+    #[tokio::test]
+    async fn complete_cd_unique_prefix_single_candidate() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("src")).await.unwrap();
+        fs::create_dir(td_l.path().join("docs")).await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let c = app.complete_cd("sr").await;
+        assert_eq!(c.len(), 1);
+        assert!(c[0].ends_with("/src"));
+    }
+
+    #[tokio::test]
+    async fn complete_cd_multiple_matches_in_sort_order() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for d in ["app", "apple", "apply"] {
+            fs::create_dir(td_l.path().join(d)).await.unwrap();
+        }
+        let app = make_app(&td_l, &td_r).await;
+        let c = app.complete_cd("app").await;
+        assert_eq!(c.len(), 3);
+        assert!(c[0].ends_with("/app"));
+        assert!(c[1].ends_with("/apple"));
+        assert!(c[2].ends_with("/apply"));
+    }
+
+    #[tokio::test]
+    async fn complete_cd_excludes_files() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("data")).await.unwrap();
+        fs::write(td_l.path().join("database"), b"x").await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let c = app.complete_cd("dat").await;
+        assert_eq!(c.len(), 1);
+        assert!(c[0].ends_with("/data"));
+    }
+
+    #[tokio::test]
+    async fn complete_cd_recent_dir_ordered_first() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("alpha")).await.unwrap();
+        fs::create_dir(td_l.path().join("apex")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Visit alpha then ascend, so dir_history_back contains [base, alpha].
+        app.quick_cd("alpha").await.unwrap();
+        app.quick_cd("..").await.unwrap();
+        let c = app.complete_cd("a").await;
+        // alpha is recent → first; apex is filesystem-only → after; deduped.
+        assert_eq!(c.len(), 2, "got {c:?}");
+        assert!(c[0].ends_with("/alpha"), "recent dir must lead: {c:?}");
+        assert!(c[1].ends_with("/apex"), "{c:?}");
+    }
+
+    #[tokio::test]
+    async fn complete_cd_no_match_is_empty() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("src")).await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        assert!(app.complete_cd("zzz").await.is_empty());
+    }
+
+    /// SC-006 injected-input gate (T1.25 origin): drive the full quick-cd
+    /// flow against the engine — complete → accept (success), a cancel
+    /// path (read-only, zero side effects), and error-recovery (bad path
+    /// rejected without mutation, then a valid accept succeeds).
+    #[tokio::test]
+    async fn quick_cd_end_to_end_complete_accept_cancel_and_recover() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("src")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let base = app.pane(PaneId::Left).cwd.clone();
+
+        // --- Cancel path: completing is read-only; not accepting leaves
+        // both panes untouched (SC-004).
+        let candidates = app.complete_cd("sr").await;
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].ends_with("/src"));
+        assert_eq!(
+            app.pane(PaneId::Left).cwd,
+            base,
+            "complete_cd mutated state"
+        );
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
+
+        // --- Error-recovery: accept a bad path → Err, no nav; then a
+        // valid accept → Ok (SC-005 then SC-001).
+        let bad = app.quick_cd("/no/such/dir/zzz").await;
+        assert!(bad.is_err());
+        assert_eq!(app.pane(PaneId::Left).cwd, base, "bad accept navigated");
+
+        // --- Accept the completed candidate → active pane moves (SC-001),
+        // previous cwd recorded (FR-005), other pane unchanged (FR-013).
+        let right_before = app.pane(PaneId::Right).cwd.clone();
+        app.quick_cd(&candidates[0]).await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/src"));
+        assert_eq!(app.pane(PaneId::Left).dir_history_back, vec![base]);
+        assert_eq!(app.pane(PaneId::Right).cwd, right_before);
     }
 
     #[tokio::test]
