@@ -14,9 +14,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) |
-| **Tests** | 212 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
-| **Binary** | 2.03 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) |
+| **Tests** | 224 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Binary** | 2.04 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **License** | MIT OR Apache-2.0 |
@@ -98,6 +98,10 @@ Phase 1 plus Feature 031 are merged — Cargonaut is a runnable dual-pane TUI:
 - **Quick-cd prompt** (Alt-c) — inline path entry prefilled with the current
   directory, Tab-completing against the pane's directories and recent history,
   Enter to jump (Feature 038).
+- **Panel filter prompt** (Alt-!) — inline prompt (prefilled with the active
+  filter) to narrow the focused pane by glob (`*.rs`) or bare-word substring,
+  case-insensitive; empty submit clears, invalid patterns show an inline error
+  (Feature 033).
 
 The full per-feature history (Features 001 → 038) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
