@@ -31,8 +31,16 @@ audit.log.*
 # CI bundling
 dist/
 
-# Claude Code per-machine state
+# Claude Code per-machine state + credentials (never commit these).
+# NOTE: the rest of .claude/ (settings.json, hooks/, skills/) is intentionally
+# tracked — it's the shared spec-kit tooling. Only per-machine / secret-bearing
+# files are ignored here.
 .claude/settings.local.json
+.claude/**/settings.local.json
+.claude/.credentials.json
+.claude/**/.credentials.json
+# MCP server configs frequently embed tokens/keys.
+.mcp.local.json
 
 # Proptest
 **/proptest-regressions/
