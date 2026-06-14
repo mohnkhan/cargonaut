@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-14 (Feature 031 visual & interactive parity layer shipped US1–US5, deferrals #37–#50 added; Phase 1.1 polish follow-ups #29–#33 from Feature 028 also tracked).
+**Last updated**: 2026-06-15 (Feature 037 shipped resume-on-launch wiring + the binary-level SC-002 PTY gate, resolving #29; Tier 1 now clear).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -14,7 +14,9 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#29](https://github.com/mohnkhan/cargonaut/issues/29) | T1.08 — binary-level SIGKILL-resume PTY test (SC-002 gate) | 0.75 ew | Feature 028 — SC-002 currently proven only at transfer-crate level; binary-level gate is `#[ignore]`d. Closes a NON-NEGOTIABLE perf-gate hole (Constitution §IV). |
+| _(none — Tier 1 is clear)_ | | | |
+
+> ✅ **Resolved**: [#29](https://github.com/mohnkhan/cargonaut/issues/29) (T1.08 — binary-level SIGKILL-resume PTY test, SC-002 gate) shipped in **Feature 037** (`037-resume-binary-wiring`). The scope grew once discovered: the resume-on-launch flow was never wired into the binary, so Feature 037 wired `scan_resumable`→`ResumePromptDialog`→`resume_transfer` end-to-end and added the gated PTY test (`CARGONAUT_PTY_TESTS=1`, enforced in CI). The PTY harness also lays groundwork for [#30](https://github.com/mohnkhan/cargonaut/issues/30).
 
 ---
 

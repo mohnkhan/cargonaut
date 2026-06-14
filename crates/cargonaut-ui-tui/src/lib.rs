@@ -23,7 +23,9 @@ pub use keymap::{
 pub use pane::PaneView;
 pub use theme::Theme;
 
-use cargonaut_core::{App, Command as AppCommand, DialogKind, Event as AppEvent, PaneId};
+use cargonaut_core::{
+    App, Command as AppCommand, DialogKind, Event as AppEvent, PaneId, ResumeOfferView,
+};
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as CtEvent, EventStream, KeyEvent, MouseButton,
     MouseEvent, MouseEventKind,
@@ -106,7 +108,8 @@ enum ActiveDialog {
         widget: ConfirmDialog,
         on_confirm: AppCommand,
     },
-    #[allow(dead_code)]
+    /// Launch-time resume prompt (Feature 037), shown when
+    /// `scan_resume_offers` finds orphan checkpoints.
     Resume(ResumePromptDialog),
     /// Single-line text input (mkdir name / select pattern).
     Input {
@@ -175,6 +178,19 @@ async fn run_loop<B: ratatui::backend::Backend>(
     let mut active_dialog: Option<ActiveDialog> = None;
     let mut chord_buf: Vec<KeyChord> = Vec::new();
     let mut quit = false;
+
+    // Feature 037: on launch, offer to resume any interrupted transfers
+    // whose checkpoints survive in the pane directories. A scan failure is
+    // non-fatal — fall through to the normal panels.
+    match app.scan_resume_offers().await {
+        Ok(offers) if !offers.is_empty() => {
+            active_dialog = Some(ActiveDialog::Resume(ResumePromptDialog::new(
+                offers.iter().map(resume_summary_from).collect(),
+            )));
+        }
+        Ok(_) => {}
+        Err(e) => status = format!("Resume scan failed: {e}"),
+    }
 
     // Periodic re-render so transfer progress updates show even without
     // input. 100 ms is well under FR-008's 500ms cancellation target.
@@ -355,11 +371,34 @@ async fn handle_key(
                 return Ok(true);
             }
             ActiveDialog::Resume(widget) => {
-                if let Some((_idx, _choice)) = widget.handle_key(key.code) {
-                    // T1.14/T1.15: actually dispatch the resume here.
-                    // For Phase 1 MVP we just dismiss after the first answer.
-                    *active_dialog = None;
-                    *mode = Mode::Pane;
+                if let Some((idx, choice)) = widget.handle_key(key.code) {
+                    // Feature 037: dispatch the choice into the App, then
+                    // rebuild the prompt from the remaining offers so the
+                    // indices never drift (R-005). Dismiss when empty.
+                    match choice {
+                        ResumeChoice::Resume => {
+                            let _ = app
+                                .resume_offer(idx)
+                                .await
+                                .map_err(|e| Error::Other(e.to_string()))?;
+                        }
+                        ResumeChoice::StartOver => {
+                            let _ = app
+                                .start_over_offer(idx)
+                                .await
+                                .map_err(|e| Error::Other(e.to_string()))?;
+                        }
+                        ResumeChoice::Skip => app.skip_offer(idx),
+                    }
+                    let remaining = app.pending_resume_views();
+                    if remaining.is_empty() {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    } else {
+                        *active_dialog = Some(ActiveDialog::Resume(ResumePromptDialog::new(
+                            remaining.iter().map(resume_summary_from).collect(),
+                        )));
+                    }
                 }
                 return Ok(true);
             }
@@ -742,6 +781,22 @@ fn make_dialog(kind: DialogKind) -> ActiveDialog {
             widget: ConfirmDialog::new(title, body),
             on_confirm: *on_confirm,
         },
+    }
+}
+
+/// Map a core [`ResumeOfferView`] onto the dialog's per-row summary
+/// (Feature 037). Strips the `file://` scheme for a tidier row.
+fn resume_summary_from(v: &ResumeOfferView) -> ResumableSummary {
+    fn short(s: &str) -> String {
+        s.strip_prefix("file://").unwrap_or(s).to_string()
+    }
+    ResumableSummary {
+        src: short(&v.src),
+        dst: short(&v.dst),
+        bytes_written_mib: v.bytes_written_mib,
+        src_size_mib: v.src_size_mib,
+        source_unchanged: v.source_unchanged,
+        dest_intact: v.dest_intact,
     }
 }
 
