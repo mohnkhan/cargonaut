@@ -70,8 +70,10 @@ in a unit test; full binary path covered by US3's PTY test.
 - [ ] **T007** [P] [US1] (red) `cargonaut-core` test for `scan_resume_offers`: stage a valid
   sidecar + partial destination in a temp pane dir (reuse the transfer crate's checkpoint
   staging helpers / `submit_transfer`+cancel), construct `App` pointed at it, assert ≥1 offer
-  returned and `pending_resumes` populated (contract C1); and a second case with no sidecars
-  returning empty, no error (C2). In `crates/cargonaut-core/src/lib.rs` tests.
+  returned and `pending_resumes` populated (contract C1); a second case with no sidecars
+  returning empty, no error (C2); and a third case where a malformed/garbage
+  `.cargonaut-transfer-*.json` sits in the dir — assert launch-scan returns no offer for it
+  and does not error (FR-010, C3). In `crates/cargonaut-core/src/lib.rs` tests.
 - [ ] **T008** [P] [US1] (red) `cargonaut-core` test for `resume_offer`: after a staged
   checkpoint, `resume_offer(0)` registers exactly one transfer, emits `TransferProgressed`,
   removes the offer (C6, C9); and the mismatch case fails safe with no successful transfer
