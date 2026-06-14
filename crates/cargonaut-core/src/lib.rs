@@ -1665,12 +1665,179 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quick_cd_popup_emits_status_stub() {
+    async fn quick_cd_popup_dispatch_is_noop_in_core() {
+        // Feature 038: the UI intercepts Alt-c to open the dialog; reaching
+        // core's dispatch is a no-op (no status stub anymore).
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let events = app.dispatch(Command::QuickCdPopup).await.unwrap();
-        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+        assert!(events.is_empty());
+    }
+
+    // ---------- Feature 038: quick-cd resolution + navigation (US1) ----------
+
+    #[tokio::test]
+    async fn quick_cd_absolute_path_navigates_active_pane() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let target = format!("{}/sub", td_l.path().to_str().unwrap());
+        app.quick_cd(&target).await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+        // Inactive pane untouched (FR-013).
+        assert!(app
+            .pane(PaneId::Right)
+            .cwd
+            .display()
+            .ends_with(td_r.path().file_name().unwrap().to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn quick_cd_relative_path_resolves_against_cwd() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.quick_cd("sub").await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+    }
+
+    #[tokio::test]
+    async fn quick_cd_dotdot_ascends() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let base = app.pane(PaneId::Left).cwd.clone();
+        app.quick_cd("sub").await.unwrap();
+        app.quick_cd("..").await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cwd, base);
+    }
+
+    #[tokio::test]
+    async fn quick_cd_trailing_slash_ignored() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.quick_cd("sub/").await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+    }
+
+    #[tokio::test]
+    async fn quick_cd_records_history() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let base = app.pane(PaneId::Left).cwd.clone();
+        app.quick_cd("sub").await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).dir_history_back, vec![base]);
+    }
+
+    #[tokio::test]
+    async fn quick_cd_empty_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.pane(PaneId::Left).cwd.clone();
+        let evs = app.quick_cd("   ").await.unwrap();
+        assert!(evs.is_empty());
+        assert_eq!(app.pane(PaneId::Left).cwd, before);
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
+    }
+
+    #[tokio::test]
+    async fn quick_cd_nonexistent_errors_without_navigating() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.pane(PaneId::Left).cwd.clone();
+        let res = app.quick_cd("/no/such/place/xyz123").await;
+        assert!(res.is_err());
+        assert_eq!(app.pane(PaneId::Left).cwd, before);
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
+    }
+
+    #[tokio::test]
+    async fn quick_cd_file_target_errors_without_navigating() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("afile"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.pane(PaneId::Left).cwd.clone();
+        let res = app.quick_cd("afile").await;
+        assert!(res.is_err());
+        assert_eq!(app.pane(PaneId::Left).cwd, before);
+    }
+
+    // ---------- Feature 038: completion (US2) ----------
+
+    #[tokio::test]
+    async fn complete_cd_unique_prefix_single_candidate() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("src")).await.unwrap();
+        fs::create_dir(td_l.path().join("docs")).await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let c = app.complete_cd("sr").await;
+        assert_eq!(c.len(), 1);
+        assert!(c[0].ends_with("/src"));
+    }
+
+    #[tokio::test]
+    async fn complete_cd_multiple_matches_in_sort_order() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for d in ["app", "apple", "apply"] {
+            fs::create_dir(td_l.path().join(d)).await.unwrap();
+        }
+        let app = make_app(&td_l, &td_r).await;
+        let c = app.complete_cd("app").await;
+        assert_eq!(c.len(), 3);
+        assert!(c[0].ends_with("/app"));
+        assert!(c[1].ends_with("/apple"));
+        assert!(c[2].ends_with("/apply"));
+    }
+
+    #[tokio::test]
+    async fn complete_cd_excludes_files() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("data")).await.unwrap();
+        fs::write(td_l.path().join("database"), b"x").await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let c = app.complete_cd("dat").await;
+        assert_eq!(c.len(), 1);
+        assert!(c[0].ends_with("/data"));
+    }
+
+    #[tokio::test]
+    async fn complete_cd_recent_dir_ordered_first() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("alpha")).await.unwrap();
+        fs::create_dir(td_l.path().join("apex")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Visit alpha then ascend, so dir_history_back contains [base, alpha].
+        app.quick_cd("alpha").await.unwrap();
+        app.quick_cd("..").await.unwrap();
+        let c = app.complete_cd("a").await;
+        // alpha is recent → first; apex is filesystem-only → after; deduped.
+        assert_eq!(c.len(), 2, "got {c:?}");
+        assert!(c[0].ends_with("/alpha"), "recent dir must lead: {c:?}");
+        assert!(c[1].ends_with("/apex"), "{c:?}");
+    }
+
+    #[tokio::test]
+    async fn complete_cd_no_match_is_empty() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("src")).await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        assert!(app.complete_cd("zzz").await.is_empty());
     }
 
     #[tokio::test]
