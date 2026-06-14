@@ -178,6 +178,167 @@ impl TextInputDialog {
 }
 
 // =====================================================================
+// PathInputDialog (Feature 038 quick-cd; reusable text-input + completion)
+// =====================================================================
+
+/// What a key did to a [`PathInputDialog`]. Completion is asynchronous
+/// (the candidate directories come from the VFS), so the widget cannot
+/// fetch them itself — on a stale cache it asks the event loop to fetch
+/// via [`PathInputAction::RequestCompletions`] and receives the result
+/// through [`PathInputDialog::apply_completions`].
+///
+/// Designed to be reused by the deferred tasks panel (#32) and panel
+/// filter prompt (#33), which need the same "text input + caller-supplied
+/// completion/validation" shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathInputAction {
+    /// Key handled; nothing further for the event loop to do.
+    Consumed,
+    /// The buffer changed (any cached completions are now stale).
+    Edited,
+    /// Tab on a stale cache — the loop must fetch candidates for `text`
+    /// and feed them back via [`PathInputDialog::apply_completions`].
+    RequestCompletions {
+        /// The current buffer text to complete.
+        text: String,
+    },
+    /// Enter — accept this text.
+    Submit(String),
+    /// Esc — cancel.
+    Cancel,
+}
+
+/// A single-line modal text-input dialog with directory tab-completion
+/// (FR-012 quick-cd). Prefilled on open; Tab completes/cycles the buffer
+/// against caller-supplied candidates; Enter submits, Esc cancels.
+#[derive(Debug, Clone)]
+pub struct PathInputDialog {
+    title: String,
+    prompt: String,
+    buffer: String,
+    /// Cached completion candidates from the last fetch.
+    completions: Vec<String>,
+    /// The buffer value `completions` was computed for; when it differs
+    /// from `buffer` the cache is stale and Tab re-requests.
+    completion_for: String,
+    /// Position within `completions` for the current cycle.
+    cycle_idx: usize,
+    /// Inline error (failed accept); cleared on the next edit.
+    error: Option<String>,
+    /// Transient hint, e.g. "(no matches)"; cleared on the next edit.
+    note: Option<String>,
+}
+
+impl PathInputDialog {
+    /// New prompt prefilled with `initial`, cursor conceptually at end.
+    pub fn new(
+        title: impl Into<String>,
+        prompt: impl Into<String>,
+        initial: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            prompt: prompt.into(),
+            buffer: initial.into(),
+            completions: Vec::new(),
+            completion_for: String::new(),
+            cycle_idx: 0,
+            error: None,
+            note: None,
+        }
+    }
+
+    /// Current buffer text.
+    pub fn value(&self) -> &str {
+        &self.buffer
+    }
+
+    /// True when the cached completions still apply to the current buffer.
+    fn cache_fresh(&self) -> bool {
+        !self.completions.is_empty() && self.completion_for == self.buffer
+    }
+
+    /// Handle a key. See [`PathInputAction`].
+    pub fn handle_key(&mut self, code: KeyCode) -> PathInputAction {
+        match code {
+            KeyCode::Esc => PathInputAction::Cancel,
+            KeyCode::Enter => PathInputAction::Submit(self.buffer.clone()),
+            KeyCode::Backspace => {
+                self.buffer.pop();
+                self.error = None;
+                self.note = None;
+                PathInputAction::Edited
+            }
+            KeyCode::Char(c) => {
+                self.buffer.push(c);
+                self.error = None;
+                self.note = None;
+                PathInputAction::Edited
+            }
+            KeyCode::Tab => {
+                if self.cache_fresh() {
+                    // Cycle to the next candidate, wrapping.
+                    self.cycle_idx = (self.cycle_idx + 1) % self.completions.len();
+                    self.buffer = self.completions[self.cycle_idx].clone();
+                    self.completion_for = self.buffer.clone();
+                    PathInputAction::Consumed
+                } else {
+                    PathInputAction::RequestCompletions {
+                        text: self.buffer.clone(),
+                    }
+                }
+            }
+            _ => PathInputAction::Consumed,
+        }
+    }
+
+    /// Install freshly-fetched candidates (response to a
+    /// [`PathInputAction::RequestCompletions`]). Applies the first
+    /// candidate and marks the cache fresh; an empty list sets the
+    /// "(no matches)" note and leaves the buffer untouched (FR-009).
+    pub fn apply_completions(&mut self, candidates: Vec<String>) {
+        if candidates.is_empty() {
+            self.completions.clear();
+            self.note = Some("(no matches)".into());
+            return;
+        }
+        self.buffer = candidates[0].clone();
+        self.completion_for = self.buffer.clone();
+        self.cycle_idx = 0;
+        self.completions = candidates;
+        self.error = None;
+        self.note = None;
+    }
+
+    /// Show an inline error and keep the prompt open (failed accept,
+    /// FR-006). Cleared on the next edit.
+    pub fn set_error(&mut self, msg: impl Into<String>) {
+        self.error = Some(msg.into());
+    }
+
+    /// Render the dialog (modal, clears its rect first).
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title(self.title.as_str())
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        let mut body = format!("{}\n> {}_", self.prompt, self.buffer);
+        if let Some(note) = &self.note {
+            body.push_str(&format!("\n{note}"));
+        }
+        if let Some(err) = &self.error {
+            body.push_str(&format!("\n✗ {err}"));
+        }
+        Paragraph::new(body)
+            .block(block)
+            .style(theme.dialog_style())
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+}
+
+// =====================================================================
 // ResumePromptDialog (offered on launch when scan_resumable finds work)
 // =====================================================================
 
