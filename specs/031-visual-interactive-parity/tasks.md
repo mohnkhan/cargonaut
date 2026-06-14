@@ -22,7 +22,7 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 - [x] T001 Confirm workspace builds clean before changes: `make build && make test` green; record baseline test count + binary size in the PR scratch notes.
 - [ ] T002 [P] Add `globset` dependency to `crates/cargonaut-core/Cargo.toml` (and re-export path if needed) for pattern selection (US5); verify `cargo tree` shows it and binary-size headroom remains within NFR-001.
-- [ ] T003 [P] Add the `theme` and `chrome` module declarations as empty stubs in `crates/cargonaut-ui-tui/src/lib.rs` (`pub mod theme; pub mod chrome;`) with `#![warn(missing_docs)]`-compliant module docs so later phases compile incrementally.
+- [x] T003 [P] Add the `theme` and `chrome` module declarations as empty stubs in `crates/cargonaut-ui-tui/src/lib.rs` (`pub mod theme; pub mod chrome;`) with `#![warn(missing_docs)]`-compliant module docs so later phases compile incrementally.
 
 ---
 
@@ -32,7 +32,7 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 - [x] T004 Flip `UiConfig::mouse` default to `true` in `crates/cargonaut-config/src/lib.rs` (US3 default-on); update the doc comment and `config.schema.json` default; add/adjust a config default unit test (red→green).
 - [x] T005 Fix the dead CLI flags in `crates/cargonaut-bin/src/main.rs`: merge `cli.theme` → `config.ui.theme` and `cli.mc_keys` → `config.ui.mc_keys` before `App::new`; add a `--no-mouse` flag that sets `config.ui.mouse=false`. (red: test that `--theme X`/`--no-mouse` change the effective config; green: implement.)
-- [ ] T006 Introduce `FrameLayout { left, right, status, menu, fkeys, ministatus_left, ministatus_right }` in `crates/cargonaut-ui-tui/src/lib.rs` and make `draw_frame` RETURN it (lift the rects currently local at the old draw_frame body); store the latest in `run_loop`. (red: unit test asserting `draw_frame` yields the expected rects for a known terminal size via `TestBackend`; green: implement.) Blocks all mouse hit-testing.
+- [x] T006 Introduce `FrameLayout { left, right, status, menu, fkeys, ministatus_left, ministatus_right }` in `crates/cargonaut-ui-tui/src/lib.rs` and make `draw_frame` RETURN it (lift the rects currently local at the old draw_frame body); store the latest in `run_loop`. (red: unit test asserting `draw_frame` yields the expected rects for a known terminal size via `TestBackend`; green: implement.) Blocks all mouse hit-testing.
 - [ ] T007 Add the new `Command` variants to `crates/cargonaut-core/src/lib.rs` `Command` enum: `CursorTo(usize)`, `Mkdir(String)`, `SelectByPattern(String)`, `UnselectByPattern(String)`, `CycleSortKey`, `ToggleSortReverse`, `CycleListingMode`, `RecursiveDirSize`, `ToggleQuickView`, `ViewExternal`, `EditExternal`, `OpenMenuBar`, `ShowHelp` (compile-only stubs returning a `Status("not yet implemented")` where behavior lands later). Keeps the crate compiling for parallel work.
 
 **Checkpoint**: workspace compiles; config + flags + layout-lift + command surface in place.
@@ -73,18 +73,18 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 ### Tests (red)
 
-- [ ] T018 [P] [US2] `FunctionKeyBar` render + label test in `crates/cargonaut-ui-tui/src/chrome.rs` (`TestBackend`): the 10 canonical labels render; per-button sub-rects are exposed for hit-testing.
-- [ ] T019 [P] [US2] `MenuBar` test: titles render; opening a menu yields an item list; selecting an item resolves to the expected `Command`.
-- [ ] T020 [P] [US2] Mini-status test in `pane.rs`/`chrome.rs`: highlighted entry produces a status line containing name/size/mtime/perms.
-- [ ] T021 [P] [US2] Narrow-terminal degrade test: rendering chrome at width 20 truncates labels and does not panic (FR-012).
+- [x] T018 [P] [US2] `FunctionKeyBar` render + label test in `crates/cargonaut-ui-tui/src/chrome.rs` (`TestBackend`): the 10 canonical labels render; per-button sub-rects are exposed for hit-testing.
+- [x] T019 [P] [US2] `MenuBar` test: titles render; opening a menu yields an item list; selecting an item resolves to the expected `Command`.
+- [x] T020 [P] [US2] Mini-status test in `pane.rs`/`chrome.rs`: highlighted entry produces a status line containing name/size/mtime/perms.
+- [x] T021 [P] [US2] Narrow-terminal degrade test: rendering chrome at width 20 truncates labels and does not panic (FR-012).
 
 ### Implementation (green)
 
-- [ ] T022 [US2] Implement `FunctionKeyBar` (labels F1..F10 per contracts/commands-delta.md; `available` flag) and `MenuBar` (+ dropdown overlay) widgets in `chrome.rs`, themed via `&Theme`, exposing their `Rect`s.
-- [ ] T023 [US2] Implement per-pane `MiniStatus` line (name/size/mtime/perms via `config.ui.date_format`).
-- [ ] T024 [US2] Extend the main layout in `draw_frame` to `[menubar(1), panes(min), ministatus(1)×2, status(1), fkeybar(1)]`; populate the menu/fkey/ministatus fields of `FrameLayout` (T006); degrade constraints on small terminals.
-- [ ] T025 [US2] Wire menu/F-key activation through the keyboard path: add `OpenMenuBar`/`ShowHelp` handling and menu-item → `Command` dispatch in `run_loop`; deferred commands emit a "not yet available" status (FR-011) — never a silent no-op.
-- [ ] T026 [US2] Add/confirm bindings in `design/contracts/keymap.toml` for F9 menu, F1 help (single source of truth, §III); ensure `ui_command_to_core` maps `OpenMenuBar`/`ShowHelp`.
+- [x] T022 [US2] Implement `FunctionKeyBar` (labels F1..F10 per contracts/commands-delta.md; `available` flag) and `MenuBar` (+ dropdown overlay) widgets in `chrome.rs`, themed via `&Theme`, exposing their `Rect`s.
+- [x] T023 [US2] Implement per-pane `MiniStatus` line (name/size/mtime/perms via `config.ui.date_format`).
+- [x] T024 [US2] Extend the main layout in `draw_frame` to `[menubar(1), panes(min), ministatus(1)×2, status(1), fkeybar(1)]`; populate the menu/fkey/ministatus fields of `FrameLayout` (T006); degrade constraints on small terminals.
+- [x] T025 [US2] Wire menu/F-key activation through the keyboard path: add `OpenMenuBar`/`ShowHelp` handling and menu-item → `Command` dispatch in `run_loop`; deferred commands emit a "not yet available" status (FR-011) — never a silent no-op.
+- [x] T026 [US2] Add/confirm bindings in `design/contracts/keymap.toml` for F9 menu, F1 help (single source of truth, §III); ensure `ui_command_to_core` maps `OpenMenuBar`/`ShowHelp`.
 
 **Checkpoint**: US2 demoable — recognizable OFM chrome; actions discoverable and labeled.
 
@@ -98,17 +98,17 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 ### Tests (red)
 
-- [ ] T027 [P] [US3] Hit-test unit tests per contracts/mouse-interaction.md: T-MOUSE-2 click in right panel sets active=Right + correct index; T-MOUSE-6 click outside regions is a no-op; row→index math with scroll offset.
-- [ ] T028 [P] [US3] Double-click rule test (T-MOUSE-3): two left-downs same row within window → `Descend`; different rows → two cursor moves, no descend.
-- [ ] T029 [P] [US3] `CursorTo` core dispatch test in `crates/cargonaut-core` (tokio+TempDir+LocalFs): `CursorTo(n)` clamps to visible len and survives a subsequent `sync_from`.
-- [ ] T030 [P] [US3] Capture-disabled test (T-MOUSE-1): with `mouse=false`, a synthesized mouse event changes no state.
+- [x] T027 [P] [US3] Hit-test unit tests per contracts/mouse-interaction.md: T-MOUSE-2 click in right panel sets active=Right + correct index; T-MOUSE-6 click outside regions is a no-op; row→index math with scroll offset.
+- [x] T028 [P] [US3] Double-click rule test (T-MOUSE-3): two left-downs same row within window → `Descend`; different rows → two cursor moves, no descend.
+- [x] T029 [P] [US3] `CursorTo` core dispatch test in `crates/cargonaut-core` (tokio+TempDir+LocalFs): `CursorTo(n)` clamps to visible len and survives a subsequent `sync_from`.
+- [x] T030 [P] [US3] Capture-disabled test (T-MOUSE-1): with `mouse=false`, a synthesized mouse event changes no state.
 
 ### Implementation (green)
 
-- [ ] T031 [US3] Implement `Command::CursorTo(usize)` dispatch in `crates/cargonaut-core/src/lib.rs` (clamp to visible subset; set authoritative pane cursor).
-- [ ] T032 [US3] Enable/disable `EnableMouseCapture`/`DisableMouseCapture` in `run()` gated on `app.config().ui.mouse` (default on); symmetric best-effort teardown.
-- [ ] T033 [US3] Implement `handle_mouse(MouseEvent, &FrameLayout, …)` in `run_loop`: left-click → focus + `CursorTo`; double-click (track `(col,row,Instant)`, ~400 ms) → `Descend`; scroll → `CursorUp/Down`; replace the catch-all that currently drops mouse events.
-- [ ] T034 [US3] Hit-test the chrome: clicking an F-key button (e.g. #7) or a menu title dispatches its `Command`/opens the menu (uses T022 sub-rects). (T-MOUSE-5)
+- [x] T031 [US3] Implement `Command::CursorTo(usize)` dispatch in `crates/cargonaut-core/src/lib.rs` (clamp to visible subset; set authoritative pane cursor).
+- [x] T032 [US3] Enable/disable `EnableMouseCapture`/`DisableMouseCapture` in `run()` gated on `app.config().ui.mouse` (default on); symmetric best-effort teardown.
+- [x] T033 [US3] Implement `handle_mouse(MouseEvent, &FrameLayout, …)` in `run_loop`: left-click → focus + `CursorTo`; double-click (track `(col,row,Instant)`, ~400 ms) → `Descend`; scroll → `CursorUp/Down`; replace the catch-all that currently drops mouse events.
+- [x] T034 [US3] Hit-test the chrome: clicking an F-key button (e.g. #7) or a menu title dispatches its `Command`/opens the menu (uses T022 sub-rects). (T-MOUSE-5)
 - [ ] T035 [US3] Add the runtime mouse-toggle key + document the hold-modifier bypass (FR-013) in keymap.toml + help text.
 
 **Checkpoint**: US3 demoable — full mouse-driven navigation; the headline defect is visibly fixed.

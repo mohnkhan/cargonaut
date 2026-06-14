@@ -11,10 +11,10 @@
 | Cold launch | < 150 ms | **in-process ~2.5 ms** (binary cold-launch via hyperfine TBD) |
 | Local-local copy throughput | ≥ 80% of `cp(1)` | **bench available** (`cargo bench -p cargonaut-transfer --bench local_copy_vs_cp`); release-mode result host-dependent |
 | Resident memory | ≤ 64 MiB | **bench available** (`cargo bench -p cargonaut-core --bench rss_headroom`, Linux only) |
-| Unit tests | All pass | **159/159** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 12 PaneView + 13 dialogs + 7 theme + 24 App) |
+| Unit tests | All pass | **175/175** (15 VfsPath + 10 Config + 4 dyn-dispatch + 35 LocalFs + 23 transfer + 16 keymap + 12 PaneView + 13 dialogs + 7 theme + 9 chrome + 5 mouse + 26 App) |
 | Integration tests | All pass | **3/3** (2 cancellation + 1 concurrent-transfers); 2 `#[ignore]` PTY stubs for T1.07/T1.08 |
 | Benches | Build clean | 5 benches across transfer/core/ui-tui (all `harness=false`; env-overridable gates) |
-| Binary size | ≤ 8 MiB stripped (NFR-001) | **1.92 MiB** (CI-gated) |
+| Binary size | ≤ 8 MiB stripped (NFR-001) | **1.94 MiB** (CI-gated) |
 | Clippy | `-D warnings` clean | **green** (workspace, `--all-targets`) |
 | CI pipeline | green | lint + build + unit-test + docs-gate + binary-size all **green** |
 
@@ -24,7 +24,11 @@ Update this table on every feature merge (per [CLAUDE.md](./CLAUDE.md) Documenta
 
 Most recent first.
 
-- **Feature 031 — Visual & interactive parity layer (US1: theme system)** (2026-06-14, in progress). First slice of the gap-analysis-driven parity work: a typed color `Theme` (`cargonaut-ui-tui::theme`) with two built-ins — `commander-dark` (new default, the signature blue-panel/bright-directory/cyan-selection look) and `monochrome` (16-color-safe fallback). `PaneView::render` now colors each row by entry kind / mode / hidden / marked; borders, status line, and dialogs are themed instead of bare reverse-video. `config.ui.theme` defaults to `commander-dark` and `ui.mouse` defaults to `true`; the previously-dead `--theme` / `--mc-keys` flags now apply and a `--no-mouse` flag was added. Unknown theme names fall back to the default with a non-fatal notice (FR-001..007). Remaining user stories — US2 chrome (menu/F-key bar), US3 mouse, US4 listing columns/sort/quick-view, US5 mkdir/pattern-select/progress-dialog/F3-F4 — are specified, planned, and tasked (`specs/031-visual-interactive-parity/`) and queued. +8 unit tests (theme resolution/distinctness/themed render); workspace green; 1.92 MiB binary.
+- **Feature 031 — Visual & interactive parity layer (US1 theme + US2 chrome + US3 mouse)** (2026-06-14, in progress). Gap-analysis-driven parity work; three of five user stories landed:
+  - **US1 theme**: typed color `Theme` (`cargonaut-ui-tui::theme`) with `commander-dark` (new default — signature blue-panel/bright-directory/cyan-selection look) and `monochrome` (16-color-safe). Per-row coloring by kind/mode/hidden/marked; themed borders, status line, dialogs; `--theme` now applies; unknown names fall back with a notice (FR-001..007).
+  - **US2 chrome** (`cargonaut-ui-tui::chrome`): top pull-down **menu bar** (Left/File/Command/Options/Right, openable + navigable), bottom **function-key bar** (`1Help…10Quit`), per-pane **mini-status** (perms/size/mtime/name), and an F1 help overlay. Deferred actions report "not yet available" rather than doing nothing (FR-008..012, FR-011).
+  - **US3 mouse** (default on; `--no-mouse` disables): click a row to focus the pane + move the cursor, double-click to enter a directory, wheel to scroll, click F-key buttons / menu titles to invoke them; `EnableMouseCapture` on start, restored on exit; new `App::Command::CursorTo` keeps a clicked cursor authoritative (FR-013..018).
+  - Remaining: **US4** (listing columns/sort/quick-view/dir-size) and **US5** (mkdir/pattern-select/progress-dialog/F3-F4 external) are specified, planned, and tasked (`specs/031-visual-interactive-parity/`). +24 unit tests; workspace green (175 unit + 3 integration); 1.94 MiB binary.
 
 - **Feature 029 — Constitution §V (SSD preservation) + `make check-tmpfs` guard** (2026-05-21). Elevates the "MANDATORY: target/ in tmpfs" prose rule from CLAUDE.md to constitutional Principle V (NON-NEGOTIABLE, dev-host scope; CI exempt via `$CI=true`); bumps the constitution to v1.1.0. New `scripts/check-tmpfs.sh` errors loudly when `target/` is a real on-SSD directory; wired as a prereq of `make build` / `test` / `bench` / `clippy`. Per-session waiver via `CARGONAUT_ALLOW_SSD_TARGET=1` (requires Learnings.md entry per §V). Triggered by ~2.8 GB of SSD writes caused by a stray `cargo clean` invocation that bypassed `make clean`'s symlink-aware logic.
 

@@ -6,10 +6,12 @@
 
 #![warn(missing_docs)]
 
+pub mod chrome;
 pub mod dialog;
 pub mod keymap;
 pub mod pane;
 pub mod theme;
+pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
     ConfirmDialog, ConfirmOutcome, ResumableSummary, ResumeChoice, ResumePromptDialog,
 };
@@ -21,7 +23,10 @@ pub use pane::PaneView;
 pub use theme::Theme;
 
 use cargonaut_core::{App, Command as AppCommand, DialogKind, Event as AppEvent, PaneId};
-use crossterm::event::{Event as CtEvent, EventStream, KeyEvent};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event as CtEvent, EventStream, KeyEvent, MouseButton,
+    MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -33,6 +38,7 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use std::io::stdout;
+use std::time::Instant;
 
 /// Default keymap (the bundled `design/contracts/keymap.toml`), embedded
 /// at compile time so the binary doesn't need a runtime file lookup.
@@ -44,20 +50,51 @@ const DEFAULT_KEYMAP: &str = include_str!("../../../design/contracts/keymap.toml
 /// state, and restores the terminal on exit (best-effort even on panic
 /// — wrapped in a teardown that always runs).
 pub async fn run(app: &mut App) -> Result<(), Error> {
+    // US3 (FR-013): mouse is captured by default (config.ui.mouse, default
+    // true); `--no-mouse` / config disables it, preserving terminal-native
+    // text selection.
+    let mouse_enabled = app.config().ui.mouse;
     enable_raw_mode().map_err(Error::Terminal)?;
     let mut out = stdout();
     execute!(out, EnterAlternateScreen).map_err(Error::Terminal)?;
+    if mouse_enabled {
+        execute!(out, EnableMouseCapture).map_err(Error::Terminal)?;
+    }
     let backend = CrosstermBackend::new(out);
     let mut term = Terminal::new(backend).map_err(Error::Terminal)?;
 
-    let result = run_loop(&mut term, app).await;
+    let result = run_loop(&mut term, app, mouse_enabled).await;
 
     // Teardown — always best-effort, even on error from the loop.
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     let _ = disable_raw_mode();
     let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
     let _ = term.show_cursor();
 
     result
+}
+
+/// On-screen rectangles for the most recent frame, used for mouse
+/// hit-testing (US3). Stored by the loop, produced by [`draw_frame`].
+#[derive(Debug, Clone, Copy, Default)]
+struct FrameLayout {
+    menu: Rect,
+    /// Inner (list) rect of the left pane.
+    left: Rect,
+    /// Inner (list) rect of the right pane.
+    right: Rect,
+    fkeys: Rect,
+}
+
+/// Loop-owned chrome + mouse state (kept in one struct to avoid a
+/// double-digit argument list on the key/mouse handlers).
+struct UiState {
+    menu: MenuBar,
+    fkeybar: FunctionKeyBar,
+    layout: FrameLayout,
+    last_click: Option<(u16, u16, Instant)>,
+    help_open: bool,
+    mouse_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -73,9 +110,20 @@ enum ActiveDialog {
 async fn run_loop<B: ratatui::backend::Backend>(
     term: &mut Terminal<B>,
     app: &mut App,
+    mouse_enabled: bool,
 ) -> Result<(), Error> {
     let keymap = Keymap::load(DEFAULT_KEYMAP).expect("bundled keymap.toml must parse");
     let mut events = EventStream::new();
+
+    // US2/US3: chrome widgets + mouse/menu state.
+    let mut ui = UiState {
+        menu: MenuBar::new(),
+        fkeybar: FunctionKeyBar::new(),
+        layout: FrameLayout::default(),
+        last_click: None,
+        help_open: false,
+        mouse_enabled,
+    };
 
     // US1 (FR-001/005/006): resolve the configured theme once. An unknown
     // name falls back to the built-in default with a non-fatal notice.
@@ -118,8 +166,14 @@ async fn run_loop<B: ratatui::backend::Backend>(
             status.clone()
         };
         let dialog_ref = active_dialog.as_mut();
+        let ms_left = chrome::mini_status_line(app.pane(PaneId::Left));
+        let ms_right = chrome::mini_status_line(app.pane(PaneId::Right));
+        let mut layout = FrameLayout::default();
+        let menu = &mut ui.menu;
+        let fkeybar = &ui.fkeybar;
+        let help_open = ui.help_open;
         term.draw(|f| {
-            draw_frame(
+            layout = draw_frame(
                 f,
                 &mut left,
                 &mut right,
@@ -128,9 +182,15 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 &status_line,
                 dialog_ref,
                 &theme,
+                menu,
+                fkeybar,
+                &ms_left,
+                &ms_right,
+                help_open,
             );
         })
         .map_err(Error::Terminal)?;
+        ui.layout = layout;
 
         if quit {
             return Ok(());
@@ -149,13 +209,17 @@ async fn run_loop<B: ratatui::backend::Backend>(
                             &mut chord_buf,
                             &mut status,
                             &mut quit,
+                            &mut ui,
                         ).await?;
                         if !cont { return Ok(()); }
+                    }
+                    Some(Ok(CtEvent::Mouse(m))) => {
+                        handle_mouse(m, app, &mut ui, &left, &right, &mut status).await?;
                     }
                     Some(Ok(CtEvent::Resize(_, _))) => {
                         // Loop iter will re-render.
                     }
-                    Some(Ok(_)) => {} // mouse / focus events — ignored for Phase 1
+                    Some(Ok(_)) => {} // focus/paste events — ignored
                     Some(Err(e)) => return Err(Error::Terminal(e)),
                     None => return Ok(()),
                 }
@@ -180,7 +244,37 @@ async fn handle_key(
     chord_buf: &mut Vec<KeyChord>,
     status: &mut String,
     quit: &mut bool,
+    ui: &mut UiState,
 ) -> Result<bool, Error> {
+    use crossterm::event::KeyCode;
+
+    // Help overlay swallows the next key (any key dismisses it).
+    if ui.help_open {
+        ui.help_open = false;
+        return Ok(true);
+    }
+
+    // Open menu swallows keys (US2): navigate / select / close.
+    if ui.menu.is_open() {
+        match key.code {
+            KeyCode::Esc => ui.menu.close(),
+            KeyCode::Down | KeyCode::Char('j') => ui.menu.select_down(),
+            KeyCode::Up | KeyCode::Char('k') => ui.menu.select_up(),
+            KeyCode::Left | KeyCode::Char('h') => ui.menu.prev_menu(),
+            KeyCode::Right | KeyCode::Char('l') => ui.menu.next_menu(),
+            KeyCode::Enter => {
+                if let Some(cmd) = ui.menu.selected_command() {
+                    ui.menu.close();
+                    dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
+                } else {
+                    ui.menu.close();
+                }
+            }
+            _ => {}
+        }
+        return Ok(true);
+    }
+
     // Dialog mode swallows all keys.
     if let Some(dialog) = active_dialog.as_mut() {
         match dialog {
@@ -230,17 +324,7 @@ async fn handle_key(
     match keymap.lookup_sequence(*mode, chord_buf) {
         SeqLookup::Command(cmd) => {
             chord_buf.clear();
-            if let Some(core_cmd) = ui_command_to_core(cmd) {
-                let events = app
-                    .dispatch(core_cmd)
-                    .await
-                    .map_err(|e| Error::Other(e.to_string()))?;
-                for ev in events {
-                    apply_event(ev, app, mode, active_dialog, status, quit);
-                }
-            } else {
-                *status = format!("Unbound: {cmd:?}");
-            }
+            dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
         }
         SeqLookup::Pending => {
             *status = format!("Chord: {chord_buf:?}");
@@ -250,6 +334,152 @@ async fn handle_key(
         }
     }
     Ok(true)
+}
+
+/// Single dispatch path shared by keyboard chords, menu selection, and
+/// mouse clicks on the function-key bar. UI-only commands (open menu,
+/// help) are handled here; everything else maps to a core command, or
+/// reports "not yet available" when it's a deferred action (FR-011).
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_ui_command(
+    cmd: Command,
+    app: &mut App,
+    mode: &mut Mode,
+    active_dialog: &mut Option<ActiveDialog>,
+    status: &mut String,
+    quit: &mut bool,
+    ui: &mut UiState,
+) -> Result<(), Error> {
+    match cmd {
+        Command::OpenMenuBar => {
+            ui.menu.open_first();
+            return Ok(());
+        }
+        Command::ShowHelp => {
+            ui.help_open = true;
+            return Ok(());
+        }
+        _ => {}
+    }
+    if let Some(core_cmd) = ui_command_to_core(cmd) {
+        let events = app
+            .dispatch(core_cmd)
+            .await
+            .map_err(|e| Error::Other(e.to_string()))?;
+        for ev in events {
+            apply_event(ev, app, mode, active_dialog, status, quit);
+        }
+    } else {
+        // Labeled on the bar/menu but not yet wired (FR-011, SC-005) —
+        // never a silent no-op.
+        *status = format!("{} — not yet available", command_label(&cmd));
+    }
+    Ok(())
+}
+
+/// Human-facing label for a deferred command's status message.
+fn command_label(cmd: &Command) -> &'static str {
+    match cmd {
+        Command::Preview => "View (F3)",
+        Command::Edit => "Edit (F4)",
+        Command::Mkdir => "Mkdir (F7)",
+        Command::ShowUserMenu => "User menu (F2)",
+        Command::CycleSortKey => "Sort order",
+        Command::CycleListingMode => "Listing mode",
+        Command::RecursiveDirSize => "Directory size",
+        _ => "This action",
+    }
+}
+
+/// Handle a mouse event against the last-rendered [`FrameLayout`] (US3).
+async fn handle_mouse(
+    m: MouseEvent,
+    app: &mut App,
+    ui: &mut UiState,
+    left: &PaneView,
+    right: &PaneView,
+    status: &mut String,
+) -> Result<(), Error> {
+    if !ui.mouse_enabled {
+        return Ok(());
+    }
+    let (x, y) = (m.column, m.row);
+    match m.kind {
+        MouseEventKind::ScrollDown => {
+            let _ = app
+                .dispatch(AppCommand::CursorDown)
+                .await
+                .map_err(|e| Error::Other(e.to_string()))?;
+        }
+        MouseEventKind::ScrollUp => {
+            let _ = app
+                .dispatch(AppCommand::CursorUp)
+                .await
+                .map_err(|e| Error::Other(e.to_string()))?;
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            // 1. Function-key bar buttons (FR-017).
+            if let Some(cmd) = ui.fkeybar.command_at(ui.layout.fkeys, x, y) {
+                let mut mode = Mode::Pane;
+                let mut quit = false;
+                let mut dialog: Option<ActiveDialog> = None;
+                dispatch_ui_command(cmd, app, &mut mode, &mut dialog, status, &mut quit, ui).await?;
+                return Ok(());
+            }
+            // 2. Menu-bar titles (FR-017).
+            if let Some(idx) = ui.menu.title_at(ui.layout.menu, x, y) {
+                ui.menu.open(idx);
+                return Ok(());
+            }
+            // 3. Panel rows: focus + move cursor (FR-014), double-click
+            //    descends (FR-015).
+            let hit = if rect_contains(ui.layout.left, x, y) {
+                Some((PaneId::Left, AppCommand::FocusLeft, left, ui.layout.left))
+            } else if rect_contains(ui.layout.right, x, y) {
+                Some((PaneId::Right, AppCommand::FocusRight, right, ui.layout.right))
+            } else {
+                None
+            };
+            if let Some((_pane, focus_cmd, view, rect)) = hit {
+                let _ = app
+                    .dispatch(focus_cmd)
+                    .await
+                    .map_err(|e| Error::Other(e.to_string()))?;
+                let row = (y - rect.y) as usize;
+                let index = view.viewport_top() + row;
+                let _ = app
+                    .dispatch(AppCommand::CursorTo(index))
+                    .await
+                    .map_err(|e| Error::Other(e.to_string()))?;
+                // Double-click detection: same cell within 400ms.
+                let is_double = ui
+                    .last_click
+                    .map(|(lx, ly, t)| lx == x && ly == y && t.elapsed().as_millis() < 400)
+                    .unwrap_or(false);
+                if is_double {
+                    let evs = app
+                        .dispatch(AppCommand::Descend)
+                        .await
+                        .map_err(|e| Error::Other(e.to_string()))?;
+                    for ev in evs {
+                        if let AppEvent::Status(s) = ev {
+                            *status = s;
+                        }
+                    }
+                    ui.last_click = None;
+                } else {
+                    ui.last_click = Some((x, y, Instant::now()));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// True if `(x, y)` is inside `r`.
+fn rect_contains(r: Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
 fn apply_event(
@@ -337,25 +567,45 @@ fn draw_frame(
     status: &str,
     dialog: Option<&mut ActiveDialog>,
     theme: &Theme,
-) {
+    menu: &mut MenuBar,
+    fkeybar: &FunctionKeyBar,
+    ms_left: &str,
+    ms_right: &str,
+    help_open: bool,
+) -> FrameLayout {
+    use ratatui::widgets::Widget;
     let area = f.size();
+    // US2 layout: [menu bar | panes | status | fkey bar].
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1), // menu bar
+            Constraint::Min(3),    // panes
+            Constraint::Length(1), // status
+            Constraint::Length(1), // function-key bar
+        ])
         .split(area);
     let pane_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(main_chunks[0]);
+        .split(main_chunks[1]);
 
-    draw_pane(f, left, pane_chunks[0], active == PaneId::Left, theme);
-    draw_pane(f, right, pane_chunks[1], active == PaneId::Right, theme);
+    let left_inner = draw_pane(f, left, pane_chunks[0], active == PaneId::Left, theme, ms_left);
+    let right_inner = draw_pane(f, right, pane_chunks[1], active == PaneId::Right, theme, ms_right);
 
     // US1 (FR-002): status bar themed instead of bare reverse-video.
     let status_text = format!(" [{mode:?}]  {status}");
-    let para = Paragraph::new(status_text).style(theme.status_style());
-    use ratatui::widgets::Widget;
-    para.render(main_chunks[1], f.buffer_mut());
+    Paragraph::new(status_text)
+        .style(theme.status_style())
+        .render(main_chunks[2], f.buffer_mut());
+
+    // US2: function-key bar (bottom) + menu bar (top, may drop down over panes).
+    fkeybar.render(main_chunks[3], f.buffer_mut(), theme);
+    menu.render(main_chunks[0], f.buffer_mut(), theme);
+
+    if help_open {
+        draw_help(f, theme, area);
+    }
 
     if let Some(d) = dialog {
         let darea = centered_rect(60, 30, area);
@@ -364,9 +614,31 @@ fn draw_frame(
             ActiveDialog::Resume(widget) => widget.render(darea, f.buffer_mut(), theme),
         }
     }
+
+    FrameLayout {
+        menu: main_chunks[0],
+        left: left_inner,
+        right: right_inner,
+        fkeys: main_chunks[3],
+    }
 }
 
-fn draw_pane(f: &mut ratatui::Frame, view: &mut PaneView, area: Rect, focused: bool, theme: &Theme) {
+/// Draw one pane (list + per-pane mini-status). Returns the inner list
+/// rect for mouse hit-testing (US3).
+fn draw_pane(
+    f: &mut ratatui::Frame,
+    view: &mut PaneView,
+    area: Rect,
+    focused: bool,
+    theme: &Theme,
+    mini_status: &str,
+) -> Rect {
+    use ratatui::widgets::Widget;
+    // Split the column into the list (with border) + a 1-row mini-status.
+    let col = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(2), Constraint::Length(1)])
+        .split(area);
     let title = view.cwd.display();
     // US1 (FR-002): panel background + focus-colored border from the theme.
     let block = Block::default()
@@ -374,10 +646,39 @@ fn draw_pane(f: &mut ratatui::Frame, view: &mut PaneView, area: Rect, focused: b
         .borders(Borders::ALL)
         .border_style(theme.border_style(focused))
         .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
-    let inner = block.inner(area);
-    use ratatui::widgets::Widget;
-    block.render(area, f.buffer_mut());
+    let inner = block.inner(col[0]);
+    block.render(col[0], f.buffer_mut());
     view.render(inner, f.buffer_mut(), theme);
+    // US2 (FR-010): per-pane mini-status line.
+    Paragraph::new(format!(" {mini_status}"))
+        .style(theme.status_style())
+        .render(col[1], f.buffer_mut());
+    inner
+}
+
+/// Minimal help overlay (F1). The full hypertext help viewer is deferred.
+fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
+    use ratatui::widgets::{Clear, Widget};
+    let r = centered_rect(60, 50, area);
+    Clear.render(r, f.buffer_mut());
+    let body = "\
+Cargonaut — quick help\n\
+\n\
+  Arrows / j k     move cursor      Tab        switch pane\n\
+  Enter            enter directory  Insert     tag file\n\
+  F5 Copy  F6 Move  F8 Delete  F7 Mkdir*  F9 Menu  F10 Quit\n\
+  F3 View*  F4 Edit*   (* not yet available)\n\
+  Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
+\n\
+  Press any key to close.";
+    let block = Block::default()
+        .title("Help")
+        .borders(Borders::ALL)
+        .style(theme.dialog_style());
+    Paragraph::new(body)
+        .block(block)
+        .style(theme.dialog_style())
+        .render(r, f.buffer_mut());
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -411,4 +712,162 @@ pub enum Error {
     /// up from the dispatch loop.
     #[error("{0}")]
     Other(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cargonaut_core::App;
+    use crossterm::event::KeyModifiers;
+    use tempfile::TempDir;
+
+    fn fresh_ui(left_rect: Rect, right_rect: Rect, mouse: bool) -> UiState {
+        UiState {
+            menu: MenuBar::new(),
+            fkeybar: FunctionKeyBar::new(),
+            layout: FrameLayout {
+                menu: Rect { x: 0, y: 0, width: 80, height: 1 },
+                left: left_rect,
+                right: right_rect,
+                fkeys: Rect { x: 0, y: 23, width: 80, height: 1 },
+            },
+            last_click: None,
+            help_open: false,
+            mouse_enabled: mouse,
+        }
+    }
+
+    async fn app_with(left: &TempDir, right: &TempDir) -> App {
+        App::new(
+            cargonaut_config::Config::default(),
+            left.path().to_str().unwrap(),
+            right.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    fn left_click(x: u16, y: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn synced_views(app: &App) -> (PaneView, PaneView) {
+        let mut l = PaneView::new(app.pane(PaneId::Left).cwd.clone(), app.pane(PaneId::Left).listing.clone());
+        let mut r = PaneView::new(app.pane(PaneId::Right).cwd.clone(), app.pane(PaneId::Right).listing.clone());
+        l.sync_from(app.pane(PaneId::Left));
+        r.sync_from(app.pane(PaneId::Right));
+        (l, r)
+    }
+
+    // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
+    // moves the cursor to the clicked row.
+    #[tokio::test]
+    async fn click_focuses_pane_and_sets_cursor() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c", "d"] {
+            std::fs::write(td_r.path().join(n), b"").unwrap();
+        }
+        let mut app = app_with(&td_l, &td_r).await;
+        let right_rect = Rect { x: 50, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(Rect { x: 0, y: 1, width: 40, height: 10 }, right_rect, true);
+        let (l, r) = synced_views(&app);
+        let mut status = String::new();
+        // Click row 2 (y = rect.y + 2) in the right pane.
+        handle_mouse(left_click(55, 3), &mut app, &mut ui, &l, &r, &mut status)
+            .await
+            .unwrap();
+        assert_eq!(app.active_pane(), PaneId::Right);
+        assert_eq!(app.pane(PaneId::Right).cursor, 2);
+    }
+
+    // T-MOUSE-3 (FR-015): a double-click on a directory row descends.
+    #[tokio::test]
+    async fn double_click_descends_into_directory() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("sub")).unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let left_rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(left_rect, Rect { x: 50, y: 1, width: 40, height: 10 }, true);
+        let (l, r) = synced_views(&app);
+        let mut status = String::new();
+        // First click on row 0 (the only entry, "sub").
+        handle_mouse(left_click(5, 1), &mut app, &mut ui, &l, &r, &mut status)
+            .await
+            .unwrap();
+        assert!(!app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+        // Second click same cell → double-click → descend.
+        handle_mouse(left_click(5, 1), &mut app, &mut ui, &l, &r, &mut status)
+            .await
+            .unwrap();
+        assert!(
+            app.pane(PaneId::Left).cwd.display().ends_with("/sub"),
+            "expected descent into sub, cwd = {}",
+            app.pane(PaneId::Left).cwd.display()
+        );
+    }
+
+    // T-MOUSE-1 (FR-013): with the mouse disabled, no event changes state.
+    #[tokio::test]
+    async fn disabled_mouse_is_a_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c"] {
+            std::fs::write(td_r.path().join(n), b"").unwrap();
+        }
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 10 },
+            Rect { x: 50, y: 1, width: 40, height: 10 },
+            false, // mouse disabled
+        );
+        let (l, r) = synced_views(&app);
+        let mut status = String::new();
+        handle_mouse(left_click(55, 3), &mut app, &mut ui, &l, &r, &mut status)
+            .await
+            .unwrap();
+        assert_eq!(app.active_pane(), PaneId::Left, "disabled mouse must not focus");
+        assert_eq!(app.pane(PaneId::Right).cursor, 0, "disabled mouse must not move cursor");
+    }
+
+    // T-MOUSE-5 (FR-017): clicking function-key button #10 dispatches Quit.
+    #[tokio::test]
+    async fn click_fkey_button_dispatches_command() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 10 },
+            Rect { x: 50, y: 1, width: 40, height: 10 },
+            true,
+        );
+        ui.layout.fkeys = Rect { x: 0, y: 23, width: 100, height: 1 };
+        let (l, r) = synced_views(&app);
+        let mut status = String::new();
+        // Button 7 (Mkdir) ≈ 7th of 10 slots → deferred → status message.
+        handle_mouse(left_click(65, 23), &mut app, &mut ui, &l, &r, &mut status)
+            .await
+            .unwrap();
+        assert!(
+            status.contains("not yet available"),
+            "expected deferred-action notice, got {status:?}"
+        );
+    }
+
+    // T-MOUSE-6 (FR-018): a click outside any region is a no-op.
+    #[test]
+    fn rect_contains_bounds() {
+        let r = Rect { x: 10, y: 5, width: 4, height: 3 };
+        assert!(rect_contains(r, 10, 5));
+        assert!(rect_contains(r, 13, 7));
+        assert!(!rect_contains(r, 14, 5)); // x past right edge
+        assert!(!rect_contains(r, 10, 8)); // y past bottom edge
+        assert!(!rect_contains(r, 9, 5));
+    }
 }

@@ -153,6 +153,13 @@ impl PaneView {
         }
     }
 
+    /// The visible-subset index at the top of the rendered viewport
+    /// (ratatui's scroll offset). Used by mouse hit-testing (US3) to map a
+    /// clicked screen row to an absolute visible index.
+    pub fn viewport_top(&self) -> usize {
+        self.list_state.offset()
+    }
+
     /// Index into `listing.entries` of the cursor's current entry, or
     /// `None` if no visible entry is focused.
     pub fn focused_entry_index(&self) -> Option<usize> {

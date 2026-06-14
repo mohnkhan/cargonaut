@@ -114,6 +114,10 @@ pub enum Command {
     CursorDown,
     /// Move active pane's cursor up one visible entry.
     CursorUp,
+    /// FR-014 — set the active pane's cursor to an absolute position in
+    /// the visible subset (used by mouse clicks; clamps to range). Lives
+    /// in core so a clicked cursor survives the per-frame `sync_from`.
+    CursorTo(usize),
     /// Descend into the focused directory (or open the focused file).
     Descend,
     /// Ascend to the parent directory.
@@ -365,6 +369,16 @@ impl App {
             CursorUp => {
                 let p = self.active_pane_mut();
                 p.cursor = p.cursor.saturating_sub(1);
+                Ok(vec![Event::PaneUpdated(self.active)])
+            }
+            CursorTo(n) => {
+                let p = self.active_pane_mut();
+                let v = p.visible_indices();
+                if v.is_empty() {
+                    p.cursor = 0;
+                } else {
+                    p.cursor = n.min(v.len() - 1);
+                }
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
             Descend => self.descend_into_focused().await,
@@ -781,6 +795,35 @@ mod tests {
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
         app.dispatch(Command::CursorDown).await.unwrap();
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
+    }
+
+    #[tokio::test]
+    async fn cursor_to_sets_absolute_position_and_clamps() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::CursorTo(2)).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+        // Out-of-range clamps to last visible entry.
+        app.dispatch(Command::CursorTo(99)).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+    }
+
+    #[tokio::test]
+    async fn cursor_to_survives_resync_via_pane_state() {
+        // A clicked cursor must be authoritative: reading pane state back
+        // reflects it (the UI's PaneView::sync_from copies state.cursor).
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c", "d"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::CursorTo(3)).await.unwrap();
+        assert_eq!(app.active_pane_state().cursor, 3);
     }
 
     #[tokio::test]
