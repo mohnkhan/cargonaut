@@ -116,6 +116,23 @@ Try `--theme monochrome` or `--no-mouse`. Full build profiles (debug / release /
 static), per-OS install, shell integration, and the make-target reference are in
 [`docs/BUILD.md`](./docs/BUILD.md).
 
+### Developer Quick Start
+
+If you want to contribute or build from source, set up your development environment in seconds:
+
+```bash
+# 1. Redirect target/ to RAM to preserve your SSD (Constitution §V)
+make tmpfs-setup
+
+# 2. Run all tests to verify your environment
+make test
+
+# 3. Run the local CI pipeline (lints, tests, release build, size checks)
+make ci-local
+```
+See [CONTRIBUTING.md](file:///home/main/MyOS-2026/cargonaut/CONTRIBUTING.md) for our mandatory branch workflows and commit style guidelines.
+
+
 ## How it's engineered
 
 Cargonaut is built under the same governance as MyOS2026 — a spec-kit workflow
@@ -139,7 +156,19 @@ Cargonaut is built under the same governance as MyOS2026 — a spec-kit workflow
 | Architecture & full design tunnel | [`docs/architecture.md`](./docs/architecture.md) · [`design/INDEX.md`](./design/INDEX.md) |
 | Contributing conventions | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 
+## Contributing
+
+We welcome contributions of all kinds—bug fixes, new features, documentation, and code reviews! 
+
+To get started:
+1. **Explore the Roadmap**: Check out [ROADMAP.md](file:///home/main/MyOS-2026/cargonaut/ROADMAP.md) for prioritized tasks. Look for issues labeled `good first issue` for great starting points.
+2. **Read the Guide**: Review our [CONTRIBUTING.md](file:///home/main/MyOS-2026/cargonaut/CONTRIBUTING.md) for code styling, TDD (Test-First) workflow, and git branch rules.
+3. **Spec out Non-Trivial Work**: For substantial features, we write a design spec first using our `spec-kit` format. Read more in the [Spec-kit Workflow](file:///home/main/MyOS-2026/cargonaut/CONTRIBUTING.md#spec-kit-pattern-for-non-trivial-features) section of our contributing guide.
+
+*Have a question or want to discuss a design? Feel free to open a GitHub issue!*
+
 ## License
 
 Dual-licensed under **MIT OR Apache-2.0** — pick whichever fits your project.
 See [`LICENSE-MIT`](./LICENSE-MIT) and [`LICENSE-APACHE`](./LICENSE-APACHE).
+
