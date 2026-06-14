@@ -241,6 +241,7 @@ async fn run_transfer(
     let mut chunk_crcs: Vec<u32> = Vec::new();
     let mut pending_chunk: Vec<u8> = Vec::with_capacity(opts.checkpoint_interval_bytes as usize);
     let mut read_buf = vec![0u8; opts.buffer_size_bytes];
+    let throttle = throttle_bytes_per_sec();
 
     loop {
         // Cancellation check — fast path between chunks; keeps response
@@ -296,6 +297,9 @@ async fn run_transfer(
             eta_secs,
             throughput_mibs,
         });
+
+        // Optional test-only throughput cap (Feature 037, R-002).
+        maybe_throttle(start, bytes_written, throttle).await;
 
         // Drain full checkpoint-interval chunks; write/refresh sidecar
         // after each.
@@ -449,6 +453,38 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Read the optional copy-throttle rate (MiB/s) from the
+/// `CARGONAUT_TRANSFER_THROTTLE_MIBPS` environment variable.
+///
+/// Returns `None` (no throttling — the production default) when the
+/// variable is unset, empty, unparsable, or non-positive. This is a
+/// test-only affordance: it lets the binary-level SC-002 SIGKILL-resume
+/// test (Feature 037, R-002) keep a copy in flight long enough to kill it
+/// mid-transfer deterministically. It is read once per transfer and has
+/// zero cost when unset.
+fn throttle_bytes_per_sec() -> Option<f64> {
+    let raw = std::env::var("CARGONAUT_TRANSFER_THROTTLE_MIBPS").ok()?;
+    let mibps: f64 = raw.trim().parse().ok()?;
+    if mibps > 0.0 {
+        Some(mibps * 1024.0 * 1024.0)
+    } else {
+        None
+    }
+}
+
+/// If a throttle is configured, sleep until `bytes_written` would have
+/// taken at least `bytes_written / rate` seconds since `start`, capping
+/// average throughput at the configured rate. No-op when `rate` is `None`.
+async fn maybe_throttle(start: Instant, bytes_written: u64, rate: Option<f64>) {
+    if let Some(bytes_per_sec) = rate {
+        let target = bytes_written as f64 / bytes_per_sec;
+        let actual = start.elapsed().as_secs_f64();
+        if target > actual {
+            tokio::time::sleep(std::time::Duration::from_secs_f64(target - actual)).await;
+        }
+    }
 }
 
 /// Resume a previously-checkpointed transfer. Re-validates the destination
@@ -609,6 +645,7 @@ async fn run_transfer_with_state(
 
     let mut pending_chunk: Vec<u8> = Vec::with_capacity(opts.checkpoint_interval_bytes as usize);
     let mut read_buf = vec![0u8; opts.buffer_size_bytes];
+    let throttle = throttle_bytes_per_sec();
 
     loop {
         if cancel.is_cancelled() {
@@ -656,6 +693,9 @@ async fn run_transfer_with_state(
             eta_secs,
             throughput_mibs,
         });
+
+        // Optional test-only throughput cap (Feature 037, R-002).
+        maybe_throttle(start, bytes_written, throttle).await;
 
         let interval = opts.checkpoint_interval_bytes as usize;
         while pending_chunk.len() >= interval {
