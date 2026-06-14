@@ -61,9 +61,12 @@ PathInputDialog {
 
 Invariants:
 - `cursor <= buffer.len()`.
-- Editing (Char/Backspace) clears `error` and invalidates the completion cache
-  (`completions` considered stale when `completion_for != buffer`).
+- Editing (Char/Backspace) clears `error` **and** `note`, and invalidates the
+  completion cache (`completions` considered stale when `completion_for != buffer`).
 - `cycle_idx < completions.len()` whenever `completions` is non-empty.
+- `note` (the "(no matches)" hint, FR-009) is shown on the next render and is
+  non-blocking — the user can keep typing. It is cleared on the next edit, on a
+  successful completion, and when the dialog closes.
 
 ### `PathInputAction` (return of `PathInputDialog::handle_key`)
 

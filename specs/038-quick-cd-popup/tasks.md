@@ -181,9 +181,12 @@ bad path returns `Err`, no nav, error shown, prompt stays open.
 ## Phase 6: Polish, gates & docs
 
 - [ ] T024 [POLISH] SC-006 end-to-end core test: a single `#[tokio::test]` that
-  drives open→type→`complete_cd`→`quick_cd` (accept) AND a cancel path, asserting
-  the success outcome and the zero-side-effect cancel. This is the named
-  injected-input gate (T1.25 origin).
+  drives open→type→`complete_cd`→`quick_cd` (accept) AND a cancel path AND an
+  error-recovery path (accept a bad path ⇒ `Err`, then accept a valid path ⇒
+  `Ok`), asserting the success outcome, the zero-side-effect cancel, and that the
+  bad-path accept did not mutate state. This is the named injected-input gate
+  (T1.25 origin). Symlink-to-dir targets are inherited from `navigate_to` and not
+  separately exercised here (noted, not tested).
 - [ ] T025 [POLISH] `make ci-local` green: clippy `-D warnings`, `cargo fmt
   --check`, `cargo test --workspace`, release build, doc build. Fix any lint.
 - [ ] T026 [POLISH] [P] Update `README.md`: "At a Glance" metrics (test count,
@@ -234,6 +237,7 @@ bad path returns `Err`, no nav, error shown, prompt stays open.
 | FR-012 relative vs absolute | T006/T007 |
 | FR-013 active pane only | T006/T007 |
 | FR-014 prefill cwd | T002/T003, T004 |
+| SC-001 keyboard-only nav (MVP) | T006/T007, T010, T011, T024 |
 | SC-002 one-keystroke unique | T012 |
 | SC-003 dirs-only candidates | T012/T013 |
 | SC-004 cancel zero side effects | T018, T024 |
