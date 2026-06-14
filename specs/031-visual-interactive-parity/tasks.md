@@ -171,7 +171,7 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 - [ ] T055 [P] Deferred-command audit: every keymap command not wired this feature emits a clear "not yet available" status (SC-005, FR-011); add a test enumerating them.
 - [x] T056 Performance gates: run `cargo bench` keypress-latency (NFR-002 ≤16 ms) and `scripts/check-binary-size.sh` (NFR-001 ≤8 MiB); record results; investigate if theming/chrome regressed either >10% (§IV).
 - [x] T057 [P] Full regression: `make ci-local` green (clippy -D warnings, `cargo test --workspace`, release build, docs-gate, binary-size); confirm no existing keybinding changed behavior (FR-028, SC-010).
-- [ ] T058 [P] Open GitHub issues + add ROADMAP.md rows for every "Out of Scope" item (internal viewer/editor, find-file, hotlist, compare-dirs, panelize, subshell, tabs, chmod/chown, sym/hardlink, bulk-rename, undo, external skins, user menu, VFS archive/remote) per CLAUDE.md deferral policy (FR-029, SC-009).
+- [x] T058 [P] Open GitHub issues + add ROADMAP.md rows for every "Out of Scope" item (internal viewer/editor, find-file, hotlist, compare-dirs, panelize, subshell, tabs, chmod/chown, sym/hardlink, bulk-rename, undo, external skins, user menu, VFS archive/remote) per CLAUDE.md deferral policy (FR-029, SC-009).
 - [x] T059 Docs (MANDATORY per CLAUDE.md): update `README.md` At-a-Glance (test count, feature count) + Feature History (Feature 031 entry); append a `Learnings.md` section (≥3 bullets: theme threading, FrameLayout-lift for hit-testing, quick-view/dir-size off-frame-path, external-tool terminal suspend).
 - [ ] T060 Run `quickstart.md` manual validation for all five user stories; capture a screenshot/asciinema for the PR.
 
