@@ -522,4 +522,105 @@ mod tests {
         assert_eq!(d.handle_key(KeyCode::Esc), None);
         assert!(d.is_empty());
     }
+
+    // ---------- PathInputDialog (Feature 038 quick-cd) ----------
+
+    #[test]
+    fn path_input_prefills_and_edits() {
+        let mut d = PathInputDialog::new("cd", "Path:", "/home/u");
+        assert_eq!(d.value(), "/home/u");
+        assert_eq!(d.handle_key(KeyCode::Char('x')), PathInputAction::Edited);
+        assert_eq!(d.value(), "/home/ux");
+        assert_eq!(d.handle_key(KeyCode::Backspace), PathInputAction::Edited);
+        assert_eq!(d.value(), "/home/u");
+    }
+
+    #[test]
+    fn path_input_enter_submits_and_esc_cancels() {
+        let mut d = PathInputDialog::new("cd", "Path:", "/x");
+        assert_eq!(
+            d.handle_key(KeyCode::Enter),
+            PathInputAction::Submit("/x".into())
+        );
+        let mut d = PathInputDialog::new("cd", "Path:", "/x");
+        assert_eq!(d.handle_key(KeyCode::Esc), PathInputAction::Cancel);
+    }
+
+    #[test]
+    fn path_input_tab_requests_then_cycles() {
+        let mut d = PathInputDialog::new("cd", "Path:", "a");
+        // Stale cache → ask the loop to fetch.
+        assert_eq!(
+            d.handle_key(KeyCode::Tab),
+            PathInputAction::RequestCompletions { text: "a".into() }
+        );
+        d.apply_completions(vec!["a1".into(), "a2".into(), "a3".into()]);
+        assert_eq!(d.value(), "a1");
+        // Fresh cache → cycle in-widget, wrapping.
+        assert_eq!(d.handle_key(KeyCode::Tab), PathInputAction::Consumed);
+        assert_eq!(d.value(), "a2");
+        assert_eq!(d.handle_key(KeyCode::Tab), PathInputAction::Consumed);
+        assert_eq!(d.value(), "a3");
+        assert_eq!(d.handle_key(KeyCode::Tab), PathInputAction::Consumed);
+        assert_eq!(d.value(), "a1");
+    }
+
+    #[test]
+    fn path_input_edit_invalidates_completion_cache() {
+        let mut d = PathInputDialog::new("cd", "Path:", "a");
+        d.apply_completions(vec!["a1".into(), "a2".into()]);
+        assert_eq!(d.value(), "a1");
+        // Editing makes the cache stale → next Tab re-requests.
+        d.handle_key(KeyCode::Char('z'));
+        assert_eq!(
+            d.handle_key(KeyCode::Tab),
+            PathInputAction::RequestCompletions {
+                text: "a1z".into()
+            }
+        );
+    }
+
+    #[test]
+    fn path_input_empty_completions_sets_note_keeps_buffer() {
+        let mut d = PathInputDialog::new("cd", "Path:", "zzz");
+        d.handle_key(KeyCode::Tab);
+        d.apply_completions(vec![]);
+        assert_eq!(d.value(), "zzz", "buffer must be unchanged on no matches");
+    }
+
+    #[test]
+    fn path_input_set_error_renders_and_clears_on_edit() {
+        let mut d = PathInputDialog::new("cd", "Path:", "/nope");
+        d.set_error("not a directory");
+        let backend = TestBackend::new(60, 8);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &Theme::default()))
+            .unwrap();
+        let rendered: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(rendered.contains("not a directory"), "error missing");
+        assert!(rendered.contains("/nope"), "buffer missing");
+        // Editing clears the error.
+        d.handle_key(KeyCode::Backspace);
+        let mut term2 = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        term2
+            .draw(|f| d.render(f.size(), f.buffer_mut(), &Theme::default()))
+            .unwrap();
+        let rendered2: String = term2
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            !rendered2.contains("not a directory"),
+            "error should clear on edit"
+        );
+    }
 }
