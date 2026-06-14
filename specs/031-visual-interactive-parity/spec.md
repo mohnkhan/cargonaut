@@ -12,7 +12,16 @@
 
 Cargonaut 0.1.0 ships a working engine — virtual filesystem, resumable transfer engine, keymap parser, command dispatch, and directory history — but its interactive surface is a deliberate Phase-1 MVP: two bordered panes and a one-line status bar rendered in monochrome, with the mouse disabled and most keymap commands inert. To a user familiar with the classic blue-background, dual-pane terminal file manager that Cargonaut is modeled on (referred to here as "the reference manager"), the application reads as unfinished and unfamiliar.
 
-This feature delivers the **visual and interactive parity layer** that makes Cargonaut look and feel like the reference manager, without building the largest deferred subsystems (internal viewer/editor, find-file, remote/archive filesystems). It addresses the three reported defects directly: a real color theme, a clickable mouse-driven interface, and the screen chrome plus the cheap-to-wire commands that users expect to be present.
+This feature delivers the **visual and interactive parity layer** that makes Cargonaut look and feel like the reference manager, without building the largest deferred subsystems (full internal viewer/editor, find-file, remote/archive filesystems). It addresses the three reported defects directly: a real color theme, a clickable mouse-driven interface, and the screen chrome plus the cheap-to-wire commands that users expect to be present.
+
+## Clarifications
+
+### Session 2026-06-14
+
+- Q: Should mouse be ON by default now, or stay opt-in (current `ui.mouse=false`)? → A: **Default ON** — mouse capture is enabled by default so the fix is visible on first launch; configuration/flag can disable it, and a runtime toggle plus a hold-modifier bypass keep terminal-native text selection available.
+- Q: Which panel listing modes ship this feature? → A: **Brief + Full + Quick-view** — quick-view makes the passive panel live-preview the highlighted file (bounded text preview); info-panel and tree modes are deferred.
+- Q: What should F3 (View) and F4 (Edit) do, given the full internal viewer/editor are deferred? → A (recommended default, not overridden): **Shell out to external tools** — F3 launches the external pager (`$PAGER`, fallback `less`/`more`), F4 launches the external editor (`$EDITOR`, fallback `vi`/`nano`); the full *internal* viewer/editor remain deferred.
+- Q: Load external/user-authored skin files, or built-in themes only? → A (recommended default, not overridden): **Built-in themes only** — ship 2+ compiled-in themes selectable by name; external skin-file format + loader are deferred to a tracked follow-up.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -56,7 +65,7 @@ A user sees, at the bottom of the screen, the familiar numbered function-key but
 
 With the mouse enabled, a user can click a file to move the cursor to it and focus that panel, double-click a directory to enter it (or a file to open it via its associated action), scroll the wheel to move through a listing, and click the function-key bar buttons and menu bar titles to invoke them.
 
-**Why this priority**: Directly fixes the reported "missing mouse support" defect. It depends on the chrome from US2 (the function-key/menu bars are the click targets) and on lifting the on-screen layout regions into shared state so clicks can be mapped to what was clicked. Sequenced with US2.
+**Why this priority**: Directly fixes the reported "missing mouse support" defect. Mouse support is **enabled by default** (per clarification) so the fix is visible on first launch, with a runtime toggle and a hold-modifier bypass so terminal-native text selection remains available. It depends on the chrome from US2 (the function-key/menu bars are the click targets) and on lifting the on-screen layout regions into shared state so clicks can be mapped to what was clicked. Sequenced with US2.
 
 **Independent Test**: With mouse enabled, click a row in each panel and confirm the cursor moves and focus follows; double-click a directory and confirm descent; scroll the wheel and confirm the listing scrolls; click a function-key button and a menu title and confirm the actions fire.
 
@@ -66,13 +75,14 @@ With the mouse enabled, a user can click a file to move the cursor to it and foc
 2. **Given** mouse support is enabled, **When** the user double-clicks a directory row, **Then** the panel descends into that directory; double-clicking a file invokes its open/descend action.
 3. **Given** mouse support is enabled, **When** the user scrolls the wheel over a panel, **Then** the listing scrolls / the cursor advances in the scroll direction.
 4. **Given** mouse support is enabled, **When** the user clicks a function-key bar button or a menu bar title, **Then** the corresponding action or menu is invoked.
-5. **Given** mouse support is disabled in configuration, **When** the user interacts, **Then** the app behaves exactly as the keyboard-only build and terminal-native text selection/copy continues to work.
+5. **Given** mouse support is disabled in configuration (or suspended via the runtime toggle / hold-modifier bypass), **When** the user interacts, **Then** the app behaves exactly as the keyboard-only build and terminal-native text selection/copy continues to work.
+6. **Given** the app is launched with no mouse configuration set, **When** it starts, **Then** mouse support is active by default.
 
 ---
 
 ### User Story 4 - Richer panel listing: columns, parent entry, sorting, listing modes (Priority: P2)
 
-A user sees more than just file names and sizes: a modification-time column and a permissions column, with a `..` parent entry as the first row for one-step ascent. The user can cycle the sort order (by name, extension, size, modification time, and reverse), switch between listing layouts (e.g. a compact multi-name "brief" mode and a detailed "full" mode), and request the recursive size of a highlighted directory on demand.
+A user sees more than just file names and sizes: a modification-time column and a permissions column, with a `..` parent entry as the first row for one-step ascent. The user can cycle the sort order (by name, extension, size, modification time, and reverse), switch between listing layouts (a compact multi-name "brief" mode, a detailed "full" mode, and a "quick-view" mode in which the passive panel live-previews the highlighted file), and request the recursive size of a highlighted directory on demand.
 
 **Why this priority**: These are high-value, low-cost capabilities — the underlying metadata is already available in the filesystem layer, so this is mostly presentation and dispatch wiring. They make the panels informative and navigable in the way the reference manager's panels are. Lower priority than the visual identity and chrome because the app is usable without them.
 
@@ -83,8 +93,9 @@ A user sees more than just file names and sizes: a modification-time column and 
 1. **Given** a directory listing, **When** it is displayed, **Then** each entry shows at least name, size, modification time, and permissions, and a `..` entry is present as the first row (except at a filesystem root).
 2. **Given** the cursor is on the `..` entry, **When** the user activates it, **Then** the panel ascends to the parent directory.
 3. **Given** a listing, **When** the user cycles the sort order, **Then** the listing reorders accordingly and the active sort order is indicated; a reverse toggle inverts the order.
-4. **Given** a listing, **When** the user switches the listing mode, **Then** the panel layout changes between the available modes (at minimum a compact "brief" and a detailed "full" mode).
-5. **Given** the cursor is on a directory, **When** the user requests its recursive size, **Then** the computed total size is displayed for that directory in place of the directory placeholder.
+4. **Given** a listing, **When** the user switches the listing mode, **Then** the panel layout changes among the available modes: a compact "brief" layout, a detailed "full" layout, and a "quick-view" mode.
+5. **Given** quick-view mode is active and the cursor is on a text-readable file, **When** the highlighted entry changes, **Then** the passive panel updates to show a bounded text preview of that file; a non-previewable or binary file shows a graceful placeholder rather than garbage.
+6. **Given** the cursor is on a directory, **When** the user requests its recursive size, **Then** the computed total size is displayed for that directory in place of the directory placeholder.
 
 ---
 
@@ -145,7 +156,7 @@ A user can create a new directory (F7), select or unselect groups of files by ty
 
 #### Mouse (US3)
 
-- **FR-013**: The system MUST enable mouse input when mouse support is enabled in configuration, and MUST NOT capture the mouse when it is disabled (preserving terminal-native text selection).
+- **FR-013**: The system MUST enable mouse input **by default**, and MUST allow it to be disabled via configuration/launch flag and suspended at runtime via a toggle and a hold-modifier bypass; when disabled or suspended the mouse MUST NOT be captured (preserving terminal-native text selection).
 - **FR-014**: A single left-click on a panel row MUST make that panel active and move the cursor to the clicked row.
 - **FR-015**: A double-click on a row MUST invoke the open/descend action for that entry (enter a directory; open a file via its associated action).
 - **FR-016**: Wheel scrolling over a panel MUST move through the listing in the scroll direction.
@@ -157,7 +168,7 @@ A user can create a new directory (F7), select or unselect groups of files by ty
 - **FR-019**: Directory listings MUST display, for each entry, at least name, size, modification time, and permissions.
 - **FR-020**: Listings MUST include a `..` parent entry as the first row that ascends to the parent directory when activated, except at a filesystem root where ascent above the root MUST NOT be possible.
 - **FR-021**: Users MUST be able to cycle the sort order among at least name, extension, size, and modification time, with a reverse toggle; the active sort order MUST be discoverable.
-- **FR-022**: Users MUST be able to switch the panel listing mode among at least a compact "brief" layout and a detailed "full" layout.
+- **FR-022**: Users MUST be able to switch the panel listing mode among a compact "brief" layout, a detailed "full" layout, and a "quick-view" mode in which the passive panel live-previews the highlighted file (bounded text preview; graceful placeholder for non-text/binary/oversized files).
 - **FR-023**: Users MUST be able to request the recursive size of a highlighted directory on demand, and the result MUST be displayed without freezing the interface.
 
 #### Operations (US5)
@@ -166,6 +177,11 @@ A user can create a new directory (F7), select or unselect groups of files by ty
 - **FR-025**: Users MUST be able to tag and untag entries by wildcard pattern (select-by-pattern / unselect-by-pattern), with a zero-match pattern reported as matching nothing.
 - **FR-026**: While a copy or move is running, the system MUST display a progress dialog showing the current item, per-operation and overall progress, throughput, and estimated time remaining.
 - **FR-027**: Users MUST be able to cancel a transfer from the progress dialog, consistent with the engine's existing cancellation guarantees; the dialog MUST dismiss on completion or cancellation and the affected panel MUST refresh.
+
+#### View / Edit via external tools (US2 function-key actions)
+
+- **FR-030**: Invoking the View action (F3) on the highlighted file MUST launch the external pager (`$PAGER`, falling back to `less`/`more`), suspending and correctly restoring the terminal around the external process; the full *internal* viewer remains deferred.
+- **FR-031**: Invoking the Edit action (F4) on the highlighted file MUST launch the external editor (`$EDITOR`, falling back to `vi`/`nano`), suspending and correctly restoring the terminal around the external process, and refreshing the panel afterward; the full *internal* editor remains deferred.
 
 #### Cross-cutting
 
@@ -177,7 +193,8 @@ A user can create a new directory (F7), select or unselect groups of files by ty
 - **Theme**: a named collection of colors for each themable interface element (panel, entry types, cursor, marked, borders, menu, function-key bar, status, dialog). Resolvable by name to a built-in palette; degrades by color depth.
 - **Screen layout regions**: the on-screen rectangles for each interactive area (left panel, right panel, status line, menu bar, function-key bar) used to map a click position to the thing clicked.
 - **Function-key binding**: the association between a numbered function key, its displayed label, and the command it invokes in the current context.
-- **Listing column set**: the fields shown per entry for a given listing mode (name, size, modification time, permissions), plus the synthetic `..` parent entry.
+- **Listing column set**: the fields shown per entry for a given listing mode (name, size, modification time, permissions), plus the synthetic `..` parent entry. The listing mode is one of brief / full / quick-view.
+- **Quick-view preview**: a bounded text projection of the highlighted file shown in the passive panel; capped in size and degraded to a placeholder for non-text/binary/oversized files.
 - **Sort order**: the active ordering key (name/extension/size/mtime) and direction (ascending/reverse) for a panel.
 - **Transfer progress view**: the user-facing projection of an in-flight transfer (current item, bytes done/total, throughput, ETA, cancel affordance) derived from the engine's existing progress events.
 
@@ -200,8 +217,9 @@ A user can create a new directory (F7), select or unselect groups of files by ty
 
 The following reference-manager capabilities are intentionally **not** delivered by this feature and are to be tracked as deferrals (GitHub issue + ROADMAP row) per the project's deferral policy:
 
-- Internal file viewer (text + hex + search).
-- Internal full-screen editor (and `$EDITOR` integration).
+- Internal file viewer (text + hex + search). *(External-pager shell-out ships via FR-030; the full internal viewer is deferred.)*
+- Internal full-screen editor. *(External-editor shell-out ships via FR-031; the full internal editor is deferred.)*
+- External skin-file format and loader for user-authored themes. *(Built-in themes ship via FR-004; external skins deferred.)*
 - Find-file (by name and by content) and external panelize.
 - Directory hotlist / bookmarks.
 - Compare-directories and diff-two-files.
@@ -214,11 +232,13 @@ The following reference-manager capabilities are intentionally **not** delivered
 
 ## Assumptions
 
-- The default theme should change from the current inert `"solarized-dark"` string to a built-in palette that evokes the reference manager's signature look; the exact default name is an implementation detail to be confirmed in clarification/planning.
-- Mouse support remains **opt-in via configuration** (the existing `ui.mouse` flag, default off) to preserve terminal-native text selection for users who rely on it; a launch flag may additionally toggle it.
+- The default theme should change from the current inert `"solarized-dark"` string to a built-in palette that evokes the reference manager's signature look; the exact default name is an implementation detail to be confirmed in planning.
+- Mouse support is **on by default** (clarified); the existing `ui.mouse` flag/launch flag can disable it and a runtime toggle + hold-modifier bypass preserve terminal-native text selection for users who rely on it.
 - The reference manager is referred to generically throughout; no trademarked product name appears in user-facing strings, code, or documentation.
 - The filesystem layer already exposes the metadata (size, modification time, permission bits, entry kind, hidden flag) needed for richer columns and type-based coloring; no new metadata sources are required.
 - The transfer engine already emits running-state events with throughput and ETA and supports cancellation; the progress dialog is a presentation of existing data, not new engine work.
 - Existing key bindings and the command vocabulary defined in the keymap contract are the source of truth for which actions exist; this feature wires the currently-inert ones rather than inventing a new key scheme.
 - Work proceeds on the `031-visual-interactive-parity` feature branch and merges via pull request with the mandatory README and Learnings documentation updates, consistent with project policy.
-- Theme palettes and built-in themes are bundled with the binary; user-authored external skin files are a nice-to-have and may themselves be deferred if they expand scope.
+- Theme palettes and built-in themes are bundled with the binary; user-authored external skin files are **deferred** (clarified) and tracked as a follow-up.
+- Quick-view preview reads a bounded amount of the highlighted file as text (e.g. a capped byte/line budget) to avoid coupling to the deferred full internal viewer and to keep the UI responsive on large files.
+- F3/F4 shell out to external pager/editor (clarified); this requires suspending the alternate screen and raw mode around the child process and restoring them afterward, reusing the existing terminal teardown/setup discipline.
