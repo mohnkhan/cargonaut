@@ -113,3 +113,8 @@ When editing this file or adding project-wide conventions, follow the discipline
 - Cite *why* (the past incident or principle that justifies the rule), not just *what*. A rule without a "why" gets argued with the next time it's inconvenient.
 - Keep rules near the top; reference material (paths, contract pointers) goes further down.
 - New rules go in their own `## Section Name` — don't bury them in another section's prose.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
