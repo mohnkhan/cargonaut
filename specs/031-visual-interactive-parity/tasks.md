@@ -123,19 +123,19 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 ### Tests (red)
 
-- [ ] T036 [P] [US4] Column-format unit tests in `pane.rs`: name/size/mtime(`date_format`)/perms(mode bits) for a known `VfsMetadata`.
+- [x] T036 [P] [US4] Column-format unit tests in `pane.rs`: name/size/mtime(`date_format`)/perms(mode bits) for a known `VfsMetadata`.
 - [ ] T037 [P] [US4] Parent-entry tests in `crates/cargonaut-core`: `..` synthesized as row 0 except at root; activating it ascends (FR-020).
-- [ ] T038 [P] [US4] Sort tests: `CycleSortKey` rotates among Name/Ext/Size/Mtime; `ToggleSortReverse` inverts; listing reorders (FR-021).
-- [ ] T039 [P] [US4] Listing-mode tests: `CycleListingMode` brief→full→quick-view; quick-view bounding (≤256 KiB/≤1000 lines; binary/oversized → placeholder kind) (FR-022).
-- [ ] T040 [P] [US4] Recursive dir-size test: async walk returns total; UI loop not blocked (simulate via a large temp tree) (FR-023).
+- [x] T038 [P] [US4] Sort tests: `CycleSortKey` rotates among Name/Ext/Size/Mtime; `ToggleSortReverse` inverts; listing reorders (FR-021).
+- [x] T039 [P] [US4] Listing-mode tests: `CycleListingMode` brief→full→quick-view; quick-view bounding (≤256 KiB/≤1000 lines; binary/oversized → placeholder kind) (FR-022).
+- [x] T040 [P] [US4] Recursive dir-size test: async walk returns total; UI loop not blocked (simulate via a large temp tree) (FR-023).
 
 ### Implementation (green)
 
-- [ ] T041 [US4] Promote the per-pane sort from hardcoded `NameAsc` (old core lib.rs:270) to a mutable field; implement `CycleSortKey`/`ToggleSortReverse` applying `cargonaut-vfs::Sort`; surface active order in mini-status.
+- [x] T041 [US4] Promote the per-pane sort from hardcoded `NameAsc` (old core lib.rs:270) to a mutable field; implement `CycleSortKey`/`ToggleSortReverse` applying `cargonaut-vfs::Sort`; surface active order in mini-status.
 - [ ] T042 [US4] Synthesize the `..` parent entry in the listing model + handle its activation (ascend) in core dispatch; suppress at filesystem root.
-- [ ] T043 [US4] Render mtime + perms columns in `PaneView::render` for the "full" mode; implement "brief" (name-only, multi-column) layout; `CycleListingMode` switches them.
-- [ ] T044 [US4] Implement quick-view: `ToggleQuickView`/mode that makes the passive panel show a bounded `QuickView` preview of the active pane's highlighted file; read off the frame path; placeholder for non-text/binary/oversized.
-- [ ] T045 [US4] Implement `RecursiveDirSize`: spawn an async VFS walk; update the highlighted dir's displayed size when done without blocking the loop.
+- [x] T043 [US4] Render mtime + perms columns in `PaneView::render` for the "full" mode; implement "brief" (name-only, multi-column) layout; `CycleListingMode` switches them.
+- [x] T044 [US4] Implement quick-view: `ToggleQuickView`/mode that makes the passive panel show a bounded `QuickView` preview of the active pane's highlighted file; read off the frame path; placeholder for non-text/binary/oversized.
+- [x] T045 [US4] Implement `RecursiveDirSize`: spawn an async VFS walk; update the highlighted dir's displayed size when done without blocking the loop.
 
 **Checkpoint**: US4 demoable — informative, navigable panels.
 
@@ -149,18 +149,18 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 
 ### Tests (red)
 
-- [ ] T046 [P] [US5] Mkdir round-trip test (`crates/cargonaut-core`, tokio+TempDir+LocalFs): `Mkdir(name)` creates the dir and refreshes; invalid name/permission error reported, no panic (FR-024).
-- [ ] T047 [P] [US5] Pattern-select tests: `SelectByPattern("*.rs")` tags matches via `globset`; `UnselectByPattern` untags; zero-match reports zero (FR-025).
-- [ ] T048 [P] [US5] `ProgressView` projection test: from a synthesized `Running{bytes_done,total,throughput,eta}` event the view exposes current item/progress/throughput/ETA (FR-026).
+- [x] T046 [P] [US5] Mkdir round-trip test (`crates/cargonaut-core`, tokio+TempDir+LocalFs): `Mkdir(name)` creates the dir and refreshes; invalid name/permission error reported, no panic (FR-024).
+- [x] T047 [P] [US5] Pattern-select tests: `SelectByPattern("*.rs")` tags matches via `globset`; `UnselectByPattern` untags; zero-match reports zero (FR-025).
+- [x] T048 [P] [US5] `ProgressView` projection test: from a synthesized `Running{bytes_done,total,throughput,eta}` event the view exposes current item/progress/throughput/ETA (FR-026).
 - [ ] T049 [P] [US5] Progress dialog render test (`dialog.rs`, `TestBackend`) + cancel routes to the existing `CancellationToken` (FR-027).
 
 ### Implementation (green)
 
-- [ ] T050 [US5] Implement `MkdirPromptDialog` (reuse shared dialog widgets, §III) + `Command::Mkdir(name)` dispatch (VFS create dir + refresh).
-- [ ] T051 [US5] Implement `PatternPromptDialog` + `SelectByPattern`/`UnselectByPattern` dispatch over the visible listing using `globset`.
-- [ ] T052 [US5] Implement `ProgressView` projection in core from existing transfer `Running` events; add `TransferProgressDialog` in `dialog.rs` (current item, per-op + overall progress, throughput, ETA); show while ≥1 transfer running; dismiss on complete/cancel + refresh target panel (replaces the status-bar count placeholder).
-- [ ] T053 [US5] Implement `ViewExternal`/`EditExternal` in `run_loop`: suspend alt-screen + raw mode, run `Command::new(pager_or_editor).arg(path)` (`$PAGER`→less/more, `$EDITOR`→vi/nano; no `sh -c`, §Dev-Workflow), restore terminal, refresh panel (FR-030/031).
-- [ ] T054 [US5] Confirm keymap.toml bindings for `+`/`-`/F7/C-s/M-t/C-Space/F3/F4 and that `ui_command_to_core` maps each (contracts/commands-delta.md, T-CMD-1/2).
+- [x] T050 [US5] Implement `MkdirPromptDialog` (reuse shared dialog widgets, §III) + `Command::Mkdir(name)` dispatch (VFS create dir + refresh).
+- [x] T051 [US5] Implement `PatternPromptDialog` + `SelectByPattern`/`UnselectByPattern` dispatch over the visible listing using `globset`.
+- [x] T052 [US5] Implement `ProgressView` projection in core from existing transfer `Running` events; add `TransferProgressDialog` in `dialog.rs` (current item, per-op + overall progress, throughput, ETA); show while ≥1 transfer running; dismiss on complete/cancel + refresh target panel (replaces the status-bar count placeholder).
+- [x] T053 [US5] Implement `ViewExternal`/`EditExternal` in `run_loop`: suspend alt-screen + raw mode, run `Command::new(pager_or_editor).arg(path)` (`$PAGER`→less/more, `$EDITOR`→vi/nano; no `sh -c`, §Dev-Workflow), restore terminal, refresh panel (FR-030/031).
+- [x] T054 [US5] Confirm keymap.toml bindings for `+`/`-`/F7/C-s/M-t/C-Space/F3/F4 and that `ui_command_to_core` maps each (contracts/commands-delta.md, T-CMD-1/2).
 
 **Checkpoint**: US5 demoable — daily operations complete with live feedback.
 
@@ -199,3 +199,12 @@ Rust workspace. Crates: `crates/cargonaut-core`, `crates/cargonaut-ui-tui`, `cra
 - Then **US2 + US3** together (chrome + mouse) — they share the FrameLayout and deliver the "missing mouse + missing chrome" complaints.
 - Then **US4** and **US5** (richer panels + operation parity) — can be parallelized.
 - Each story merges only with its tests green and the perf/size gates intact; deferrals tracked before PR (T058).
+
+## Implementation notes & deferrals (US4/US5)
+
+- **T002 (globset) superseded**: pattern selection (FR-025) uses a dependency-free `glob_match` in `cargonaut-core` (`*`/`?`) instead of pulling `globset`+`regex` — keeps the binary lean (1.96 MiB). Justified deviation; revisit if extended-glob/regex selection is needed.
+- **T037 / T042 (`..` parent entry as first row) deferred**: synthesizing `..` into `listing.entries` would shift every cursor/selection index and break the existing index-based model + ~10 tests. Ascent already works via the `Ascend` keybinding, the menu, and mouse; the `..`-as-row affordance (FR-020) is tracked as a follow-up (needs an index model that separates synthetic rows from real entries).
+- **T007 partial**: only the core `Command` variants actually wired this round were added (`CursorTo`, `CycleSortKey`, `ToggleSortReverse`, `CycleListingMode`, `RecursiveDirSize`, `Mkdir`, `SelectByPattern`, `UnselectByPattern`).
+- **T035 (runtime mouse-toggle key) partial**: `--no-mouse` + `config.ui.mouse` disable mouse; a live in-session toggle key is deferred (the hold-modifier bypass is terminal-native).
+- **T049 (progress-dialog render test) light**: `ProgressView` projection (`App::active_progress`) + the overlay are implemented; a deterministic render test needs a controllable in-flight transfer fixture — deferred.
+- **T056/T057 gates**: keypress-latency NFR-002 OK (0.2 µs lookup); binary-size NFR-001 OK (1.96 MiB).

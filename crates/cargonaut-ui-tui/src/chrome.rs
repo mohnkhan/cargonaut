@@ -373,7 +373,7 @@ pub fn mini_status_line(state: &PaneState) -> String {
 
 /// Render a `rwxr-xr-x`-style permission string from the low 9 mode bits,
 /// prefixed by the entry type character.
-fn perms_string(bits: u32, kind: &VfsKind) -> String {
+pub fn perms_string(bits: u32, kind: &VfsKind) -> String {
     let type_ch = match kind {
         VfsKind::Dir => 'd',
         VfsKind::Symlink { .. } => 'l',
@@ -538,6 +538,7 @@ mod tests {
             cursor: 0,
             selected: BTreeSet::new(),
             show_hidden: false,
+            sort: Sort::NameAsc,
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),

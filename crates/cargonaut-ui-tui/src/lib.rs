@@ -13,7 +13,8 @@ pub mod pane;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
-    ConfirmDialog, ConfirmOutcome, ResumableSummary, ResumeChoice, ResumePromptDialog,
+    ConfirmDialog, ConfirmOutcome, InputOutcome, ResumableSummary, ResumeChoice,
+    ResumePromptDialog, TextInputDialog,
 };
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
@@ -95,6 +96,8 @@ struct UiState {
     last_click: Option<(u16, u16, Instant)>,
     help_open: bool,
     mouse_enabled: bool,
+    /// Set by F3/F4; run_loop suspends the TUI, runs it, and restores.
+    pending_external: Option<PendingExternal>,
 }
 
 #[derive(Debug)]
@@ -105,6 +108,28 @@ enum ActiveDialog {
     },
     #[allow(dead_code)]
     Resume(ResumePromptDialog),
+    /// Single-line text input (mkdir name / select pattern).
+    Input {
+        widget: TextInputDialog,
+        kind: InputKind,
+    },
+}
+
+/// What a [`TextInputDialog`]'s submitted text becomes.
+#[derive(Debug, Clone, Copy)]
+enum InputKind {
+    Mkdir,
+    SelectPattern,
+    UnselectPattern,
+}
+
+/// An external program to run (F3/F4), suspending the TUI around it.
+#[derive(Debug, Clone)]
+struct PendingExternal {
+    /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks).
+    program: String,
+    /// Local filesystem path argument.
+    path: String,
 }
 
 async fn run_loop<B: ratatui::backend::Backend>(
@@ -123,6 +148,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         last_click: None,
         help_open: false,
         mouse_enabled,
+        pending_external: None,
     };
 
     // US1 (FR-001/005/006): resolve the configured theme once. An unknown
@@ -168,6 +194,13 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let dialog_ref = active_dialog.as_mut();
         let ms_left = chrome::mini_status_line(app.pane(PaneId::Left));
         let ms_right = chrome::mini_status_line(app.pane(PaneId::Right));
+        let view_mode = app.view_mode();
+        let qv_preview = if view_mode == cargonaut_core::ViewMode::QuickView {
+            compute_preview(app)
+        } else {
+            String::new()
+        };
+        let progress = progress_summary(app);
         let mut layout = FrameLayout::default();
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
@@ -187,6 +220,9 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 &ms_left,
                 &ms_right,
                 help_open,
+                view_mode,
+                &qv_preview,
+                progress.as_deref(),
             );
         })
         .map_err(Error::Terminal)?;
@@ -214,7 +250,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
                         if !cont { return Ok(()); }
                     }
                     Some(Ok(CtEvent::Mouse(m))) => {
-                        handle_mouse(m, app, &mut ui, &left, &right, &mut status).await?;
+                        handle_mouse(
+                            m, app, &mut ui, &left, &right, &mut status,
+                            &mut mode, &mut active_dialog, &mut quit,
+                        ).await?;
                     }
                     Some(Ok(CtEvent::Resize(_, _))) => {
                         // Loop iter will re-render.
@@ -230,6 +269,17 @@ async fn run_loop<B: ratatui::backend::Backend>(
             _ = tick.tick() => {
                 // Drains pending transfer state changes through to the next render.
             }
+        }
+
+        // US5 (FR-030/031): an F3/F4 request suspends the TUI, runs the
+        // external pager/editor, then restores the terminal + refreshes.
+        if let Some(ext) = ui.pending_external.take() {
+            run_external(term, &ext, ui.mouse_enabled)?;
+            let _ = app
+                .refresh_active_pane()
+                .await
+                .map_err(|e| Error::Other(e.to_string()))?;
+            status = format!("Returned from {}", ext.program);
         }
     }
 }
@@ -313,6 +363,31 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            ActiveDialog::Input { widget, kind } => {
+                if let Some(outcome) = widget.handle_key(key.code) {
+                    let kind = *kind;
+                    *active_dialog = None;
+                    *mode = Mode::Pane;
+                    if let InputOutcome::Submit(text) = outcome {
+                        let text = text.trim().to_string();
+                        if !text.is_empty() {
+                            let core = match kind {
+                                InputKind::Mkdir => AppCommand::Mkdir(text),
+                                InputKind::SelectPattern => AppCommand::SelectByPattern(text),
+                                InputKind::UnselectPattern => AppCommand::UnselectByPattern(text),
+                            };
+                            let events = app
+                                .dispatch(core)
+                                .await
+                                .map_err(|e| Error::Other(e.to_string()))?;
+                            for ev in events {
+                                apply_event(ev, app, mode, active_dialog, status, quit);
+                            }
+                        }
+                    }
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -359,6 +434,40 @@ async fn dispatch_ui_command(
             ui.help_open = true;
             return Ok(());
         }
+        // US5 (FR-024/025): these need text input first — open a dialog.
+        Command::Mkdir => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::new("Make directory", "New directory name:"),
+                kind: InputKind::Mkdir,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        Command::SelectionAddByPattern => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::new("Select group", "Tag files matching (glob):"),
+                kind: InputKind::SelectPattern,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        Command::SelectionRemoveByPattern => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::new("Unselect group", "Untag files matching (glob):"),
+                kind: InputKind::UnselectPattern,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // US5 (FR-030/031): F3/F4 shell out to $PAGER / $EDITOR.
+        Command::Preview => {
+            queue_external(app, ui, status, ExternalTool::Pager);
+            return Ok(());
+        }
+        Command::Edit => {
+            queue_external(app, ui, status, ExternalTool::Editor);
+            return Ok(());
+        }
         _ => {}
     }
     if let Some(core_cmd) = ui_command_to_core(cmd) {
@@ -377,6 +486,64 @@ async fn dispatch_ui_command(
     Ok(())
 }
 
+/// Which external tool F3/F4 launch.
+#[derive(Debug, Clone, Copy)]
+enum ExternalTool {
+    Pager,
+    Editor,
+}
+
+/// US5 (FR-030/031): resolve the external tool + focused file and queue
+/// it for run_loop to execute (suspending the TUI). No-op with a status
+/// message if nothing suitable is focused.
+fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: ExternalTool) {
+    let p = app.active_pane_state();
+    let Some(idx) = p.focused_entry_index() else {
+        *status = "Nothing to open".into();
+        return;
+    };
+    let Some(e) = p.listing.entries.get(idx) else {
+        return;
+    };
+    if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir) {
+        *status = format!("{} is a directory", e.name);
+        return;
+    }
+    let path = p.cwd.join(e.name.as_str());
+    let disp = path.display();
+    let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+    let program = match tool {
+        ExternalTool::Pager => std::env::var("PAGER").unwrap_or_else(|_| "less".into()),
+        ExternalTool::Editor => std::env::var("EDITOR").unwrap_or_else(|_| "vi".into()),
+    };
+    ui.pending_external = Some(PendingExternal {
+        program,
+        path: local,
+    });
+}
+
+/// Suspend the TUI, run an external program on a file, then restore the
+/// terminal (FR-030/031). Uses `Command::new(prog).arg(path)` — no shell —
+/// per the constitution's macro-safety rule.
+fn run_external<B: ratatui::backend::Backend>(
+    term: &mut Terminal<B>,
+    ext: &PendingExternal,
+    mouse_enabled: bool,
+) -> Result<(), Error> {
+    let _ = disable_raw_mode();
+    let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    let _ = std::process::Command::new(&ext.program)
+        .arg(&ext.path)
+        .status();
+    enable_raw_mode().map_err(Error::Terminal)?;
+    execute!(stdout(), EnterAlternateScreen).map_err(Error::Terminal)?;
+    if mouse_enabled {
+        let _ = execute!(stdout(), EnableMouseCapture);
+    }
+    term.clear().map_err(Error::Terminal)?;
+    Ok(())
+}
+
 /// Human-facing label for a deferred command's status message.
 fn command_label(cmd: &Command) -> &'static str {
     match cmd {
@@ -392,6 +559,7 @@ fn command_label(cmd: &Command) -> &'static str {
 }
 
 /// Handle a mouse event against the last-rendered [`FrameLayout`] (US3).
+#[allow(clippy::too_many_arguments)]
 async fn handle_mouse(
     m: MouseEvent,
     app: &mut App,
@@ -399,6 +567,9 @@ async fn handle_mouse(
     left: &PaneView,
     right: &PaneView,
     status: &mut String,
+    mode: &mut Mode,
+    active_dialog: &mut Option<ActiveDialog>,
+    quit: &mut bool,
 ) -> Result<(), Error> {
     if !ui.mouse_enabled {
         return Ok(());
@@ -420,10 +591,7 @@ async fn handle_mouse(
         MouseEventKind::Down(MouseButton::Left) => {
             // 1. Function-key bar buttons (FR-017).
             if let Some(cmd) = ui.fkeybar.command_at(ui.layout.fkeys, x, y) {
-                let mut mode = Mode::Pane;
-                let mut quit = false;
-                let mut dialog: Option<ActiveDialog> = None;
-                dispatch_ui_command(cmd, app, &mut mode, &mut dialog, status, &mut quit, ui).await?;
+                dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
                 return Ok(());
             }
             // 2. Menu-bar titles (FR-017).
@@ -480,6 +648,56 @@ async fn handle_mouse(
 /// True if `(x, y)` is inside `r`.
 fn rect_contains(r: Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+/// US4 (FR-022) quick-view: bounded text preview of the active pane's
+/// highlighted file. Reads at most 64 KiB; binary/oversized → placeholder.
+fn compute_preview(app: &App) -> String {
+    let p = app.active_pane_state();
+    let Some(idx) = p.focused_entry_index() else {
+        return "(nothing highlighted)".into();
+    };
+    let Some(e) = p.listing.entries.get(idx) else {
+        return String::new();
+    };
+    if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir) {
+        return format!("{}/  (directory)", e.name);
+    }
+    let path = p.cwd.join(e.name.as_str());
+    let disp = path.display();
+    let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+    const CAP: usize = 64 * 1024;
+    use std::io::Read;
+    let mut buf = vec![0u8; CAP];
+    match std::fs::File::open(&local).and_then(|mut f| f.read(&mut buf)) {
+        Ok(n) => {
+            let slice = &buf[..n];
+            if slice.contains(&0) {
+                return format!("{}  (binary file, {} bytes)", e.name, e.meta.size);
+            }
+            String::from_utf8_lossy(slice)
+                .lines()
+                .take(1000)
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        Err(err) => format!("(cannot preview {}: {err})", e.name),
+    }
+}
+
+/// US5 (FR-026): one-line summary of the active transfer, if any.
+fn progress_summary(app: &App) -> Option<String> {
+    app.active_progress().map(|p| {
+        let pct = p
+            .bytes_done
+            .saturating_mul(100)
+            .checked_div(p.bytes_total)
+            .unwrap_or(0);
+        format!(
+            "{}/{} bytes ({pct}%)   {:.1} MiB/s   ETA {}s",
+            p.bytes_done, p.bytes_total, p.throughput_mibs, p.eta_secs
+        )
+    })
 }
 
 fn apply_event(
@@ -553,6 +771,9 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::HistoryNextDir => AppCommand::HistoryNextDir,
         U::QuickCdPopup => AppCommand::QuickCdPopup,
         U::ShowTasksPanel => AppCommand::ShowTasksPanel,
+        U::CycleSortKey => AppCommand::CycleSortKey,
+        U::CycleListingMode => AppCommand::CycleListingMode,
+        U::RecursiveDirSize => AppCommand::RecursiveDirSize,
         _ => return None,
     })
 }
@@ -572,7 +793,11 @@ fn draw_frame(
     ms_left: &str,
     ms_right: &str,
     help_open: bool,
+    view_mode: cargonaut_core::ViewMode,
+    qv_preview: &str,
+    progress: Option<&str>,
 ) -> FrameLayout {
+    use cargonaut_core::ViewMode;
     use ratatui::widgets::Widget;
     let area = f.size();
     // US2 layout: [menu bar | panes | status | fkey bar].
@@ -590,8 +815,24 @@ fn draw_frame(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[1]);
 
-    let left_inner = draw_pane(f, left, pane_chunks[0], active == PaneId::Left, theme, ms_left);
-    let right_inner = draw_pane(f, right, pane_chunks[1], active == PaneId::Right, theme, ms_right);
+    // US4 (FR-022): Brief/Full column layout; in QuickView the *passive*
+    // pane previews the active pane's highlighted file.
+    let pane_layout = match view_mode {
+        ViewMode::Brief => pane::PaneLayout::Brief,
+        _ => pane::PaneLayout::Full,
+    };
+    let qv = view_mode == ViewMode::QuickView;
+
+    let left_inner = if qv && active == PaneId::Right {
+        draw_preview(f, pane_chunks[0], theme, qv_preview)
+    } else {
+        draw_pane(f, left, pane_chunks[0], active == PaneId::Left, theme, ms_left, pane_layout)
+    };
+    let right_inner = if qv && active == PaneId::Left {
+        draw_preview(f, pane_chunks[1], theme, qv_preview)
+    } else {
+        draw_pane(f, right, pane_chunks[1], active == PaneId::Right, theme, ms_right, pane_layout)
+    };
 
     // US1 (FR-002): status bar themed instead of bare reverse-video.
     let status_text = format!(" [{mode:?}]  {status}");
@@ -603,6 +844,11 @@ fn draw_frame(
     fkeybar.render(main_chunks[3], f.buffer_mut(), theme);
     menu.render(main_chunks[0], f.buffer_mut(), theme);
 
+    // US5 (FR-026): transfer progress overlay while a copy/move runs.
+    if let Some(p) = progress {
+        draw_progress(f, theme, area, p);
+    }
+
     if help_open {
         draw_help(f, theme, area);
     }
@@ -612,6 +858,7 @@ fn draw_frame(
         match d {
             ActiveDialog::Confirm { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Resume(widget) => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::Input { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
         }
     }
 
@@ -625,6 +872,7 @@ fn draw_frame(
 
 /// Draw one pane (list + per-pane mini-status). Returns the inner list
 /// rect for mouse hit-testing (US3).
+#[allow(clippy::too_many_arguments)]
 fn draw_pane(
     f: &mut ratatui::Frame,
     view: &mut PaneView,
@@ -632,6 +880,7 @@ fn draw_pane(
     focused: bool,
     theme: &Theme,
     mini_status: &str,
+    layout: pane::PaneLayout,
 ) -> Rect {
     use ratatui::widgets::Widget;
     // Split the column into the list (with border) + a 1-row mini-status.
@@ -648,12 +897,44 @@ fn draw_pane(
         .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
     let inner = block.inner(col[0]);
     block.render(col[0], f.buffer_mut());
-    view.render(inner, f.buffer_mut(), theme);
+    view.render(inner, f.buffer_mut(), theme, layout);
     // US2 (FR-010): per-pane mini-status line.
     Paragraph::new(format!(" {mini_status}"))
         .style(theme.status_style())
         .render(col[1], f.buffer_mut());
     inner
+}
+
+/// US4 (FR-022) quick-view: render the passive pane as a bounded text
+/// preview of the active pane's highlighted file. Returns its inner rect.
+fn draw_preview(f: &mut ratatui::Frame, area: Rect, theme: &Theme, preview: &str) -> Rect {
+    use ratatui::widgets::Widget;
+    let block = Block::default()
+        .title("Quick view")
+        .borders(Borders::ALL)
+        .border_style(theme.border_style(false))
+        .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
+    let inner = block.inner(area);
+    block.render(area, f.buffer_mut());
+    Paragraph::new(preview)
+        .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg))
+        .render(inner, f.buffer_mut());
+    inner
+}
+
+/// US5 (FR-026) transfer progress overlay.
+fn draw_progress(f: &mut ratatui::Frame, theme: &Theme, area: Rect, body: &str) {
+    use ratatui::widgets::{Clear, Widget};
+    let r = centered_rect(60, 20, area);
+    Clear.render(r, f.buffer_mut());
+    let block = Block::default()
+        .title("Transfer")
+        .borders(Borders::ALL)
+        .style(theme.dialog_style());
+    Paragraph::new(format!("\n {body}\n\n Ctrl-c to cancel"))
+        .block(block)
+        .style(theme.dialog_style())
+        .render(r, f.buffer_mut());
 }
 
 /// Minimal help overlay (F1). The full hypertext help viewer is deferred.
@@ -734,6 +1015,7 @@ mod tests {
             last_click: None,
             help_open: false,
             mouse_enabled: mouse,
+            pending_external: None,
         }
     }
 
@@ -764,6 +1046,19 @@ mod tests {
         (l, r)
     }
 
+    /// Drive `handle_mouse` with throwaway mode/dialog/quit; return the
+    /// resulting status string.
+    async fn mouse(m: MouseEvent, app: &mut App, ui: &mut UiState, l: &PaneView, r: &PaneView) -> String {
+        let mut status = String::new();
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut quit = false;
+        handle_mouse(m, app, ui, l, r, &mut status, &mut mode, &mut dlg, &mut quit)
+            .await
+            .unwrap();
+        status
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]
@@ -777,11 +1072,8 @@ mod tests {
         let right_rect = Rect { x: 50, y: 1, width: 40, height: 10 };
         let mut ui = fresh_ui(Rect { x: 0, y: 1, width: 40, height: 10 }, right_rect, true);
         let (l, r) = synced_views(&app);
-        let mut status = String::new();
         // Click row 2 (y = rect.y + 2) in the right pane.
-        handle_mouse(left_click(55, 3), &mut app, &mut ui, &l, &r, &mut status)
-            .await
-            .unwrap();
+        let _ = mouse(left_click(55, 3), &mut app, &mut ui, &l, &r).await;
         assert_eq!(app.active_pane(), PaneId::Right);
         assert_eq!(app.pane(PaneId::Right).cursor, 2);
     }
@@ -796,16 +1088,11 @@ mod tests {
         let left_rect = Rect { x: 0, y: 1, width: 40, height: 10 };
         let mut ui = fresh_ui(left_rect, Rect { x: 50, y: 1, width: 40, height: 10 }, true);
         let (l, r) = synced_views(&app);
-        let mut status = String::new();
         // First click on row 0 (the only entry, "sub").
-        handle_mouse(left_click(5, 1), &mut app, &mut ui, &l, &r, &mut status)
-            .await
-            .unwrap();
+        let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
         assert!(!app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
         // Second click same cell → double-click → descend.
-        handle_mouse(left_click(5, 1), &mut app, &mut ui, &l, &r, &mut status)
-            .await
-            .unwrap();
+        let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
         assert!(
             app.pane(PaneId::Left).cwd.display().ends_with("/sub"),
             "expected descent into sub, cwd = {}",
@@ -828,15 +1115,13 @@ mod tests {
             false, // mouse disabled
         );
         let (l, r) = synced_views(&app);
-        let mut status = String::new();
-        handle_mouse(left_click(55, 3), &mut app, &mut ui, &l, &r, &mut status)
-            .await
-            .unwrap();
+        let _ = mouse(left_click(55, 3), &mut app, &mut ui, &l, &r).await;
         assert_eq!(app.active_pane(), PaneId::Left, "disabled mouse must not focus");
         assert_eq!(app.pane(PaneId::Right).cursor, 0, "disabled mouse must not move cursor");
     }
 
-    // T-MOUSE-5 (FR-017): clicking function-key button #10 dispatches Quit.
+    // T-MOUSE-5 (FR-017): clicking a function-key button invokes its
+    // command. Button 2 (Menu/user-menu) is deferred → status message.
     #[tokio::test]
     async fn click_fkey_button_dispatches_command() {
         let td_l = TempDir::new().unwrap();
@@ -849,11 +1134,8 @@ mod tests {
         );
         ui.layout.fkeys = Rect { x: 0, y: 23, width: 100, height: 1 };
         let (l, r) = synced_views(&app);
-        let mut status = String::new();
-        // Button 7 (Mkdir) ≈ 7th of 10 slots → deferred → status message.
-        handle_mouse(left_click(65, 23), &mut app, &mut ui, &l, &r, &mut status)
-            .await
-            .unwrap();
+        // Button 2 (Menu = user menu) ≈ 2nd of 10 slots (x 10..20) → deferred.
+        let status = mouse(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
         assert!(
             status.contains("not yet available"),
             "expected deferred-action notice, got {status:?}"

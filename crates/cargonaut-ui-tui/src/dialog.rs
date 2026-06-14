@@ -109,6 +109,75 @@ impl ConfirmDialog {
 }
 
 // =====================================================================
+// TextInputDialog (mkdir name, select-by-pattern)
+// =====================================================================
+
+/// What the user did in a text-input dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputOutcome {
+    /// Enter pressed — carries the entered text.
+    Submit(String),
+    /// Esc pressed — cancelled.
+    Cancel,
+}
+
+/// A single-line modal text-input dialog (FR-024 mkdir, FR-025 pattern).
+#[derive(Debug, Clone)]
+pub struct TextInputDialog {
+    title: String,
+    prompt: String,
+    buffer: String,
+}
+
+impl TextInputDialog {
+    /// New dialog with a title and an inline prompt.
+    pub fn new(title: impl Into<String>, prompt: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            prompt: prompt.into(),
+            buffer: String::new(),
+        }
+    }
+
+    /// Current entered text (mostly for tests).
+    pub fn value(&self) -> &str {
+        &self.buffer
+    }
+
+    /// Handle a key. Returns `Some(outcome)` when the dialog dismisses.
+    pub fn handle_key(&mut self, code: KeyCode) -> Option<InputOutcome> {
+        match code {
+            KeyCode::Esc => Some(InputOutcome::Cancel),
+            KeyCode::Enter => Some(InputOutcome::Submit(self.buffer.clone())),
+            KeyCode::Backspace => {
+                self.buffer.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                self.buffer.push(c);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Render the dialog (modal, clears its rect first).
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title(self.title.as_str())
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        let body = format!("{}\n> {}_", self.prompt, self.buffer);
+        Paragraph::new(body)
+            .block(block)
+            .style(theme.dialog_style())
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+}
+
+// =====================================================================
 // ResumePromptDialog (offered on launch when scan_resumable finds work)
 // =====================================================================
 
@@ -421,6 +490,29 @@ mod tests {
             rendered.contains("large.bin"),
             "summary missing: {rendered:?}"
         );
+    }
+
+    // ---------- TextInputDialog ----------
+
+    #[test]
+    fn text_input_collects_and_submits() {
+        let mut d = TextInputDialog::new("Make directory", "Name:");
+        for c in "newdir".chars() {
+            assert_eq!(d.handle_key(KeyCode::Char(c)), None);
+        }
+        assert_eq!(d.value(), "newdir");
+        d.handle_key(KeyCode::Backspace);
+        assert_eq!(d.value(), "newdi");
+        assert_eq!(
+            d.handle_key(KeyCode::Enter),
+            Some(InputOutcome::Submit("newdi".into()))
+        );
+    }
+
+    #[test]
+    fn text_input_esc_cancels() {
+        let mut d = TextInputDialog::new("t", "p");
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(InputOutcome::Cancel));
     }
 
     #[test]
