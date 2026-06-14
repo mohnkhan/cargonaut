@@ -1976,7 +1976,11 @@ mod tests {
         let candidates = app.complete_cd("sr").await;
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].ends_with("/src"));
-        assert_eq!(app.pane(PaneId::Left).cwd, base, "complete_cd mutated state");
+        assert_eq!(
+            app.pane(PaneId::Left).cwd,
+            base,
+            "complete_cd mutated state"
+        );
         assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
 
         // --- Error-recovery: accept a bad path → Err, no nav; then a

@@ -735,9 +735,7 @@ mod tests {
         d.handle_key(KeyCode::Char('z'));
         assert_eq!(
             d.handle_key(KeyCode::Tab),
-            PathInputAction::RequestCompletions {
-                text: "a1z".into()
-            }
+            PathInputAction::RequestCompletions { text: "a1z".into() }
         );
     }
 
