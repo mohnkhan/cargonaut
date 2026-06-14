@@ -1959,6 +1959,41 @@ mod tests {
         assert!(app.complete_cd("zzz").await.is_empty());
     }
 
+    /// SC-006 injected-input gate (T1.25 origin): drive the full quick-cd
+    /// flow against the engine — complete → accept (success), a cancel
+    /// path (read-only, zero side effects), and error-recovery (bad path
+    /// rejected without mutation, then a valid accept succeeds).
+    #[tokio::test]
+    async fn quick_cd_end_to_end_complete_accept_cancel_and_recover() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("src")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let base = app.pane(PaneId::Left).cwd.clone();
+
+        // --- Cancel path: completing is read-only; not accepting leaves
+        // both panes untouched (SC-004).
+        let candidates = app.complete_cd("sr").await;
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].ends_with("/src"));
+        assert_eq!(app.pane(PaneId::Left).cwd, base, "complete_cd mutated state");
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty());
+
+        // --- Error-recovery: accept a bad path → Err, no nav; then a
+        // valid accept → Ok (SC-005 then SC-001).
+        let bad = app.quick_cd("/no/such/dir/zzz").await;
+        assert!(bad.is_err());
+        assert_eq!(app.pane(PaneId::Left).cwd, base, "bad accept navigated");
+
+        // --- Accept the completed candidate → active pane moves (SC-001),
+        // previous cwd recorded (FR-005), other pane unchanged (FR-013).
+        let right_before = app.pane(PaneId::Right).cwd.clone();
+        app.quick_cd(&candidates[0]).await.unwrap();
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/src"));
+        assert_eq!(app.pane(PaneId::Left).dir_history_back, vec![base]);
+        assert_eq!(app.pane(PaneId::Right).cwd, right_before);
+    }
+
     #[tokio::test]
     async fn show_tasks_panel_emits_status_with_transfer_count() {
         let td_l = TempDir::new().unwrap();
