@@ -13,8 +13,8 @@ pub mod pane;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
-    ConfirmDialog, ConfirmOutcome, InputOutcome, ResumableSummary, ResumeChoice,
-    ResumePromptDialog, TextInputDialog,
+    ConfirmDialog, ConfirmOutcome, InputOutcome, PathInputAction, PathInputDialog,
+    ResumableSummary, ResumeChoice, ResumePromptDialog, TextInputDialog,
 };
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
@@ -115,6 +115,11 @@ enum ActiveDialog {
     Input {
         widget: TextInputDialog,
         kind: InputKind,
+    },
+    /// Feature 038 — quick-cd prompt with directory tab-completion.
+    QuickCd {
+        /// The shared path-input widget.
+        widget: PathInputDialog,
     },
 }
 
@@ -427,6 +432,45 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            ActiveDialog::QuickCd { widget } => {
+                match widget.handle_key(key.code) {
+                    PathInputAction::RequestCompletions { text } => {
+                        // Async completion fetch off the render path (R-005).
+                        let candidates = app.complete_cd(&text).await;
+                        if let Some(ActiveDialog::QuickCd { widget }) = active_dialog.as_mut() {
+                            widget.apply_completions(candidates);
+                        }
+                    }
+                    PathInputAction::Submit(text) => {
+                        if !text.trim().is_empty() {
+                            match app.quick_cd(&text).await {
+                                Ok(events) => {
+                                    *active_dialog = None;
+                                    *mode = Mode::Pane;
+                                    for ev in events {
+                                        apply_event(ev, app, mode, active_dialog, status, quit);
+                                    }
+                                }
+                                // FR-006: keep the prompt open, show the error.
+                                Err(e) => {
+                                    if let Some(ActiveDialog::QuickCd { widget }) =
+                                        active_dialog.as_mut()
+                                    {
+                                        widget.set_error(e.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        // Empty input: no-op, prompt stays open (US3 #3).
+                    }
+                    PathInputAction::Cancel => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    PathInputAction::Edited | PathInputAction::Consumed => {}
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -494,6 +538,16 @@ async fn dispatch_ui_command(
             *active_dialog = Some(ActiveDialog::Input {
                 widget: TextInputDialog::new("Unselect group", "Untag files matching (glob):"),
                 kind: InputKind::UnselectPattern,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 038 (FR-012/FR-014): Alt-c opens the quick-cd prompt,
+        // prefilled with the active pane's current directory.
+        Command::QuickCdPopup => {
+            let initial = app.active_pane_state().cwd.display();
+            *active_dialog = Some(ActiveDialog::QuickCd {
+                widget: PathInputDialog::new("Quick cd", "Directory:", initial),
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -935,6 +989,7 @@ fn draw_frame(
             ActiveDialog::Confirm { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Resume(widget) => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Input { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::QuickCd { widget } => widget.render(darea, f.buffer_mut(), theme),
         }
     }
 
