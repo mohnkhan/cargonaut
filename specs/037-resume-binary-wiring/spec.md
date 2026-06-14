@@ -8,6 +8,23 @@
 
 **Input**: User description: "Wire end-to-end resume-from-interrupted-transfer at the binary level and close the SC-002 binary-level gate (issue #29 / T1.08)."
 
+## Clarifications
+
+### Session 2026-06-15
+
+- Q: On launch, which directories should the binary scan for orphan checkpoint sidecars?
+  → A: **Both launch directories** (the left and right panel paths the binary was started
+  with), non-recursively. Either panel can be a copy destination, so this catches an
+  interruption in either direction without the startup cost/risk of a recursive walk.
+- Q: How should the binary-level SIGKILL-resume test balance fidelity vs. CI cost?
+  → A: **Modest file + small checkpoint interval** (and/or a throughput throttle) so the kill
+  lands mid-transfer deterministically and fast. Exercises the full kill→resume→verify chain
+  end-to-end without a literal multi-GiB copy.
+- Q: How should CI exercise the expensive end-to-end resume test?
+  → A: **Enable the opt-in flag for the existing `cargo test --workspace` step** in CI
+  (e.g. `CARGONAUT_PTY_TESTS=1`) so the gated test runs inline on every PR — one pipeline,
+  minimal plumbing, pairs with the modest test sizing above.
+
 ## Overview
 
 The transfer engine already knows how to resume an interrupted copy: `cargonaut-transfer`
@@ -145,8 +162,9 @@ and asserts a source/destination checksum match — all without human interactio
 
 ### Functional Requirements
 
-- **FR-001**: On startup, the binary MUST scan the relevant destination/working location(s)
-  for orphan checkpoint sidecars before presenting the normal interactive view.
+- **FR-001**: On startup, the binary MUST scan both launch directories (the left and right
+  panel paths it was started with), non-recursively, for orphan checkpoint sidecars before
+  presenting the normal interactive view.
 - **FR-002**: When one or more resumable transfers are found, the system MUST present the
   resume prompt listing each found transfer with its source, destination, and progress so far.
 - **FR-003**: When no resumable transfers are found, the system MUST proceed directly to the
@@ -217,15 +235,17 @@ and asserts a source/destination checksum match — all without human interactio
   into the binary and does not redesign it.
 - The `ResumePromptDialog` widget's rendering and key handling are correct as already
   unit-tested; this feature constructs it, shows it on launch, and dispatches its outcomes.
-- The location scanned for checkpoints on launch is the destination/working directory(ies)
-  derived from the panels the binary is started with — the same directories a copy would
-  target. (To be confirmed in clarify/plan: exact scan scope.)
-- "Multi-gigabyte" test file size is large enough to guarantee the copy is still in flight
-  when the kill signal is sent on the CI runner; the exact size and timing are tuned during
-  implementation to stay within runner disk/time limits (the destination tree lives in tmpfs
-  per Constitution §V on the dev host; CI is exempt).
-- The opt-in mechanism for the expensive test is an environment flag; CI sets it. Default
-  developer `cargo test` runs leave it unset.
+- The locations scanned for checkpoints on launch are both panel directories the binary is
+  started with, scanned non-recursively (clarified 2026-06-15).
+- The end-to-end test uses a modest file size with a small checkpoint interval (and/or a
+  throughput throttle) tuned so the copy is reliably still in flight when the kill signal is
+  sent, while keeping the test fast and within runner disk/time limits (clarified
+  2026-06-15). The destination tree lives in tmpfs per Constitution §V on the dev host; CI is
+  exempt.
+- The opt-in mechanism for the expensive test is an environment flag (e.g.
+  `CARGONAUT_PTY_TESTS=1`); the existing CI `cargo test --workspace` step sets it so the gate
+  runs inline on every PR. Default developer `cargo test` runs leave it unset (clarified
+  2026-06-15).
 - TDD per Constitution §II applies: each FR gets a failing test committed before the
   implementation that satisfies it, with red-before-green commit history.
 - Resume-on-launch is additive to the existing startup flow; the no-checkpoints path is the
