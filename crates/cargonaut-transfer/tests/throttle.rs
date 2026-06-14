@@ -65,9 +65,10 @@ async fn run_copy_secs(payload: &[u8]) -> f64 {
     )
     .await
     .unwrap();
-    let final_state = tokio::time::timeout(Duration::from_secs(30), wait_terminal(job.state.clone()))
-        .await
-        .expect("transfer didn't terminate in 30s");
+    let final_state =
+        tokio::time::timeout(Duration::from_secs(30), wait_terminal(job.state.clone()))
+            .await
+            .expect("transfer didn't terminate in 30s");
     assert!(matches!(final_state, TransferState::Completed { .. }));
     started.elapsed().as_secs_f64()
 }

@@ -803,10 +803,7 @@ impl App {
     /// Pure (no I/O). Used by the UI to rebuild its prompt after each
     /// choice.
     pub fn pending_resume_views(&self) -> Vec<ResumeOfferView> {
-        self.pending_resumes
-            .iter()
-            .map(resume_offer_view)
-            .collect()
+        self.pending_resumes.iter().map(resume_offer_view).collect()
     }
 
     /// Resume the offer at `index`: continue the transfer from its
@@ -1731,7 +1728,10 @@ mod tests {
         bytes_written: usize,
         interval: usize,
     ) -> std::path::PathBuf {
-        assert!(bytes_written % interval == 0, "checkpoint at interval boundary");
+        assert!(
+            bytes_written % interval == 0,
+            "checkpoint at interval boundary"
+        );
         let src = src_dir.join(name);
         let dst = dst_dir.join(name);
         fs::write(&src, full).await.unwrap();
@@ -1824,7 +1824,9 @@ mod tests {
     async fn scan_finds_nothing_when_no_sidecars() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        fs::write(td_l.path().join("plain.txt"), b"hi").await.unwrap();
+        fs::write(td_l.path().join("plain.txt"), b"hi")
+            .await
+            .unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let offers = app.scan_resume_offers().await.unwrap();
         assert!(offers.is_empty());
@@ -1844,7 +1846,10 @@ mod tests {
         .unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let offers = app.scan_resume_offers().await.unwrap();
-        assert!(offers.is_empty(), "malformed sidecar must not yield an offer");
+        assert!(
+            offers.is_empty(),
+            "malformed sidecar must not yield an offer"
+        );
     }
 
     // ---- T008: resume_offer ----
@@ -1854,7 +1859,8 @@ mod tests {
         let td_src = TempDir::new().unwrap();
         let td_dst = TempDir::new().unwrap();
         let full: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
-        let dst = stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
+        let dst =
+            stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
 
         let mut app = make_app(&td_src, &td_dst).await;
         app.scan_resume_offers().await.unwrap();
@@ -1880,7 +1886,8 @@ mod tests {
         let td_src = TempDir::new().unwrap();
         let td_dst = TempDir::new().unwrap();
         let full: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
-        let dst = stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
+        let dst =
+            stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
         // Corrupt the partial destination after staging.
         fs::write(&dst, vec![0xFFu8; 4096]).await.unwrap();
 
@@ -1905,7 +1912,8 @@ mod tests {
         let td_src = TempDir::new().unwrap();
         let td_dst = TempDir::new().unwrap();
         let full: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
-        let dst = stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
+        let dst =
+            stage_checkpoint(td_src.path(), td_dst.path(), "big.bin", &full, 4096, 1024).await;
         let sidecar = td_dst
             .path()
             .join(".cargonaut-transfer-11111111-1111-4111-8111-111111111111.json");
@@ -1918,7 +1926,10 @@ mod tests {
             Some(Event::TransferProgressed(id)) => *id,
             other => panic!("expected TransferProgressed, got {other:?}"),
         };
-        assert!(!sidecar.exists(), "start over must remove the stale sidecar");
+        assert!(
+            !sidecar.exists(),
+            "start over must remove the stale sidecar"
+        );
         assert!(app.pending_resume_views().is_empty());
 
         let final_state = wait_completed(&app, id).await;
@@ -1942,11 +1953,18 @@ mod tests {
         app.scan_resume_offers().await.unwrap();
         app.skip_offer(0);
         assert!(app.transfer_ids().is_empty(), "skip starts no transfer");
-        assert!(app.pending_resume_views().is_empty(), "offer dropped from memory");
+        assert!(
+            app.pending_resume_views().is_empty(),
+            "offer dropped from memory"
+        );
         assert!(sidecar.exists(), "skip leaves the sidecar on disk");
 
         // A fresh scan re-discovers the skipped transfer.
         let offers = app.scan_resume_offers().await.unwrap();
-        assert_eq!(offers.len(), 1, "skipped transfer is offered again next launch");
+        assert_eq!(
+            offers.len(),
+            1,
+            "skipped transfer is offered again next launch"
+        );
     }
 }

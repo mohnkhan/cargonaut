@@ -61,18 +61,18 @@ fn write_payload(p: &Path, len: u64) {
     f.flush().unwrap();
 }
 
-/// Spawn cargonaut under a PTY. Returns (child, writer, shared-output).
-/// A background thread drains the PTY master so the child never blocks on
-/// a full output buffer.
-fn spawn(
-    exe: &str,
-    left: &Path,
-    right: &Path,
-) -> (
+/// A spawned cargonaut process under a PTY: the child handle, a writer to
+/// its PTY master (for key injection), and a shared buffer the drain
+/// thread appends all output to.
+type PtyHandle = (
     Box<dyn portable_pty::Child + Send + Sync>,
     Box<dyn Write + Send>,
     Arc<Mutex<Vec<u8>>>,
-) {
+);
+
+/// Spawn cargonaut under a PTY. A background thread drains the PTY master
+/// so the child never blocks on a full output buffer.
+fn spawn(exe: &str, left: &Path, right: &Path) -> PtyHandle {
     let pty = native_pty_system();
     let pair = pty
         .openpty(PtySize {
@@ -174,7 +174,7 @@ fn resume_sigkill_smoke() {
     // well under way (≥16 MiB, < full) — proof the copy is in flight.
     let in_flight = wait_until(Duration::from_secs(20), || {
         let size = std::fs::metadata(&dst_file).map(|m| m.len()).unwrap_or(0);
-        has_sidecar(dst_dir.path()) && size >= 16 * 1024 * 1024 && size < FILE_BYTES
+        has_sidecar(dst_dir.path()) && (16 * 1024 * 1024..FILE_BYTES).contains(&size)
     });
     let pre_kill_size = std::fs::metadata(&dst_file).map(|m| m.len()).unwrap_or(0);
     assert!(
@@ -194,8 +194,9 @@ fn resume_sigkill_smoke() {
     let (mut child2, mut w2, out2) = spawn(exe, src_dir.path(), dst_dir.path());
     let pid2 = child2.process_id().expect("run2 has a pid");
 
-    let prompt_shown =
-        wait_until(Duration::from_secs(10), || output_contains(&out2, "Resumable transfers"));
+    let prompt_shown = wait_until(Duration::from_secs(10), || {
+        output_contains(&out2, "Resumable transfers")
+    });
     assert!(
         prompt_shown,
         "resume prompt did not appear on relaunch (no 'Resumable transfers' in output)"
