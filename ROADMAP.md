@@ -18,6 +18,8 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 
 > ✅ **Resolved**: [#29](https://github.com/mohnkhan/cargonaut/issues/29) (T1.08 — binary-level SIGKILL-resume PTY test, SC-002 gate) shipped in **Feature 037** (`037-resume-binary-wiring`). The scope grew once discovered: the resume-on-launch flow was never wired into the binary, so Feature 037 wired `scan_resumable`→`ResumePromptDialog`→`resume_transfer` end-to-end and added the gated PTY test (`CARGONAUT_PTY_TESTS=1`, enforced in CI). The PTY harness also lays groundwork for [#30](https://github.com/mohnkhan/cargonaut/issues/30).
 
+> ✅ **Resolved**: [#31](https://github.com/mohnkhan/cargonaut/issues/31) (T1.25 — full quick-cd popup w/ tab-completion, FR-012) shipped in **Feature 038** (`038-quick-cd-popup`). Alt-c now opens an inline prompt (prefilled with the active pane's cwd) that Tab-completes directories against the pane's VFS + recent-dir history and navigates via the existing `navigate_to` path. It also delivers the shared, caller-driven `PathInputDialog` widget, which **unblocks [#32](https://github.com/mohnkhan/cargonaut/issues/32) and [#33](https://github.com/mohnkhan/cargonaut/issues/33)** (both were waiting on a reusable text-input dialog).
+
 ---
 
 ## Tier 2 — near-term, well-scoped features
@@ -25,8 +27,7 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
 | [#37](https://github.com/mohnkhan/cargonaut/issues/37) | Panel: `..` parent entry as first row (FR-020) | S | Feature 031 — ascent works via key/menu/mouse; needs an index model separating the synthetic row from real entries |
-| [#31](https://github.com/mohnkhan/cargonaut/issues/31) | T1.25 — full quick-cd popup w/ tab-completion (FR-012) | 0.25–0.5 ew | Feature 028 — ships as status-bar placeholder; needs shared text-input dialog (also unblocks #32/#33). |
-| [#32](https://github.com/mohnkhan/cargonaut/issues/32) | T1.29 — tasks/jobs panel popup (FR-016, NFR-004) | 1.0 ew | Feature 028 — ships as status-bar placeholder; registry data already in `App`, needs list dialog + pause/resume wiring. |
+| [#32](https://github.com/mohnkhan/cargonaut/issues/32) | T1.29 — tasks/jobs panel popup (FR-016, NFR-004) | 1.0 ew | Feature 028 — ships as status-bar placeholder; registry data already in `App`, needs list dialog + pause/resume wiring. **Unblocked**: shared `PathInputDialog` landed in Feature 038. |
 
 ---
 
@@ -41,7 +42,7 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 | [#46](https://github.com/mohnkhan/cargonaut/issues/46) | File attributes: chmod/chown + sym/hardlink | M | Feature 031 §Out of Scope — needs new VFS ops |
 | [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
 | [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
-| [#33](https://github.com/mohnkhan/cargonaut/issues/33) | FR-013 — panel filter prompt dialog (currently clear-only) | 0.25 ew | Feature 022 — `globset` plumbing present; prompt deferred pending shared input dialog (#31). |
+| [#33](https://github.com/mohnkhan/cargonaut/issues/33) | FR-013 — panel filter prompt dialog (currently clear-only) | 0.25 ew | Feature 022 — `globset` plumbing present; prompt deferred pending shared input dialog (#31). **Unblocked**: shared `PathInputDialog` landed in Feature 038. |
 
 ---
 
