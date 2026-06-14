@@ -121,6 +121,12 @@ enum ActiveDialog {
         /// The shared path-input widget.
         widget: PathInputDialog,
     },
+    /// Feature 033 — panel filter prompt (FR-013). Reuses the shared
+    /// path-input widget; no completions (a glob has nothing to complete).
+    FilterPrompt {
+        /// The shared path-input widget.
+        widget: PathInputDialog,
+    },
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -471,6 +477,39 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            ActiveDialog::FilterPrompt { widget } => {
+                match widget.handle_key(key.code) {
+                    // Empty submit clears (US2); valid sets; invalid keeps the
+                    // prompt open with an inline error (FR-006). `set_filter`
+                    // is synchronous (research R-005).
+                    PathInputAction::Submit(text) => match app.set_filter(&text) {
+                        Ok(events) => {
+                            *active_dialog = None;
+                            *mode = Mode::Pane;
+                            for ev in events {
+                                apply_event(ev, app, mode, active_dialog, status, quit);
+                            }
+                        }
+                        Err(e) => {
+                            if let Some(ActiveDialog::FilterPrompt { widget }) =
+                                active_dialog.as_mut()
+                            {
+                                widget.set_error(e.to_string());
+                            }
+                        }
+                    },
+                    // FR-008: cancel leaves the pane's filter untouched.
+                    PathInputAction::Cancel => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    // No path completions for a glob prompt.
+                    PathInputAction::RequestCompletions { .. }
+                    | PathInputAction::Edited
+                    | PathInputAction::Consumed => {}
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -548,6 +587,21 @@ async fn dispatch_ui_command(
             let initial = app.active_pane_state().cwd.display();
             *active_dialog = Some(ActiveDialog::QuickCd {
                 widget: PathInputDialog::new("Quick cd", "Directory:", initial),
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 033 (FR-013): Alt-! opens the panel filter prompt,
+        // prefilled with the active pane's current filter pattern (FR-002).
+        Command::TogglePanelFilter => {
+            let initial = app
+                .active_pane_state()
+                .filter
+                .as_ref()
+                .map(|f| f.pattern().to_string())
+                .unwrap_or_default();
+            *active_dialog = Some(ActiveDialog::FilterPrompt {
+                widget: PathInputDialog::new("Filter", "Pattern:", initial),
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -990,6 +1044,7 @@ fn draw_frame(
             ActiveDialog::Resume(widget) => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Input { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::QuickCd { widget } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
         }
     }
 
@@ -1168,6 +1223,208 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    // Feature 033: drive one key through the real `handle_key` path.
+    async fn feed_key(
+        code: crossterm::event::KeyCode,
+        app: &mut App,
+        keymap: &Keymap,
+        mode: &mut Mode,
+        dlg: &mut Option<ActiveDialog>,
+        ui: &mut UiState,
+    ) {
+        let mut chord_buf: Vec<KeyChord> = Vec::new();
+        let mut status = String::new();
+        let mut quit = false;
+        handle_key(
+            KeyEvent::from(code),
+            app,
+            keymap,
+            mode,
+            dlg,
+            &mut chord_buf,
+            &mut status,
+            &mut quit,
+            ui,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Feature 033 SC-005: injected-input E2E through the dialog wiring —
+    // invalid → error/stay-open, set → filtered/close, re-open → prefilled,
+    // Esc → unchanged, empty submit → cleared.
+    #[tokio::test]
+    async fn filter_prompt_e2e_invalid_set_cancel_clear() {
+        use crossterm::event::KeyCode;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.rs"), b"").unwrap();
+        std::fs::write(td_l.path().join("b.md"), b"").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        // Open (Alt-! routes to this command).
+        dispatch_ui_command(
+            Command::TogglePanelFilter,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(dlg, Some(ActiveDialog::FilterPrompt { .. })));
+        assert!(matches!(mode, Mode::Dialog));
+
+        // Invalid glob '[' then Enter → stays open, pane unchanged (FR-006).
+        feed_key(
+            KeyCode::Char('['),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        feed_key(
+            KeyCode::Enter,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(
+            matches!(dlg, Some(ActiveDialog::FilterPrompt { .. })),
+            "invalid pattern keeps the prompt open"
+        );
+        assert!(
+            app.active_pane_state().filter.is_none(),
+            "invalid pattern leaves the pane unchanged"
+        );
+
+        // Fix it: backspace the '[', type "*.rs", Enter → filtered + closed.
+        feed_key(
+            KeyCode::Backspace,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        for c in "*.rs".chars() {
+            feed_key(
+                KeyCode::Char(c),
+                &mut app,
+                &keymap,
+                &mut mode,
+                &mut dlg,
+                &mut ui,
+            )
+            .await;
+        }
+        feed_key(
+            KeyCode::Enter,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(dlg.is_none(), "valid submit closes the prompt");
+        assert!(matches!(mode, Mode::Pane));
+        assert_eq!(app.active_pane_state().visible_indices().len(), 1);
+
+        // Re-open → prefilled with the active pattern (FR-002); Esc → unchanged.
+        dispatch_ui_command(
+            Command::TogglePanelFilter,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        if let Some(ActiveDialog::FilterPrompt { widget }) = &dlg {
+            assert_eq!(
+                widget.value(),
+                "*.rs",
+                "prompt prefilled with current filter"
+            );
+        } else {
+            panic!("expected FilterPrompt open");
+        }
+        feed_key(
+            KeyCode::Esc,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(dlg.is_none());
+        assert_eq!(
+            app.active_pane_state().visible_indices().len(),
+            1,
+            "Esc leaves the filter intact (FR-008)"
+        );
+
+        // Re-open → clear text → Enter clears the filter (FR-005).
+        dispatch_ui_command(
+            Command::TogglePanelFilter,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        for _ in 0.."*.rs".len() {
+            feed_key(
+                KeyCode::Backspace,
+                &mut app,
+                &keymap,
+                &mut mode,
+                &mut dlg,
+                &mut ui,
+            )
+            .await;
+        }
+        feed_key(
+            KeyCode::Enter,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(dlg.is_none());
+        assert!(app.active_pane_state().filter.is_none());
+        assert_eq!(app.active_pane_state().visible_indices().len(), 2);
     }
 
     fn left_click(x: u16, y: u16) -> MouseEvent {
