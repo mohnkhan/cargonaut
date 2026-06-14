@@ -7,7 +7,7 @@
 #   min_phase   = 1..6             # phase in which the command becomes available
 #   fr          = ["FR-NNN", ...]  # the FR(s) this command implements
 #
-# Migrants from MC will press `:` first to discover; new users press F9 (FR-404)
+# Orthodox-FM migrants will press `:` first to discover; new users press F9 (FR-404)
 # for the menu bar; experts use the keybindings in contracts/keymap.toml.
 
 [[cmd]]

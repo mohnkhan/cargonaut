@@ -223,7 +223,7 @@ impl ViewMode {
 /// FR-015 split orientation for the two-pane layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitOrient {
-    /// Side-by-side panes (default — matches MC's classic look).
+    /// Side-by-side panes (default — the classic orthodox look).
     Horizontal,
     /// Stacked panes (left = top, right = bottom).
     Vertical,

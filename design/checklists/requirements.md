@@ -56,7 +56,7 @@
 ## Releases + migration
 
 - [X] Phased release milestones (`milestones.md`)
-- [X] MC migration table (`milestones.md`)
+- [X] orthodox-FM migration table (`milestones.md`)
 
 ## Implementation scaffold
 

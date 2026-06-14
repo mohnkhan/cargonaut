@@ -27,7 +27,7 @@ struct Cli {
     #[arg(long)]
     theme: Option<String>,
 
-    /// Load MC-compat keymap.
+    /// Load the orthodox-FM-compat keymap.
     #[arg(long)]
     mc_keys: bool,
 

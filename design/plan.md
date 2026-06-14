@@ -4,7 +4,7 @@
 
 ## Summary
 
-Build Cargonaut as a Rust 2021-edition cargo workspace with one binary crate and ~12 library crates organized around stable contracts. The Phase 1 MVP ships a runnable prototype with dual-pane local file navigation + resumable copy engine, byte-for-byte tested against `cp(1)` for throughput parity (≥80%). Phases 2-6 layer adapters (SFTP/S3/archive), previewers + editor handoff, plugin sandbox, terminal emulator + undo + audit, theming + l10n + a11y, and finally security hardening + perf tuning + MC migration. Each phase is independently shippable with measurable acceptance criteria (SC-001 … SC-010 in spec.md §4.1).
+Build Cargonaut as a Rust 2021-edition cargo workspace with one binary crate and ~12 library crates organized around stable contracts. The Phase 1 MVP ships a runnable prototype with dual-pane local file navigation + resumable copy engine, byte-for-byte tested against `cp(1)` for throughput parity (≥80%). Phases 2-6 layer adapters (SFTP/S3/archive), previewers + editor handoff, plugin sandbox, terminal emulator + undo + audit, theming + l10n + a11y, and finally security hardening + perf tuning + orthodox-FM migration. Each phase is independently shippable with measurable acceptance criteria (SC-001 … SC-010 in spec.md §4.1).
 
 ## Technical Context
 
@@ -41,7 +41,7 @@ Build Cargonaut as a Rust 2021-edition cargo workspace with one binary crate and
 - ≥80% code coverage on core crates (NFR-007)
 - Plugin sandbox MUST reject all out-of-capability syscalls (NFR-006)
 
-**Scale/Scope** (revised post-MC-gap-analysis):
+**Scale/Scope** (revised post-orthodox-FM-gap-analysis):
 - Phase 1: ~4,500 LoC + ~2,000 LoC tests = 6.5k LoC; 6 crates total (1 binary + 5 lib: bin, core, ui-tui, vfs, transfer, config). Added FR-011..017 panel ergonomics: history, quick-cd, filter, sync, niceties, tasks-panel, exit-cwd.
 - Phase 1-3 cumulative: ~16k LoC; 9 crates (adds cargonaut-vfs-sftp/-s3/-archive + cargonaut-search + cargonaut-plugin-host). Phase 3 adds FR-204..211 mask-rename, panelize, user-menu, openers, bulk-rename, hex-view, fuzzy, zoxide — all hosted in the existing core/ui-tui crates (no new sibling crates).
 - Full vision (all phases): ~40-55k LoC; ~12 crates

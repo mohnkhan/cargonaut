@@ -204,9 +204,9 @@ mode = "dialog"
 key = "Enter"
 action = "dialog-confirm"
 
-# ── MC compat mode (loaded only if [ui] mc_keys = true) ──────────────────────
-# All Phase 1 F-keys already match MC; the compat layer adds:
-#   Esc-N for F(N) (legacy MC fallback for terminals that swallow F-keys)
+# ── Orthodox-FM compat mode (loaded only if [ui] mc_keys = true) ─────────────
+# All Phase 1 F-keys already match the reference OFM; the compat layer adds:
+#   Esc-N for F(N) (legacy orthodox-FM fallback for terminals that swallow F-keys)
 [[binding]]
 mode = "pane"
 key = "M-5"
@@ -219,7 +219,7 @@ key = "M-6"
 action = "move-or-rename-selection"
 context = "mc-compat"
 
-# ── MC-parity panel ergonomics (Phase 1 — FR-011..017) ───────────────────────
+# ── Orthodox-FM parity panel ergonomics (Phase 1 — FR-011..017) ──────────────
 [[binding]]
 mode = "pane"
 key = "M-S-h"
@@ -280,7 +280,7 @@ mode = "global"
 key = "F12"
 action = "show-tasks-panel"  # FR-016
 
-# ── MC-killer features + modern niceties (Phase 3 — FR-204..211) ──────────────
+# ── Power features + modern niceties (Phase 3 — FR-204..211) ─────────────────
 [[binding]]
 mode = "pane"
 key = "F2"

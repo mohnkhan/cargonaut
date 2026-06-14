@@ -55,7 +55,7 @@ pub struct UiConfig {
     pub theme: String,
     /// Enable mouse input.
     pub mouse: bool,
-    /// Load the MC-compat keymap layer.
+    /// Load the orthodox-FM-compat keymap layer.
     pub mc_keys: bool,
     /// Show Unix dotfiles by default.
     pub show_hidden: bool,

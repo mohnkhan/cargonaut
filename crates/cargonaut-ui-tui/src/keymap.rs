@@ -161,7 +161,7 @@ pub enum Command {
     // FR-016 jobs panel
     /// Open the in-flight transfers panel (F12).
     ShowTasksPanel,
-    // FR-204+ MC-killer features
+    // FR-204+ power features
     /// External panelize: run cmd, present stdout as a pane (Ctrl-x !).
     ExternalPanelize,
     /// Open the F2 user menu.

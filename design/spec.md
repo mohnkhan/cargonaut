@@ -6,11 +6,11 @@
 
 **Status**: Draft — Phase 1 scope locked; Phases 2-6 high-level only
 
-**Input**: User description: "Rust-native, terminal, keyboard-first dual-pane file manager inspired by Midnight Commander (optional mouse) that ships incrementally in phases..."
+**Input**: User description: "Rust-native, terminal, keyboard-first dual-pane file manager inspired by the reference orthodox file manager (optional mouse) that ships incrementally in phases..."
 
 ## 1. Vision (one paragraph)
 
-Cargonaut is a Rust-native, terminal, keyboard-first dual-pane file manager — Midnight Commander reimagined for 2026 hardware, security expectations, and async I/O. The dominant interaction is a keyboard with mouse as opt-in. Two panes, navigation by hjkl/arrows/Tab, transactional file operations with progress + resumability + undo, a Lua/WASM plugin surface, transparent VFS adapters for local + remote (SFTP, S3, smb, archive) backends, and built-in previewers + terminal emulator. Defaults are conservative (no plugin runs without explicit opt-in; no destructive op without confirmation); power-user behavior is one config tweak away. The implementation language and the cultural lineage (cargo, crates, async-first, fearless concurrency) are intentional — Cargonaut SHOULD feel obviously Rust.
+Cargonaut is a Rust-native, terminal, keyboard-first dual-pane file manager — the reference orthodox file manager reimagined for 2026 hardware, security expectations, and async I/O. The dominant interaction is a keyboard with mouse as opt-in. Two panes, navigation by hjkl/arrows/Tab, transactional file operations with progress + resumability + undo, a Lua/WASM plugin surface, transparent VFS adapters for local + remote (SFTP, S3, smb, archive) backends, and built-in previewers + terminal emulator. Defaults are conservative (no plugin runs without explicit opt-in; no destructive op without confirmation); power-user behavior is one config tweak away. The implementation language and the cultural lineage (cargo, crates, async-first, fearless concurrency) are intentional — Cargonaut SHOULD feel obviously Rust.
 
 ## 2. User Scenarios & Testing *(mandatory)*
 
@@ -35,7 +35,7 @@ A developer launches `cargonaut`, sees two panes (left = `$HOME`, right = `/tmp`
 
 A developer connects to a remote box: in the left pane, types `:cd sftp://user@host:/var/log` (or selects "Remote → SFTP" from a menu). Cargonaut prompts for password OR uses the SSH agent automatically (configurable). The pane now shows the remote directory listing. The developer navigates, previews a 200-MB log file (Cargonaut streams the first/last 1000 lines instead of downloading the whole thing), and copies a 50-MB log file from remote to local with F5. The transfer uses pipelined reads (parallel SFTP file-handle reads where supported) and shows real throughput. Disconnect during transfer → cargonaut keeps the partial file + checkpoint metadata → reconnect resumes.
 
-**Why this priority**: Remote file-system access is the #1 thing MC users miss when MC doesn't have a good adapter for the remote system. Putting it in Phase 2 (not Phase 1) is honest — getting the SFTP credential handling and resumable-via-SFTP right is non-trivial.
+**Why this priority**: Remote file-system access is the #1 thing orthodox-FM users miss when the reference OFM doesn't have a good adapter for the remote system. Putting it in Phase 2 (not Phase 1) is honest — getting the SFTP credential handling and resumable-via-SFTP right is non-trivial.
 
 **Independent Test**: Set up a Docker SFTP server with one large file. Boot cargonaut, navigate to `sftp://`, copy file to local, disconnect SSH mid-transfer, reconnect, verify SHA-256 match after resume.
 
@@ -50,7 +50,7 @@ A developer connects to a remote box: in the left pane, types `:cd sftp://user@h
 
 A developer presses `F3` on a `.png` to open the inline image preview (rendered via sixel/iTerm protocol/Kitty graphics protocol depending on terminal capability) — falls back to ASCII art if the terminal can't render. Presses `F3` on a `.json` → syntax-highlighted preview with line numbers (uses `syntect`). Presses `F4` → edits the file via `$EDITOR` (handoff to the user's existing editor: vim, helix, nvim, etc.). On editor exit, cargonaut refreshes the file's metadata in the pane.
 
-**Why this priority**: Previewer is the #2 thing MC users want. Editor handoff is the simplest win — cargonaut DOES NOT try to be the editor; it delegates to `$EDITOR`.
+**Why this priority**: Previewer is the #2 thing orthodox-FM users want. Editor handoff is the simplest win — cargonaut DOES NOT try to be the editor; it delegates to `$EDITOR`.
 
 **Independent Test**: Open cargonaut in a Kitty terminal, navigate to a PNG, press F3, verify the image renders. Press F4 on a .rs file, verify cargonaut spawns `$EDITOR` with the file path, on exit return to cargonaut with refreshed mtime.
 
@@ -105,7 +105,7 @@ After a destructive operation (delete, overwrite, rename, move across filesystem
 - **FR-009** *(P1)*: Memory ceiling: the working-set RSS of a cargonaut process MUST stay ≤ **64 MiB** for the canonical "typical session" — defined as **3 panes × 10k-entry directories, no plugins, no concurrent transfers > 3** (same definition used by SC-003). The implementation MUST NOT load entire directory listings into memory for large dirs (>10k entries); streaming + virtual scrolling required.
 - **FR-010** *(P1)*: Startup time: cold-cache launch to interactive prompt MUST be ≤ **150 ms** on the 2026-baseline reference laptop (see §13 Assumptions: 4-core x86_64 / 16 GiB RAM / NVMe SSD).
 
-#### Phase 1 additions — MC-parity panel ergonomics
+#### Phase 1 additions — orthodox-FM parity panel ergonomics
 
 - **FR-011** *(P1)*: Directory + command history. `Alt-Shift-h` opens directory-history popup (chronological in-session); `Alt-y`/`Alt-u` step prev/next. `Alt-h` opens command-history popup (persisted at `~/.local/state/cargonaut/history`). Both bounded; default depth 100; configurable via `[ui.history]`.
 - **FR-012** *(P1)*: Quick-cd popup. `Alt-c` opens an inline cd prompt with tab-completion against the current FS, recent dirs, and (if FR-211 enabled) zoxide DB. Same semantics as `:cd PATH` but one keystroke instead of three.
@@ -124,18 +124,18 @@ After a destructive operation (delete, overwrite, rename, move across filesystem
 - **FR-202** *(P3)*: Bookmarks, persistent across sessions; tabs (multiple pane configurations); tags (per-path metadata, indexed for search).
 - **FR-203** *(P3)*: Search: glob/regex over filenames (instant); content search via `ripgrep` integration; results as virtual directory.
 
-#### Phase 3 additions — MC-killer features + modern TUI niceties
+#### Phase 3 additions — power features + modern TUI niceties
 
 - **FR-204** *(P3)*: Advanced mask rename. `F6` on ≥2 tagged files opens an "Advanced Rename" dialog: SOURCE pattern (glob OR regex toggle) → TARGET template with `$1..$9` backrefs in regex mode (Rust `regex` crate convention; NOT sed-style `\1..\9`) or `*` wildcards in glob mode. Preview table shows before→after for each tagged row with per-row untoggle. Dry-run mandatory before apply.
 - **FR-205** *(P3)*: External panelize. `:!cmd` (or `Ctrl-x !`) runs `cmd` via `$SHELL -c`, captures stdout line-by-line, and presents each line as an entry in the focused pane. Non-resolving lines (no such path) shown with strike-through and skipped on operation. Ephemeral until next `:cd`. Enables `:!fd -e rs`, `:!rg -l TODO`, `:!git diff --name-only` as panel sources. **Shell-injection rule (applies to FR-205/206/207)**: the `cmd` body is opaque shell text — users are trusted with their own config — but every macro substitution (`%f`/`%t`/`%d`/etc.) MUST be shell-quoted via the `shell-quote` crate before splicing. Where possible (no shell metacharacters in `cmd`), implementations SHOULD prefer `Command::new(prog).arg(arg)` over `sh -c` to bypass the shell entirely. Every external invocation MUST be appended to the audit log with full argv (FR-304, when Phase 4 lands).
 - **FR-206** *(P3)*: User menu. `F2` opens a context menu from `~/.config/cargonaut/menu.toml` merged with `./.cargonaut.menu.toml` (per-directory; auto-loaded when the focused pane's cwd contains it). Schema in [`contracts/menu.schema.json`](./contracts/menu.schema.json). Each entry: `{ label, key, command, condition?, background? }`. Macros expanded in `command` (all shell-quoted per the FR-205 shell-injection rule): `%f`/`%F` (focused file active/passive), `%d`/`%D` (dirs), `%t`/`%T` (tagged list — `%t` is **NUL-separated** for compatibility with `xargs -0` / `find -print0`; `%T` returns a JSON array for structured consumers; filenames containing NUL byte are rejected by LocalFs upstream so the separator is unambiguous), `%s`/`%S` (tagged-or-focused), `%b` (basename), `%x` (extension), `%%` (literal). Conditions: `is-file`, `is-dir`, `is-symlink`, `is-executable`, `has-tagged`, `match-glob='*.rs'`, `match-mime='text/*'`, `has-cap='execute'`. Sandbox: same shell environment as the parent cargonaut; commands run under the audit log (Phase 4).
 - **FR-207** *(P3)*: Extension binding (`openers.toml`). `~/.config/cargonaut/openers.toml` maps `(ext|glob|mime)` → `{ open=cmd, view=cmd, edit=cmd }`. Schema in [`contracts/openers.schema.json`](./contracts/openers.schema.json). `Enter` triggers `open` (falls back to `view` if not set); `F3` triggers `view`; `F4` triggers `edit` (falls back to `$EDITOR`, preserving FR-104). Commands use `%f` macro (shell-quoted per FR-205 rule). Bundled defaults: `.png/.jpg/.gif` → `chafa`, `.pdf` → `pdftotext`, `.md` → `glow`, `.json/.yaml/.toml` → fenced `syntect`, `.gz/.bz2/.xz` → decompress-and-view.
 - **FR-208** *(P3)*: Bulk rename via `$EDITOR`. With ≥2 tagged files, the "Bulk Rename" command (default `Ctrl-x r`) writes the tagged names to a temp file, opens in `$EDITOR`, then on editor exit diffs old↔new lines and applies a rename for each row whose right side differs. Line-count mismatch = hard error; existing-name conflict prompts per-row (overwrite / skip / abort).
-- **FR-209** *(P3)*: Previewer hex view + in-previewer search. Inside the previewer (F3), `:hex` (or `Ctrl-x X` while previewer focused — NOTE: deliberately NOT `Ctrl-x h`; that binding is reserved for FR-202 hotlist-add in Phase 5 to preserve MC migrant muscle memory) toggles hex view (16 bytes/row, address + bytes + ASCII gutter, xxd-style). `/<regex>` forward-search; `?<regex>` backward; `n`/`N` next/prev; `:g <n>` jumps to line (text mode) or offset (hex mode). **Mode dispatch**: keys `/`, `?`, `n`, `N` are dispatched to the previewer iff the previewer pane has keyboard focus; otherwise they fall through to the file-pane (so FR-003 `/` = cd-root still works when the previewer is not focused).
+- **FR-209** *(P3)*: Previewer hex view + in-previewer search. Inside the previewer (F3), `:hex` (or `Ctrl-x X` while previewer focused — NOTE: deliberately NOT `Ctrl-x h`; that binding is reserved for FR-202 hotlist-add in Phase 5 to preserve orthodox-FM migrant muscle memory) toggles hex view (16 bytes/row, address + bytes + ASCII gutter, xxd-style). `/<regex>` forward-search; `?<regex>` backward; `n`/`N` next/prev; `:g <n>` jumps to line (text mode) or offset (hex mode). **Mode dispatch**: keys `/`, `?`, `n`, `N` are dispatched to the previewer iff the previewer pane has keyboard focus; otherwise they fall through to the file-pane (so FR-003 `/` = cd-root still works when the previewer is not focused).
 - **FR-210** *(P3)*: Fuzzy filter. `<` (or `:filter`) opens an inline fuzzy prompt over visible names; results re-rank as user types; uses `nucleo` crate (fzf-equivalent scorer). FR-203 Find dialog also gains a `--fuzzy` switch.
 - **FR-211** *(P3)*: Zoxide integration. `[ui] zoxide` is tri-state: `"auto"` (default — enable iff `zoxide` is on `$PATH` at startup; silently disable otherwise), `true` (force on — fail loudly at startup if missing), `false` (force off). When enabled: `:z <fragment>` jumps via `zoxide query -i`; every `:cd` and `Alt-c` accepted path also records via `zoxide add` (best-effort, errors swallowed). Soft dependency — Cargonaut works fine without it.
 
-- **FR-301** *(P4)*: Built-in terminal emulator (drop-down or split, like Midnight Commander's `Ctrl-o` subshell but a real emulator using `portable-pty` + own VT100 renderer).
+- **FR-301** *(P4)*: Built-in terminal emulator (drop-down or split, like the reference orthodox file manager's `Ctrl-o` subshell but a real emulator using `portable-pty` + own VT100 renderer).
 - **FR-302** *(P4)*: Transactional undo: per-session undo stack persisted to `~/.local/share/cargonaut/undo/`; bounded depth (config; default 100 ops); destructive ops surface to undo within 10 ms.
 - **FR-303** *(P4)*: Conflict resolution dialogs: name collision (overwrite / skip / rename / merge); permission denied (retry-as-root / skip); checksum mismatch (re-copy / accept / abort).
 - **FR-304** *(P4)*: Audit log: append-only `~/.local/share/cargonaut/audit.log` with timestamp, op, source, dest, byte counts, exit status. Rotated daily; integrity-protected via per-line HMAC chain (keyed from OS keychain).
@@ -144,12 +144,12 @@ After a destructive operation (delete, overwrite, rename, move across filesystem
 - **FR-401** *(P5)*: Theming via TOML files; bundled themes: solarized-dark, solarized-light, dracula, gruvbox, nord, monochrome.
 - **FR-402** *(P5)*: Localization: English + at least 5 community-translated locales (Spanish, French, German, Russian, Japanese) at first ship; `fluent-rs` for runtime selection.
 - **FR-403** *(P5)*: Accessibility: high-contrast mode, screen-reader-friendly output via `--a11y-output text-stream` mode that emits plain text events instead of ANSI cursor jumps.
-- **FR-404** *(P5)*: Menu bar (F9). Top-line menu bar with dropdowns: **File** (operations), **Edit** (selection), **View** (previewer/sort/filter), **Navigate** (history/bookmarks), **Tools** (compare/diff/find/panelize), **Help**. Mouse-clickable; arrow-key navigable. Sole purpose: discoverability for MC migrants who don't remember shortcuts.
+- **FR-404** *(P5)*: Menu bar (F9). Top-line menu bar with dropdowns: **File** (operations), **Edit** (selection), **View** (previewer/sort/filter), **Navigate** (history/bookmarks), **Tools** (compare/diff/find/panelize), **Help**. Mouse-clickable; arrow-key navigable. Sole purpose: discoverability for orthodox-FM migrants who don't remember shortcuts.
 - **FR-405** *(P5)*: Listing modes. `Alt-t` cycles per-pane listing mode: **Brief** (name only, multi-column auto-fit), **Standard** (FR-002 default), **Long** (one row per file with ino, blocks, ctime, atime, xattr count, target-for-symlinks), **User-defined** (columns enumerated in `[ui.listing.user]` config block, e.g. `columns = ["name", "size", "perms", "git-status"]` where `git-status` is plugin-provided).
 
 - **FR-501** *(P6)*: Security hardening: seccomp/landlock filters for the main process (no exec, no network unless using a VFS that requires it); seccomp for plugins (stricter — no network, no exec).
 - **FR-502** *(P6)*: Performance tuning: io_uring on Linux for the copy engine; pipelined SFTP for remote; SIMD-accelerated checksums.
-- **FR-503** *(P6)*: Migration guide: importer for MC bookmarks (`~/.config/mc/`), key-binding compatibility mode (`--mc-keys`).
+- **FR-503** *(P6)*: Migration guide: importer for the reference manager's bookmarks (`~/.config/mc/`), key-binding compatibility mode (`--mc-keys`).
 
 ### 3.2 Non-Functional Requirements
 
@@ -178,7 +178,7 @@ Every FR above is mirrored in `contracts/requirements.toml` with `id`, `priority
 - **SC-006** *(Plugin sandbox, P3)*: Sandbox-escape fuzzer (CI job) runs 100k random WASM modules attempting to escape; zero successful escapes. Verified by `tests/fuzz/sandbox_escape.rs`.
 - **SC-007** *(Undo correctness, P4)*: After a sequence of 10 random destructive operations, pressing Ctrl-z 10 times restores the original directory tree (bit-identical for files; sha-256 match). Verified by `tests/integration/undo_sequence.rs`.
 - **SC-008** *(Audit-log integrity, P4)*: Tampering with a line in `audit.log` is detected on next launch via HMAC-chain verification. Verified by `tests/integration/audit_tamper.rs`.
-- **SC-009** *(MC migration)*: An MC user's `~/.config/mc/bookmarks` is importable; key-binding compat mode passes a checklist of 30 most-used MC shortcuts. Verified by `tests/integration/mc_migration.rs`.
+- **SC-009** *(orthodox-FM migration)*: An orthodox-FM user's `~/.config/mc/bookmarks` is importable; key-binding compat mode passes a checklist of 30 most-used orthodox-FM shortcuts. Verified by `tests/integration/mc_migration.rs`.
 - **SC-010** *(Test coverage)*: `cargo tarpaulin --lcov` reports ≥ 80% on core crates. Verified by CI gate.
 
 ### 4.2 Phased acceptance gates
@@ -189,7 +189,7 @@ Each phase MUST PASS all SCs whose priority ≤ phase.priority before moving on:
 - **Phase 2 (VFS + Transfer Adapters)**: + SC-005
 - **Phase 3 (Plugin + Preview/Editor)**: + SC-006
 - **Phase 4 (Built-in terminal + undo + audit)**: + SC-007, SC-008
-- **Phase 5 (Polish: theming, l10n, a11y)**: no new SC; perceptual quality bar — usability test with 5 MC users
+- **Phase 5 (Polish: theming, l10n, a11y)**: no new SC; perceptual quality bar — usability test with 5 orthodox-FM users
 - **Phase 6 (Security hardening + perf tuning + migration docs)**: + SC-009, SC-010
 
 ## 5. Key Entities
@@ -271,7 +271,7 @@ cargonaut [OPTIONS] [LEFT_PATH] [RIGHT_PATH]
 OPTIONS:
   --config <PATH>          alternate config file (default ~/.config/cargonaut/config.toml)
   --theme <NAME>           override config theme
-  --mc-keys                MC compat keymap (overrides config)
+  --mc-keys                orthodox-FM compat keymap (overrides config)
   --enable-plugin <NAME>   enable plugin for this session only
   --a11y-output text       emit plain-text event stream (screen reader)
   --verbose                debug logging to stderr
@@ -300,7 +300,7 @@ See [`tests-plan.md`](./tests-plan.md) for unit/integration/fuzz/property breakd
 
 ## 12. Release milestones + migration path
 
-See [`milestones.md`](./milestones.md) for phased delivery + the MC migration guide.
+See [`milestones.md`](./milestones.md) for phased delivery + the orthodox-FM migration guide.
 
 ## 13. Assumptions
 
@@ -320,7 +320,7 @@ See [`milestones.md`](./milestones.md) for phased delivery + the MC migration gu
 
 - **Q (Phase 1)**: WASM vs Lua for the plugin runtime? → **A**: WASM (`wasmtime`) — typed interfaces (WIT/component model), better sandboxing, polyglot (any source language). Lua is rejected because it would couple plugin developers to a dynamically-typed language and require yet another sandbox audit.
 - **Q (Phase 1)**: Checkpoint file location — beside the destination, beside the source, or in `$XDG_DATA_HOME/cargonaut/checkpoints/`? → **A**: Beside the destination, hidden filename `.cargonaut-transfer-<uuid>.json`. Reason: a destination-side checkpoint survives partial copies that don't reach the source filesystem; XDG_DATA_HOME wouldn't survive a chroot/container restart.
-- **Q (Phase 1)**: Default to MC-compatible F-keys (F5=copy etc.) or modern Ctrl-shortcuts (Ctrl-c=copy)? → **A**: MC-compatible F-keys by default; `--mc-keys` is a no-op (already on). Users opt into modern keys via `[ui] mc_keys = false` (which renames the binding scheme, not just unbinds F-keys). Justifies the F-key choice via "MC migration is the #1 user persona".
+- **Q (Phase 1)**: Default to orthodox-FM-compatible F-keys (F5=copy etc.) or modern Ctrl-shortcuts (Ctrl-c=copy)? → **A**: orthodox-FM-compatible F-keys by default; `--mc-keys` is a no-op (already on). Users opt into modern keys via `[ui] mc_keys = false` (which renames the binding scheme, not just unbinds F-keys). Justifies the F-key choice via "orthodox-FM migration is the #1 user persona".
 
 ## 15. Out of scope (forever, OR for v1)
 
@@ -328,8 +328,8 @@ See [`milestones.md`](./milestones.md) for phased delivery + the MC migration gu
 - GUI version (FOREVER — TUI is the product).
 - Mobile/touch UI (FOREVER).
 - FTP backend (FOREVER — SFTP via FR-101 supersedes; rsync-over-SSH for low-trust networks).
-- Audio-CD / mailfs / undelete (ext2 unlinked inodes) VFS backends (FOREVER — MC niche backends, near-zero modern demand).
-- Built-in MC-style `mcedit` (FOREVER — `$EDITOR` is the editor; ext-binding via FR-207 is the customization surface).
+- Audio-CD / mailfs / undelete (ext2 unlinked inodes) VFS backends (FOREVER — orthodox-FM niche backends, near-zero modern demand).
+- Built-in orthodox-FM-style reference editor (FOREVER — `$EDITOR` is the editor; ext-binding via FR-207 is the customization surface).
 - Cloud sync of cargonaut config across machines (v2+ — not in any of the 6 phases).
 - File system mounting (FUSE) (v2+).
 - Native macOS/Windows installers / code-signing (Phase 6+).
@@ -344,7 +344,7 @@ See [`milestones.md`](./milestones.md) for phased delivery + the MC migration gu
 | # | Name | One-line rationale | Choice |
 |---|---|---|---|
 | 1 | **Cargonaut** | Cargo (Rust's tool) + naut (navigator) — Rust-native heritage + file navigation; brandable single word. | **TOP** |
-| 2 | Bicommander | Direct MC heritage ("bi" = dual-pane); recognizable lineage but too referential. | Runner-up |
+| 2 | Bicommander | Direct dual-pane heritage ("bi" = dual-pane); recognizable lineage but too referential. | Runner-up |
 | 3 | Twain | "Twain" = two + literary recognition; short, memorable but unclear domain. | Honorable |
 | 4 | Dyad | Mathematical pair; concise but academic-feeling. | Honorable |
 | 5 | Rusk | Rust + desk; short, but trademark risk (food brand). | Drop |

@@ -324,7 +324,7 @@ verification = "benches/copy-io_uring-vs-stdio.rs"
 id = "FR-503"
 priority = "P6"
 phase = 6
-acceptance = "MC bookmarks import; --mc-keys compat mode."
+acceptance = "Reference-OFM bookmarks import; --mc-keys compat mode."
 verification = "tests/integration/mc_migration.rs"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -381,7 +381,7 @@ verification = "tests/integration/audit_tamper.rs"
 [[sc]]
 id = "SC-009"
 phase = 6
-target = "MC bookmarks importable; --mc-keys passes 30-shortcut checklist"
+target = "Reference-OFM bookmarks importable; --mc-keys passes 30-shortcut checklist"
 verification = "tests/integration/mc_migration.rs"
 
 [[sc]]
