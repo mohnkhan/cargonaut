@@ -20,12 +20,16 @@
 #![warn(missing_docs)]
 
 use cargonaut_transfer::{
-    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError, TransferId,
-    TransferJob, TransferOptions, TransferState,
+    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError, TransferJob,
+    TransferOptions, TransferState,
 };
+/// Re-exported transfer identity + mode so UI layers can name jobs without
+/// depending on `cargonaut-transfer` directly (mirrors the existing
+/// projection seam — see [`JobView`], [`ProgressView`]).
+pub use cargonaut_transfer::{TransferId, TransferMode};
 use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath};
 use globset::{GlobBuilder, GlobMatcher};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -270,6 +274,59 @@ pub struct ProgressView {
     pub throughput_mibs: f32,
 }
 
+/// Feature 039 — UI-agnostic status of one transfer as rendered by the
+/// tasks/jobs panel. Projects the transfer engine's `TransferState` (plus
+/// the App's user-paused marker) into the states the panel distinguishes,
+/// keeping `cargonaut-transfer`'s types out of the UI.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobStatus {
+    /// Submitted, not yet progressing.
+    Queued,
+    /// In flight, with progress.
+    Running {
+        /// Bytes copied so far.
+        bytes_done: u64,
+        /// Total bytes to copy.
+        bytes_total: u64,
+        /// Estimated seconds remaining.
+        eta_secs: u32,
+        /// Current throughput in MiB/s.
+        throughput_mibs: f32,
+    },
+    /// Paused by the user (resumable).
+    Paused,
+    /// Finished; `verified` mirrors the post-copy SHA-256 check.
+    Completed {
+        /// True if the destination SHA-256 matched the source.
+        verified: bool,
+    },
+    /// Errored; `resumable` is true if a checkpoint exists for retry.
+    Failed {
+        /// Can the transfer be resumed from its checkpoint?
+        resumable: bool,
+    },
+    /// Cancelled by the user (distinct from [`JobStatus::Paused`]).
+    Cancelled,
+}
+
+/// Feature 039 — UI-facing projection of one registry transfer (one row of
+/// the tasks/jobs panel). Built by [`App::job_views`]; mirrors the role of
+/// [`ProgressView`] / [`ResumeOfferView`] so the UI never touches the
+/// transfer crate's types.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobView {
+    /// Stable identity; the target of per-row actions.
+    pub id: TransferId,
+    /// Source path/URI for display (caller may shorten).
+    pub src: String,
+    /// Destination path/URI for display.
+    pub dst: String,
+    /// Copy or move.
+    pub mode: TransferMode,
+    /// Classified status, including progress.
+    pub status: JobStatus,
+}
+
 /// Feature 037 — UI-agnostic projection of one resumable transfer found
 /// on launch. Lets the UI build its resume prompt without depending on
 /// the transfer crate's types (mirrors [`ProgressView`]). The UI maps
@@ -392,6 +449,10 @@ pub struct App {
     transfers: HashMap<TransferId, TransferJob>,
     /// IDs in submit order — used by `CancelCurrentTransfer`.
     transfer_order: Vec<TransferId>,
+    /// Feature 039 — ids the user has paused (vs. cancelled). Source of
+    /// truth for the [`JobStatus::Paused`] classification and for resume
+    /// eligibility; the engine's `TransferState` can't express "paused".
+    paused: HashSet<TransferId>,
     /// Feature 037 — resumable transfers discovered on launch, in scan
     /// order. Drained one at a time as the user answers the resume prompt.
     pending_resumes: Vec<ResumableTransfer>,
@@ -450,6 +511,7 @@ impl App {
             local_fs,
             transfers: HashMap::new(),
             transfer_order: Vec::new(),
+            paused: HashSet::new(),
             pending_resumes: Vec::new(),
             status: String::new(),
             split: SplitOrient::Horizontal,
@@ -526,6 +588,149 @@ impl App {
     /// Borrow a transfer by id (for the UI to read its `watch::Receiver`).
     pub fn transfer(&self, id: TransferId) -> Option<&TransferJob> {
         self.transfers.get(&id)
+    }
+
+    /// Feature 039 (FR-002/003/004) — a read-only projection of every
+    /// transfer in the registry, in submit order, for the tasks/jobs panel.
+    /// Pure (no I/O). The user-paused marker overrides a raw `Canceled`
+    /// snapshot so a deliberately-paused transfer renders as `Paused`; a
+    /// transfer that reached a terminal state before the pause took effect
+    /// still renders with its terminal status.
+    pub fn job_views(&self) -> Vec<JobView> {
+        self.transfer_order
+            .iter()
+            .filter_map(|id| {
+                let job = self.transfers.get(id)?;
+                let raw = transfer_state_snapshot(job);
+                let paused = self.paused.contains(id);
+                let status = job_status_from(raw, paused);
+                Some(JobView {
+                    id: *id,
+                    src: job.src.1.display(),
+                    dst: job.dst.1.display(),
+                    mode: job.mode,
+                    status,
+                })
+            })
+            .collect()
+    }
+
+    /// Feature 039 (FR-009, SC-002) — cancel the transfer with `id` through
+    /// the engine's cancellation token. Clears any user-paused marker first
+    /// so the job renders as `Cancelled`, not `Paused`. Affects only this
+    /// transfer; unknown ids are a safe no-op.
+    pub fn cancel_transfer(&mut self, id: TransferId) -> Vec<Event> {
+        self.paused.remove(&id);
+        match self.transfers.get(&id) {
+            Some(job) => {
+                job.cancel.cancel();
+                vec![Event::Status(format!("Canceled transfer {id:?}"))]
+            }
+            None => vec![Event::Status("No such transfer".into())],
+        }
+    }
+
+    /// Feature 039 (FR-010/012/016/017) — pause the transfer with `id`.
+    /// Signals its cancellation token (which stops the copy loop while
+    /// leaving the checkpoint sidecar in place) and records the id as
+    /// user-paused so it renders as `Paused` and is resume-eligible. A
+    /// no-op on unknown, already-paused, or terminal transfers.
+    pub fn pause_transfer(&mut self, id: TransferId) -> Vec<Event> {
+        if self.paused.contains(&id) {
+            return vec![];
+        }
+        let pausable = match self.transfers.get(&id) {
+            None => return vec![],
+            Some(job) => match transfer_state_snapshot(job) {
+                TransferState::Completed { .. }
+                | TransferState::Failed { .. }
+                | TransferState::Canceled => false,
+                _ => {
+                    job.cancel.cancel();
+                    true
+                }
+            },
+        };
+        if pausable {
+            self.paused.insert(id);
+            vec![Event::Status(format!("Paused transfer {id:?}"))]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Feature 039 (FR-011/012) — resume a user-paused transfer. Locates
+    /// the job's checkpoint sidecar (via `scan_resumable` on the destination
+    /// directory) and re-arms it through [`resume_transfer`] with a fresh
+    /// cancellation token, preserving its `TransferId`. If no checkpoint
+    /// exists yet (paused before the first checkpoint interval), the
+    /// transfer is restarted from scratch. A no-op when `id` is not paused.
+    pub async fn resume_paused(&mut self, id: TransferId) -> Result<Vec<Event>, AppError> {
+        if !self.paused.contains(&id) {
+            return Ok(vec![]);
+        }
+        let (src_path, dst_path) = match self.transfers.get(&id) {
+            Some(job) => (job.src.1.clone(), job.dst.1.clone()),
+            None => {
+                self.paused.remove(&id);
+                return Ok(vec![]);
+            }
+        };
+        let dst_parent = dst_path
+            .parent()
+            .ok_or_else(|| AppError::BadPath("destination path has no parent".into()))?;
+        let opts = self.transfer_opts();
+
+        // Find this job's checkpoint sidecar in the destination directory.
+        let found = scan_resumable(Arc::clone(&self.local_fs), dst_parent)
+            .await?
+            .into_iter()
+            .find(|rt| rt.checkpoint.job_id == id.0.to_string());
+
+        match found {
+            Some(rt) => {
+                match resume_transfer(
+                    Arc::clone(&self.local_fs),
+                    Arc::clone(&self.local_fs),
+                    rt.checkpoint,
+                    opts,
+                )
+                .await
+                {
+                    Ok(job) => {
+                        // resume_transfer preserves the id, so this replaces
+                        // the paused entry in place; transfer_order is intact.
+                        let new_id = job.id;
+                        self.transfers.insert(new_id, job);
+                        self.paused.remove(&id);
+                        Ok(vec![Event::TransferProgressed(new_id)])
+                    }
+                    Err(e) => Ok(vec![Event::Status(format!("Cannot resume: {e}"))]),
+                }
+            }
+            None => {
+                // No checkpoint yet — restart from scratch. submit_transfer
+                // mints a fresh id, so swap it into transfer_order in place.
+                let job = submit_transfer(
+                    Arc::clone(&self.local_fs),
+                    src_path,
+                    Arc::clone(&self.local_fs),
+                    dst_path,
+                    opts,
+                )
+                .await?;
+                let new_id = job.id;
+                self.transfers.insert(new_id, job);
+                if let Some(pos) = self.transfer_order.iter().position(|x| *x == id) {
+                    self.transfer_order[pos] = new_id;
+                } else {
+                    self.transfer_order.push(new_id);
+                }
+                self.transfers.remove(&id);
+                self.paused.remove(&id);
+                Ok(vec![Event::TransferProgressed(new_id)])
+            }
+        }
     }
 
     /// Apply a command. Returns the events the UI should react to.
@@ -615,23 +820,17 @@ impl App {
             // Feature 038: opened UI-side (the TUI builds the dialog and
             // calls `complete_cd`/`quick_cd`). A direct dispatch is a no-op.
             QuickCdPopup => Ok(vec![]),
-            ShowTasksPanel => {
-                let n = self.transfer_order.len();
-                Ok(vec![Event::Status(format!(
-                    "Tasks panel not yet implemented (T1.29 stub) — {n} active transfer(s)"
-                ))])
-            }
+            // Feature 039: the tasks panel is opened UI-side (the TUI builds
+            // the modal from `job_views()` and routes per-row actions to
+            // `cancel_transfer`/`pause_transfer`/`resume_paused`). A direct
+            // dispatch is a no-op, like `QuickCdPopup`/`TogglePanelFilter`.
+            ShowTasksPanel => Ok(vec![]),
             Copy => self.request_copy_confirmation(),
             Move => self.request_move_confirmation(),
             Delete => self.request_delete_confirmation(),
             CancelCurrentTransfer => {
                 if let Some(id) = self.transfer_order.last().copied() {
-                    if let Some(job) = self.transfers.get(&id) {
-                        job.cancel.cancel();
-                        Ok(vec![Event::Status(format!("Canceled transfer {id:?}"))])
-                    } else {
-                        Ok(vec![])
-                    }
+                    Ok(self.cancel_transfer(id))
                 } else {
                     Ok(vec![Event::Status("No active transfer to cancel".into())])
                 }
@@ -1374,6 +1573,36 @@ fn parse_path(s: &str) -> Result<VfsPath, AppError> {
 /// borrow across awaits.
 pub fn transfer_state_snapshot(job: &TransferJob) -> TransferState {
     job.state.borrow().clone()
+}
+
+/// Feature 039 — classify a raw `TransferState` into the panel's
+/// [`JobStatus`], honoring the user-paused marker. A paused, still-active
+/// transfer renders as `Paused`; one that already reached a terminal state
+/// keeps that terminal status (defensive: a finished job is never shown as
+/// paused).
+fn job_status_from(raw: TransferState, paused: bool) -> JobStatus {
+    match raw {
+        TransferState::Completed { sha256_match } => JobStatus::Completed {
+            verified: sha256_match,
+        },
+        TransferState::Failed { resumable, .. } => JobStatus::Failed { resumable },
+        TransferState::Canceled if paused => JobStatus::Paused,
+        TransferState::Canceled => JobStatus::Cancelled,
+        _ if paused => JobStatus::Paused,
+        TransferState::Queued => JobStatus::Queued,
+        TransferState::Paused => JobStatus::Paused,
+        TransferState::Running {
+            bytes_done,
+            bytes_total,
+            eta_secs,
+            throughput_mibs,
+        } => JobStatus::Running {
+            bytes_done,
+            bytes_total,
+            eta_secs,
+            throughput_mibs,
+        },
+    }
 }
 
 // =====================================================================
@@ -2368,8 +2597,15 @@ mod tests {
         let _ = app.pause_transfer(id);
         assert!(matches!(app.job_views()[0].status, JobStatus::Paused));
         let _ = app.cancel_transfer(id);
-        // After cancel, the job must render as Cancelled, not Paused.
-        assert!(matches!(app.job_views()[0].status, JobStatus::Cancelled));
+        // After cancel the user-paused marker is cleared, so the job no
+        // longer classifies as Paused (it renders as Cancelled once the
+        // task observes the token — never Paused again). The deterministic
+        // invariant is "not Paused".
+        assert!(
+            !matches!(app.job_views()[0].status, JobStatus::Paused),
+            "cancel must clear the paused marker"
+        );
+        assert!(app.transfer(id).unwrap().cancel.is_cancelled());
     }
 
     #[tokio::test]
