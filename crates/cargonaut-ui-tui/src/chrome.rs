@@ -399,6 +399,24 @@ impl MenuBar {
 }
 
 // =====================================================================
+// Mouse-capture indicator (Feature 041 US2 / FR-005)
+// =====================================================================
+
+/// The persistent menu-bar label for the current mouse-capture state.
+///
+/// `session_supported` is `config.ui.mouse` (false ⇒ disabled for the whole
+/// session via `--no-mouse`/config); `captured` is the runtime
+/// `UiState.mouse_enabled`. A disabled session always reads `[mouse:off]`
+/// regardless of the runtime flag.
+pub fn mouse_indicator(session_supported: bool, captured: bool) -> &'static str {
+    match (session_supported, captured) {
+        (false, _) => "[mouse:off]",
+        (true, true) => "[mouse:on]",
+        (true, false) => "[mouse:susp]",
+    }
+}
+
+// =====================================================================
 // Mini-status (per-pane)
 // =====================================================================
 
