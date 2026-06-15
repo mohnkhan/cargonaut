@@ -13,8 +13,9 @@ pub mod pane;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
-    ConfirmDialog, ConfirmOutcome, InputOutcome, PathInputAction, PathInputDialog,
-    ResumableSummary, ResumeChoice, ResumePromptDialog, TextInputDialog,
+    ConfirmDialog, ConfirmOutcome, InputOutcome, JobRow, PathInputAction, PathInputDialog,
+    ResumableSummary, ResumeChoice, ResumePromptDialog, TasksAction, TasksPanelDialog,
+    TextInputDialog,
 };
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
@@ -127,6 +128,12 @@ enum ActiveDialog {
         /// The shared path-input widget.
         widget: PathInputDialog,
     },
+    /// Feature 039 — F12 tasks/jobs panel: a modal list of transfers with
+    /// per-row cancel/pause/resume over the App transfer registry.
+    TasksPanel {
+        /// The shared list widget; rows refreshed from `job_views()`.
+        widget: TasksPanelDialog,
+    },
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -218,6 +225,11 @@ async fn run_loop<B: ratatui::backend::Backend>(
         } else {
             status.clone()
         };
+        // Feature 039 (FR-008): refresh the tasks panel from the live
+        // registry each frame so progress/state update without reopening.
+        if let Some(ActiveDialog::TasksPanel { widget }) = active_dialog.as_mut() {
+            widget.set_rows(build_job_rows(app));
+        }
         let dialog_ref = active_dialog.as_mut();
         let ms_left = chrome::mini_status_line(app.pane(PaneId::Left));
         let ms_right = chrome::mini_status_line(app.pane(PaneId::Right));
@@ -510,6 +522,47 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            ActiveDialog::TasksPanel { widget } => {
+                // Map the focused row index → transfer id via job_views()
+                // (index-aligned with the widget rows), run the action, then
+                // refresh rows so the change shows. Panel stays open until
+                // Close (Esc / F12). FR-009/010/011/012.
+                match widget.handle_key(key.code) {
+                    Some(TasksAction::Close) => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    Some(action) => {
+                        let ids: Vec<_> = app.job_views().into_iter().map(|v| v.id).collect();
+                        match action {
+                            TasksAction::Cancel(i) => {
+                                if let Some(id) = ids.get(i).copied() {
+                                    let _ = app.cancel_transfer(id);
+                                }
+                            }
+                            TasksAction::Pause(i) => {
+                                if let Some(id) = ids.get(i).copied() {
+                                    let _ = app.pause_transfer(id);
+                                }
+                            }
+                            TasksAction::Resume(i) => {
+                                if let Some(id) = ids.get(i).copied() {
+                                    let _ = app
+                                        .resume_paused(id)
+                                        .await
+                                        .map_err(|e| Error::Other(e.to_string()))?;
+                                }
+                            }
+                            TasksAction::Close => unreachable!("handled above"),
+                        }
+                        if let Some(ActiveDialog::TasksPanel { widget }) = active_dialog.as_mut() {
+                            widget.set_rows(build_job_rows(app));
+                        }
+                    }
+                    None => {}
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -602,6 +655,16 @@ async fn dispatch_ui_command(
                 .unwrap_or_default();
             *active_dialog = Some(ActiveDialog::FilterPrompt {
                 widget: PathInputDialog::new("Filter", "Pattern:", initial),
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 039 (FR-001): F12 opens the tasks/jobs panel over the
+        // App transfer registry. One modal at a time — while it's open,
+        // keys are swallowed by the dialog arm, so it can't stack (FR-013).
+        Command::ShowTasksPanel => {
+            *active_dialog = Some(ActiveDialog::TasksPanel {
+                widget: TasksPanelDialog::new(build_job_rows(app)),
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -852,6 +915,60 @@ fn progress_summary(app: &App) -> Option<String> {
     })
 }
 
+/// Feature 039 — project the App's `job_views()` into tasks-panel rows.
+/// Index-aligned with `job_views()` so the event loop can map a row index
+/// back to a transfer id. Eligibility flags follow the data-model table.
+fn build_job_rows(app: &App) -> Vec<JobRow> {
+    use cargonaut_core::JobStatus;
+    let base = |s: &str| s.rsplit('/').next().unwrap_or(s).to_string();
+    app.job_views()
+        .into_iter()
+        .map(|v| {
+            let label = format!("{} → {}", base(&v.src), base(&v.dst));
+            let status_label = match &v.status {
+                JobStatus::Queued => "Queued".to_string(),
+                JobStatus::Running {
+                    bytes_done,
+                    bytes_total,
+                    ..
+                } => {
+                    let pct = bytes_done
+                        .saturating_mul(100)
+                        .checked_div(*bytes_total)
+                        .unwrap_or(0);
+                    format!("Running {pct}%")
+                }
+                JobStatus::Paused => "Paused".to_string(),
+                JobStatus::Completed { verified } => {
+                    if *verified {
+                        "Completed ✓".to_string()
+                    } else {
+                        "Completed ✗".to_string()
+                    }
+                }
+                JobStatus::Failed { resumable } => {
+                    if *resumable {
+                        "Failed (resumable)".to_string()
+                    } else {
+                        "Failed".to_string()
+                    }
+                }
+                JobStatus::Cancelled => "Cancelled".to_string(),
+            };
+            JobRow {
+                can_cancel: matches!(
+                    v.status,
+                    JobStatus::Queued | JobStatus::Running { .. } | JobStatus::Paused
+                ),
+                can_pause: matches!(v.status, JobStatus::Queued | JobStatus::Running { .. }),
+                can_resume: matches!(v.status, JobStatus::Paused),
+                label,
+                status_label,
+            }
+        })
+        .collect()
+}
+
 fn apply_event(
     ev: AppEvent,
     _app: &mut App,
@@ -1045,6 +1162,7 @@ fn draw_frame(
             ActiveDialog::Input { widget, .. } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::QuickCd { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::TasksPanel { widget } => widget.render(darea, f.buffer_mut(), theme),
         }
     }
 
