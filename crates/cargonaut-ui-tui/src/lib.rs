@@ -1677,8 +1677,22 @@ mod tests {
         let parent = app.pane(PaneId::Left).cwd.clone(); // td_l
         app.dispatch(AppCommand::Descend).await.unwrap(); // into "sub"
         assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
-        let left_rect = Rect { x: 0, y: 1, width: 40, height: 10 };
-        let mut ui = fresh_ui(left_rect, Rect { x: 50, y: 1, width: 40, height: 10 }, true);
+        let left_rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(
+            left_rect,
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
         let (l, r) = synced_views(&app);
         // "sub" is empty → row 0 (y=1) is the `..` row. Double-click it.
         let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;

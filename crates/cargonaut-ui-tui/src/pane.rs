@@ -81,7 +81,8 @@ impl PaneView {
         if rows == 0 {
             self.list_state.select(None);
         } else {
-            self.list_state.select(Some(self.parent_offset().min(rows - 1)));
+            self.list_state
+                .select(Some(self.parent_offset().min(rows - 1)));
         }
     }
 
@@ -225,56 +226,53 @@ impl PaneView {
                 style,
             ))));
         }
-        let entry_items = self
-            .visible_indices()
-            .into_iter()
-            .map(|i| {
-                let entry = &self.listing.entries[i];
-                let marked = self.selected.contains(&i);
-                let prefix = if marked { '*' } else { ' ' };
-                let kind_suffix = match &entry.meta.kind {
-                    VfsKind::Dir => "/",
-                    VfsKind::Symlink { .. } => "@",
-                    _ => "",
-                };
-                let line = match layout {
-                    PaneLayout::Brief => {
-                        format!("{prefix} {}{}", entry.name.as_str(), kind_suffix)
-                    }
-                    PaneLayout::Full => {
-                        // US4 (FR-019): name + size + mtime + perms columns.
-                        let size = if matches!(entry.meta.kind, VfsKind::Dir) {
-                            String::from("   <DIR>")
-                        } else {
-                            format!("{:>8}", entry.meta.size)
-                        };
-                        let mtime = crate::chrome::format_mtime(entry.meta.mtime);
-                        let perms = entry
-                            .meta
-                            .mode
-                            .as_ref()
-                            .map(|m| crate::chrome::perms_string(m.bits, &entry.meta.kind))
-                            .unwrap_or_else(|| "----------".to_string());
-                        format!(
-                            "{prefix}{} {} {}  {}{}",
-                            perms,
-                            size,
-                            mtime,
-                            entry.name.as_str(),
-                            kind_suffix
-                        )
-                    }
-                };
-                // US1 (FR-003): per-entry color keyed on kind / mode /
-                // hidden / marked, on the theme's panel background.
-                let style = theme.entry_style(
-                    &entry.meta.kind,
-                    entry.meta.mode.as_ref(),
-                    entry.meta.is_hidden,
-                    marked,
-                );
-                ListItem::new(Line::from(Span::styled(line, style)))
-            });
+        let entry_items = self.visible_indices().into_iter().map(|i| {
+            let entry = &self.listing.entries[i];
+            let marked = self.selected.contains(&i);
+            let prefix = if marked { '*' } else { ' ' };
+            let kind_suffix = match &entry.meta.kind {
+                VfsKind::Dir => "/",
+                VfsKind::Symlink { .. } => "@",
+                _ => "",
+            };
+            let line = match layout {
+                PaneLayout::Brief => {
+                    format!("{prefix} {}{}", entry.name.as_str(), kind_suffix)
+                }
+                PaneLayout::Full => {
+                    // US4 (FR-019): name + size + mtime + perms columns.
+                    let size = if matches!(entry.meta.kind, VfsKind::Dir) {
+                        String::from("   <DIR>")
+                    } else {
+                        format!("{:>8}", entry.meta.size)
+                    };
+                    let mtime = crate::chrome::format_mtime(entry.meta.mtime);
+                    let perms = entry
+                        .meta
+                        .mode
+                        .as_ref()
+                        .map(|m| crate::chrome::perms_string(m.bits, &entry.meta.kind))
+                        .unwrap_or_else(|| "----------".to_string());
+                    format!(
+                        "{prefix}{} {} {}  {}{}",
+                        perms,
+                        size,
+                        mtime,
+                        entry.name.as_str(),
+                        kind_suffix
+                    )
+                }
+            };
+            // US1 (FR-003): per-entry color keyed on kind / mode /
+            // hidden / marked, on the theme's panel background.
+            let style = theme.entry_style(
+                &entry.meta.kind,
+                entry.meta.mode.as_ref(),
+                entry.meta.is_hidden,
+                marked,
+            );
+            ListItem::new(Line::from(Span::styled(line, style)))
+        });
         items.extend(entry_items);
 
         let list = List::new(items)
@@ -558,8 +556,15 @@ mod tests {
 
     fn render_string(p: &mut PaneView, w: u16, h: u16) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        term.draw(|f| p.render(f.size(), f.buffer_mut(), &Theme::default(), PaneLayout::Brief))
-            .unwrap();
+        term.draw(|f| {
+            p.render(
+                f.size(),
+                f.buffer_mut(),
+                &Theme::default(),
+                PaneLayout::Brief,
+            )
+        })
+        .unwrap();
         term.backend()
             .buffer()
             .content()
@@ -579,7 +584,7 @@ mod tests {
         );
         assert!(p.has_parent());
         assert_eq!(p.row_count(), 3); // `..` + alpha + beta
-        // Default cursor is the first real entry, past the `..` row.
+                                      // Default cursor is the first real entry, past the `..` row.
         assert_eq!(p.focused_entry_index(), Some(0));
         let s = render_string(&mut p, 30, 6);
         assert!(s.contains(".."), "first row should show `..`: {s:?}");
@@ -607,7 +612,10 @@ mod tests {
         assert!(p.has_parent());
         assert_eq!(p.row_count(), 1); // only the `..` row
         let s = render_string(&mut p, 30, 6);
-        assert!(s.contains(".."), "`..` must remain under a zero-match filter: {s:?}");
+        assert!(
+            s.contains(".."),
+            "`..` must remain under a zero-match filter: {s:?}"
+        );
     }
 
     #[test]

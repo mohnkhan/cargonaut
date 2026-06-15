@@ -1881,7 +1881,9 @@ mod tests {
         let mut app = app_with_three(&td_l, &td_r).await;
         app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
         let events = app.dispatch(Command::Copy).await.unwrap();
-        assert!(events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Nothing"))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Nothing"))));
     }
 
     #[tokio::test]
