@@ -1770,6 +1770,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remove_bookmark_drops_and_persists(/* SC-005 */) {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let hl_file = TempDir::new().unwrap();
+        let path = hl_file.path().join("hotlist.toml");
+        let mut app = make_app(&td_l, &td_r).await;
+        app.hotlist_path = path.clone();
+        app.add_bookmark("a", None).unwrap();
+        app.add_bookmark("b", None).unwrap();
+
+        app.remove_bookmark(0).unwrap();
+        assert_eq!(app.bookmarks().len(), 1);
+        assert_eq!(app.bookmarks()[0].name, "b");
+        // gone on reload too.
+        assert_eq!(cargonaut_config::Hotlist::load(&path).bookmarks.len(), 1);
+        // out-of-range is a clean error, no panic.
+        assert!(matches!(app.remove_bookmark(9), Err(AppError::BadBookmark(_))));
+    }
+
+    #[tokio::test]
     async fn jump_to_bookmark_navigates_active_pane() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();

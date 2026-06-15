@@ -845,6 +845,13 @@ mod tests {
         assert_eq!(d.handle_key(KeyCode::Char('a')), Some(HotlistAction::Add));
     }
 
+    #[test]
+    fn hotlist_remove_key_returns_remove() {
+        let mut d = HotlistDialog::new(vec![hl_entry("a", 0), hl_entry("b", 1)]);
+        d.handle_key(KeyCode::Down);
+        assert_eq!(d.handle_key(KeyCode::Char('d')), Some(HotlistAction::Remove(1)));
+    }
+
     // ---------- ConfirmDialog ----------
 
     #[test]

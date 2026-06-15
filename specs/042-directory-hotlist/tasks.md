@@ -132,14 +132,14 @@ pane is at the bookmarked dir.
 
 **Independent Test**: With a bookmark present, remove it; absent on reopen + reload.
 
-- [ ] T014 [US3] (red) In `crates/cargonaut-core/src/lib.rs`, add a failing
+- [X] T014 [US3] (red) In `crates/cargonaut-core/src/lib.rs`, add a failing
   `#[tokio::test]`: `remove_bookmark(i)` drops entry `i`, persists, and a reload
   confirms it's gone (SC-005); out-of-range ⇒ error/no-op, no panic.
-- [ ] T015 [US3] (green) Implement `App::remove_bookmark(index)` (remove, `save`,
+- [X] T015 [US3] (green) Implement `App::remove_bookmark(index)` (remove, `save`,
   status). Make T014 pass.
-- [ ] T016 [US3] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a failing
+- [X] T016 [US3] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a failing
   test that the remove key ⇒ `HotlistAction::Remove(i)`.
-- [ ] T017 [US3] (green) Handle the remove key in `HotlistDialog` and wire
+- [X] T017 [US3] (green) Handle the remove key in `HotlistDialog` and wire
   `Remove(i)` → `app.remove_bookmark(i)` + refresh the popup in
   `crates/cargonaut-ui-tui/src/lib.rs`. Make T016 pass.
 
