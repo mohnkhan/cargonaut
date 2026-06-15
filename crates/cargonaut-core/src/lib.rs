@@ -2608,6 +2608,105 @@ mod tests {
         assert!(app.transfer(id).unwrap().cancel.is_cancelled());
     }
 
+    /// Poll a job's status until it reaches a terminal state or `deadline`
+    /// elapses, yielding so background transfer tasks make progress.
+    async fn wait_status<F>(app: &App, id: TransferId, deadline_ms: u64, pred: F) -> bool
+    where
+        F: Fn(&JobStatus) -> bool,
+    {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(v) = app.job_views().into_iter().find(|v| v.id == id) {
+                if pred(&v.status) {
+                    return true;
+                }
+            }
+            if start.elapsed().as_millis() as u64 > deadline_ms {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    }
+
+    /// SC-003 (the issue's headline acceptance test): submit three throttled
+    /// transfers, pause one, and assert the other two run to completion while
+    /// the paused one is held; then resume it and assert it completes too.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn three_jobs_pause_one_others_continue() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::env::set_var("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "16");
+        for name in ["a.bin", "b.bin", "c.bin"] {
+            fs::write(td_l.path().join(name), vec![0x5Au8; 24 * 1024 * 1024])
+                .await
+                .unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.refresh_active_pane().await.unwrap();
+        app.dispatch(Command::SelectByPattern("*.bin".into()))
+            .await
+            .unwrap();
+        app.confirm_copy().await.unwrap();
+
+        let ids = app.transfer_ids();
+        assert_eq!(ids.len(), 3, "expected 3 transfers, got {}", ids.len());
+        let paused_id = ids[1];
+
+        // Pause the middle job immediately (still in flight under throttle).
+        let _ = app.pause_transfer(paused_id);
+        assert!(app.transfer(paused_id).unwrap().cancel.is_cancelled());
+
+        // The other two must complete.
+        assert!(
+            wait_status(&app, ids[0], 30_000, |s| matches!(
+                s,
+                JobStatus::Completed { .. }
+            ))
+            .await,
+            "sibling 0 did not complete"
+        );
+        assert!(
+            wait_status(&app, ids[2], 30_000, |s| matches!(
+                s,
+                JobStatus::Completed { .. }
+            ))
+            .await,
+            "sibling 2 did not complete"
+        );
+
+        // The paused job did NOT complete — it is held as Paused.
+        let paused_status = app
+            .job_views()
+            .into_iter()
+            .find(|v| v.id == paused_id)
+            .unwrap()
+            .status;
+        assert!(
+            matches!(paused_status, JobStatus::Paused),
+            "paused job should be Paused, was {paused_status:?}"
+        );
+
+        // Resume it and assert it completes.
+        let _ = app.resume_paused(paused_id).await.unwrap();
+        // resume_transfer preserves the id; the from-scratch fallback would
+        // swap it, so resolve the (possibly new) middle id from order.
+        let resumed_id = app.transfer_ids()[1];
+        assert!(
+            wait_status(&app, resumed_id, 30_000, |s| matches!(
+                s,
+                JobStatus::Completed { .. }
+            ))
+            .await,
+            "resumed job did not complete"
+        );
+
+        // All three destinations exist and match the source size.
+        for name in ["a.bin", "b.bin", "c.bin"] {
+            let meta = std::fs::metadata(td_r.path().join(name)).unwrap();
+            assert_eq!(meta.len(), 24 * 1024 * 1024, "{name} wrong size");
+        }
+    }
+
     #[tokio::test]
     async fn cancel_current_transfer_signals_cancel_on_latest() {
         let td_l = TempDir::new().unwrap();
