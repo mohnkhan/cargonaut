@@ -186,7 +186,7 @@ no capture; indicator stays `[mouse:off]`.
   + Feature History one-liner for Feature 041) and append a Feature 041 section
   to `Learnings.md` (≥3 bullets: the single-flag reuse, the pure-function
   testable seam, FR-007 already-satisfied finding).
-- [ ] T020 [POLISH] Close issue #38: confirm FR-013 toggle delivered; reference
+- [X] T020 [POLISH] Close issue #38: confirm FR-013 toggle delivered; reference
   the merged PR. (No new deferral/ROADMAP row needed — this feature *resolves* a
   deferral rather than creating one.)
 
