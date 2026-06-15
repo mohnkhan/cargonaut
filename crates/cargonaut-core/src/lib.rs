@@ -137,6 +137,16 @@ pub struct PaneState {
     pub dir_history_fwd: Vec<VfsPath>,
 }
 
+/// Feature 040 — what the pane cursor currently points at: the synthetic
+/// `..` parent row, or a real entry (index into `listing.entries`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedRow {
+    /// The synthetic `..` parent row (present only in a non-root directory).
+    Parent,
+    /// A real listing entry at this index into `listing.entries`.
+    Entry(usize),
+}
+
 impl PaneState {
     /// Indices that pass the visibility filters, in listing order.
     pub fn visible_indices(&self) -> Vec<usize> {
@@ -158,9 +168,57 @@ impl PaneState {
             .collect()
     }
 
-    /// Absolute index in `listing.entries` of the cursor's current entry.
+    /// Feature 040 (FR-001/002) — true when the directory has a parent, so a
+    /// synthetic `..` row is shown as the first row.
+    pub fn has_parent(&self) -> bool {
+        self.cwd.parent().is_some()
+    }
+
+    /// Feature 040 — the virtual↔real index shift: 1 when a `..` row is
+    /// present (non-root), 0 at a filesystem root.
+    pub fn parent_offset(&self) -> usize {
+        usize::from(self.has_parent())
+    }
+
+    /// Feature 040 — number of addressable cursor rows: the `..` row (when
+    /// present) plus the visible real entries.
+    pub fn row_count(&self) -> usize {
+        self.parent_offset() + self.visible_indices().len()
+    }
+
+    /// Feature 040 — true when the cursor is on the synthetic `..` row.
+    pub fn on_parent_row(&self) -> bool {
+        self.has_parent() && self.cursor < self.parent_offset()
+    }
+
+    /// Feature 040 — what the cursor currently points at (parent row vs a
+    /// real entry).
+    pub fn focused_row(&self) -> FocusedRow {
+        match self.focused_entry_index() {
+            Some(i) => FocusedRow::Entry(i),
+            None if self.on_parent_row() => FocusedRow::Parent,
+            // Empty real listing with no parent: nothing focusable; treat as
+            // Parent only when a parent row exists, else default to Parent-less
+            // — callers gate on focused_entry_index for real-entry actions.
+            None => FocusedRow::Parent,
+        }
+    }
+
+    /// Absolute index in `listing.entries` of the cursor's current real
+    /// entry, or `None` when the cursor is on the `..` row (Feature 040).
     pub fn focused_entry_index(&self) -> Option<usize> {
-        self.visible_indices().get(self.cursor).copied()
+        let off = self.parent_offset();
+        if self.cursor < off {
+            return None; // on the synthetic `..` row
+        }
+        self.visible_indices().get(self.cursor - off).copied()
+    }
+
+    /// Feature 040 (FR-014) — the cursor position to use for a fresh listing:
+    /// the first real entry (just past the `..` row), or the `..` row itself
+    /// in an empty non-root directory, or 0 at a root.
+    fn default_cursor(&self) -> usize {
+        self.parent_offset().min(self.row_count().saturating_sub(1))
     }
 }
 
@@ -479,7 +537,7 @@ impl App {
 
         let show_hidden = config.ui.show_hidden;
 
-        let panes = [
+        let mut panes = [
             PaneState {
                 cwd: left_p,
                 listing: left_listing,
@@ -503,6 +561,11 @@ impl App {
                 dir_history_fwd: Vec::new(),
             },
         ];
+        // Feature 040 (FR-014): start the cursor on the first real entry, past
+        // the synthetic `..` row in a non-root directory.
+        for p in &mut panes {
+            p.cursor = p.default_cursor();
+        }
 
         Ok(Self {
             config,
@@ -741,9 +804,10 @@ impl App {
         match cmd {
             CursorDown => {
                 let p = self.active_pane_mut();
-                let v = p.visible_indices();
-                if !v.is_empty() {
-                    p.cursor = (p.cursor + 1).min(v.len() - 1);
+                // Feature 040: clamp to the last virtual row (`..` + entries).
+                let rows = p.row_count();
+                if rows > 0 {
+                    p.cursor = (p.cursor + 1).min(rows - 1);
                 }
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
@@ -754,15 +818,19 @@ impl App {
             }
             CursorTo(n) => {
                 let p = self.active_pane_mut();
-                let v = p.visible_indices();
-                if v.is_empty() {
-                    p.cursor = 0;
-                } else {
-                    p.cursor = n.min(v.len() - 1);
-                }
+                let rows = p.row_count();
+                p.cursor = if rows == 0 { 0 } else { n.min(rows - 1) };
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
-            Descend => self.descend_into_focused().await,
+            // Feature 040 (FR-003): activating the `..` row ascends; otherwise
+            // descend into the focused real entry.
+            Descend => {
+                if self.active_pane_state().on_parent_row() {
+                    self.ascend_to_parent().await
+                } else {
+                    self.descend_into_focused().await
+                }
+            }
             Ascend => self.ascend_to_parent().await,
             FocusSwap => {
                 self.active = self.active.other();
@@ -796,7 +864,7 @@ impl App {
             ToggleHidden => {
                 let p = self.active_pane_mut();
                 p.show_hidden = !p.show_hidden;
-                p.cursor = 0;
+                p.cursor = p.default_cursor(); // Feature 040
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
             TogglePanelFilter => {
@@ -877,12 +945,9 @@ impl App {
         let listing = self.local_fs.list(&cwd, sort).await?;
         let p = self.pane_mut(id);
         p.listing = listing;
-        let v = p.visible_indices();
-        p.cursor = if v.is_empty() {
-            0
-        } else {
-            p.cursor.min(v.len() - 1)
-        };
+        // Feature 040: clamp within the virtual row range (`..` + entries).
+        let rows = p.row_count();
+        p.cursor = if rows == 0 { 0 } else { p.cursor.min(rows - 1) };
         Ok(vec![Event::PaneUpdated(id)])
     }
 
@@ -1138,12 +1203,9 @@ impl App {
         let p = self.active_pane_mut();
         p.listing = listing;
         p.selected.clear();
-        let v = p.visible_indices();
-        if v.is_empty() {
-            p.cursor = 0;
-        } else {
-            p.cursor = p.cursor.min(v.len() - 1);
-        }
+        // Feature 040: clamp within the virtual row range (`..` + entries).
+        let rows = p.row_count();
+        p.cursor = if rows == 0 { 0 } else { p.cursor.min(rows - 1) };
         Ok(vec![Event::PaneUpdated(id)])
     }
 
@@ -1250,7 +1312,7 @@ impl App {
         }
         p.dir_history_fwd.clear();
         p.listing = listing;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040: first real entry, past `..`
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
     }
@@ -1340,7 +1402,7 @@ impl App {
         let id = self.active;
         let p = self.active_pane_mut();
         p.filter = filter;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040: first match, past `..`
         Ok(vec![Event::PaneUpdated(id), Event::Status(status)])
     }
 
@@ -1413,7 +1475,7 @@ impl App {
         let cur = std::mem::replace(&mut p.cwd, prev);
         p.dir_history_fwd.push(cur);
         p.listing = listing;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
     }
@@ -1429,7 +1491,7 @@ impl App {
         let cur = std::mem::replace(&mut p.cwd, next);
         p.dir_history_back.push(cur);
         p.listing = listing;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
     }
@@ -1771,12 +1833,16 @@ mod tests {
     async fn descend_on_parent_row_ascends() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        let mut app = app_with_three(&td_l, &td_r).await;
-        let here = app.active_pane_state().cwd.clone();
-        let parent = here.parent().unwrap();
-        app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
+        // Use a controlled nested dir so ascent returns to OUR temp dir, not
+        // the shared /tmp (which other parallel tests churn — TOCTOU NotFound).
+        std::fs::create_dir(td_l.path().join("sub")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let parent = app.active_pane_state().cwd.clone(); // td_l
+        app.dispatch(Command::Descend).await.unwrap(); // into "sub" (first entry)
+        assert_ne!(app.active_pane_state().cwd, parent);
+        // "sub" is an empty non-root dir → cursor rests on the `..` row.
         assert!(app.active_pane_state().on_parent_row());
-        app.dispatch(Command::Descend).await.unwrap();
+        app.dispatch(Command::Descend).await.unwrap(); // `..` → ascend
         assert_eq!(app.active_pane_state().cwd, parent);
     }
 
