@@ -609,6 +609,27 @@ async fn dispatch_ui_command(
             ui.help_open = true;
             return Ok(());
         }
+        // Feature 041 (FR-001/002/003/006): M-m toggles mouse capture at
+        // runtime. The decision is pure (`plan_mouse_toggle`); here we apply
+        // the thin terminal I/O. Capture control is best-effort — terminals
+        // without mouse reporting silently ignore the control sequence, so a
+        // toggle must never crash the loop (FR-011).
+        Command::ToggleMouseCapture => {
+            let outcome = plan_mouse_toggle(app.config().ui.mouse, ui.mouse_enabled);
+            match outcome {
+                MouseToggleOutcome::Disabled => {} // no capture change (FR-006)
+                MouseToggleOutcome::EnabledNow => {
+                    let _ = execute!(stdout(), EnableMouseCapture);
+                    ui.mouse_enabled = true;
+                }
+                MouseToggleOutcome::SuspendedNow => {
+                    let _ = execute!(stdout(), DisableMouseCapture);
+                    ui.mouse_enabled = false;
+                }
+            }
+            *status = outcome.status().to_string();
+            return Ok(());
+        }
         // US5 (FR-024/025): these need text input first — open a dialog.
         Command::Mkdir => {
             *active_dialog = Some(ActiveDialog::Input {

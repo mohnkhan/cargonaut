@@ -66,21 +66,21 @@ resuming re-captures it — without restart.
 **Independent Test**: Launch with mouse on, press `M-m` → terminal-native
 selection works; press `M-m` again → in-app clicks work again.
 
-- [ ] T004 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add failing
+- [X] T004 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add failing
   unit tests for the pure decision fn `plan_mouse_toggle(supported, currently)`
   covering the full truth table (contract §3): `(false,false)→Disabled`,
   `(false,true)→Disabled`, `(true,false)→EnabledNow`, `(true,true)→SuspendedNow`.
-- [ ] T005 [US1] (green) Implement `MouseToggleOutcome` enum +
+- [X] T005 [US1] (green) Implement `MouseToggleOutcome` enum +
   `plan_mouse_toggle(supported: bool, currently: bool) -> MouseToggleOutcome`
   (pure, no I/O) in `crates/cargonaut-ui-tui/src/lib.rs` with doc comments. Make
   T004 pass.
-- [ ] T006 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
+- [X] T006 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
   test that drives `dispatch_ui_command(Command::ToggleMouseCapture, …)` against
   a `UiState` (mouse-supported session) and asserts: starting `mouse_enabled=true`
   → after dispatch `mouse_enabled=false` and `status` contains "suspended";
   dispatch again → `mouse_enabled=true` and `status` contains "on". (Reuse the
   existing `fresh_ui` test helper; config with `ui.mouse=true`.)
-- [ ] T007 [US1] (green) Add the `Command::ToggleMouseCapture` arm to
+- [X] T007 [US1] (green) Add the `Command::ToggleMouseCapture` arm to
   `dispatch_ui_command` in `crates/cargonaut-ui-tui/src/lib.rs` (contract §4):
   match `plan_mouse_toggle(app.config().ui.mouse, ui.mouse_enabled)`; on
   `EnabledNow` `execute!(stdout(), EnableMouseCapture)?` + set flag + status; on
