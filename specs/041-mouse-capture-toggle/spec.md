@@ -8,6 +8,13 @@
 
 **Input**: User description: "In-session mouse capture toggle key. Add a runtime keymap binding that toggles mouse capture on/off without restarting the app, complementing the existing `--no-mouse` launch flag and `ui.mouse` config. Pressing the key when capture is active suspends it (restoring terminal-native text selection); pressing it again re-enables capture. The current capture state is tracked in UiState and surfaced to the user. Document the terminal hold-modifier (Shift) bypass for one-off text selection. This implements deferred FR-013 from Feature 031 (tracked as issue #38)."
 
+## Clarifications
+
+### Session 2026-06-15
+
+- Q: Which key should toggle mouse capture at runtime? → A: `M-m` (Alt-m) — mnemonic for "mouse", currently unbound, single keystroke, consistent with the Alt-letter convention used by other UI toggles (M-c quick-cd, M-! filter).
+- Q: How should the new mouse-capture state be surfaced to the user (FR-005 / US2)? → A: Both — a transient status-line message on each toggle PLUS a persistent indicator in the chrome showing captured vs. suspended.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Suspend mouse capture mid-session to copy text (Priority: P1)
@@ -67,11 +74,11 @@ A user who launched with `--no-mouse` (or has `ui.mouse = false` in config) pres
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST provide a runtime control (a keymap binding) that toggles mouse capture between active and suspended without restarting the application.
+- **FR-001**: The system MUST provide a runtime keymap binding — `M-m` (Alt-m) — that toggles mouse capture between active and suspended without restarting the application.
 - **FR-002**: When mouse capture is active and the user invokes the toggle, the system MUST suspend mouse capture so that mouse events are released to the terminal (enabling terminal-native text selection/copy).
 - **FR-003**: When mouse capture is suspended and the user invokes the toggle, the system MUST resume mouse capture so that in-app mouse interaction works again.
 - **FR-004**: The system MUST track the current mouse capture state in the running UI state so that all parts of the app observe a single, consistent capture state.
-- **FR-005**: The system MUST surface the current capture state to the user when it changes (active vs. suspended), so the change is discoverable and not silent.
+- **FR-005**: The system MUST surface the current capture state to the user both (a) transiently — a status-line message on each toggle — and (b) persistently — an always-visible indicator in the chrome showing captured vs. suspended — so the change is discoverable both at the moment of toggling and at a glance thereafter.
 - **FR-006**: When mouse support is disabled for the session by launch flag (`--no-mouse`) or configuration (`ui.mouse = false`), invoking the toggle MUST NOT capture the mouse, and the system MUST communicate that mouse support is disabled for the session.
 - **FR-007**: The system MUST keep the tracked capture state and the actual terminal capture state synchronized across operations that suspend and restore the TUI (e.g., shelling out to an external pager/editor), restoring the user's last toggled choice rather than the launch-time state.
 - **FR-008**: On application exit, the system MUST leave the terminal in a clean state (mouse capture released) regardless of the last toggle state.
@@ -97,7 +104,7 @@ A user who launched with `--no-mouse` (or has `ui.mouse = false` in config) pres
 ## Assumptions
 
 - **Default-on baseline**: Mouse capture is enabled by default per Feature 031 (FR-013); this feature adds only the runtime toggle on top of that baseline.
-- **Single dedicated binding**: A single key/chord toggles capture (rather than separate enable/disable keys). The exact key is finalized during planning; it must not collide with existing bindings and should be discoverable via the help overlay.
+- **Single dedicated binding**: A single key — `M-m` (Alt-m) — toggles capture (rather than separate enable/disable keys). It is currently unbound, does not collide with existing bindings (including the `--mc-keys` orthodox map), and is discoverable via the help overlay.
 - **Scope is the interactive TUI**: The toggle applies to the running terminal UI session only; it does not change persisted config and does not affect non-interactive subcommands.
 - **No persistence**: The toggle affects the current session only; it does not write the user's choice back to the config file. Relaunching starts from the config/flag default.
 - **Hold-modifier bypass is terminal-provided**: The Shift (or terminal-specific) hold-modifier text-selection bypass is a function of the user's terminal emulator, not implemented by the app; this feature documents it rather than implementing it.
