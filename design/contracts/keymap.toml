@@ -280,6 +280,11 @@ mode = "global"
 key = "F12"
 action = "show-tasks-panel"  # FR-016
 
+[[binding]]
+mode = "global"
+key = "M-m"
+action = "toggle-mouse-capture"  # Feature 041 FR-001 (031 FR-013 follow-up, #38)
+
 # ── Power features + modern niceties (Phase 3 — FR-204..211) ─────────────────
 [[binding]]
 mode = "pane"

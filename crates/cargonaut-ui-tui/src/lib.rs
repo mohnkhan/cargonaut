@@ -69,13 +69,22 @@ pub async fn run(app: &mut App) -> Result<(), Error> {
 
     let result = run_loop(&mut term, app, mouse_enabled).await;
 
-    // Teardown — always best-effort, even on error from the loop.
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    // Teardown — always best-effort, even on error from the loop. Mouse
+    // capture is released unconditionally regardless of the runtime toggle
+    // state (Feature 041 FR-008 / SC-005).
+    let _ = restore_terminal_modes(&mut std::io::stdout());
     let _ = disable_raw_mode();
-    let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
     let _ = term.show_cursor();
 
     result
+}
+
+/// Write the terminal-restore control sequences — release mouse capture, then
+/// leave the alternate screen — to `out`. Always emits `DisableMouseCapture`
+/// so a session that exits while capture is active still leaves the terminal
+/// clean (Feature 041 FR-008 / SC-005), independent of the runtime toggle.
+fn restore_terminal_modes<W: std::io::Write>(out: &mut W) -> std::io::Result<()> {
+    execute!(out, DisableMouseCapture, LeaveAlternateScreen)
 }
 
 /// On-screen rectangles for the most recent frame, used for mouse
@@ -241,6 +250,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
         };
         let progress = progress_summary(app);
         let mut layout = FrameLayout::default();
+        // Feature 041 US2 (FR-005): capture state for the persistent indicator,
+        // read out before the partial borrow of `ui` below.
+        let mouse_supported = app.config().ui.mouse;
+        let mouse_captured = ui.mouse_enabled;
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
         let help_open = ui.help_open;
@@ -262,6 +275,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 view_mode,
                 &qv_preview,
                 progress.as_deref(),
+                mouse_supported,
+                mouse_captured,
             );
         })
         .map_err(Error::Terminal)?;
@@ -609,6 +624,27 @@ async fn dispatch_ui_command(
             ui.help_open = true;
             return Ok(());
         }
+        // Feature 041 (FR-001/002/003/006): M-m toggles mouse capture at
+        // runtime. The decision is pure (`plan_mouse_toggle`); here we apply
+        // the thin terminal I/O. Capture control is best-effort — terminals
+        // without mouse reporting silently ignore the control sequence, so a
+        // toggle must never crash the loop (FR-011).
+        Command::ToggleMouseCapture => {
+            let outcome = plan_mouse_toggle(app.config().ui.mouse, ui.mouse_enabled);
+            match outcome {
+                MouseToggleOutcome::Disabled => {} // no capture change (FR-006)
+                MouseToggleOutcome::EnabledNow => {
+                    let _ = execute!(stdout(), EnableMouseCapture);
+                    ui.mouse_enabled = true;
+                }
+                MouseToggleOutcome::SuspendedNow => {
+                    let _ = execute!(stdout(), DisableMouseCapture);
+                    ui.mouse_enabled = false;
+                }
+            }
+            *status = outcome.status().to_string();
+            return Ok(());
+        }
         // US5 (FR-024/025): these need text input first — open a dialog.
         Command::Mkdir => {
             *active_dialog = Some(ActiveDialog::Input {
@@ -694,6 +730,49 @@ async fn dispatch_ui_command(
         *status = format!("{} — not yet available", command_label(&cmd));
     }
     Ok(())
+}
+
+/// Outcome of an `M-m` mouse-capture toggle (Feature 041, FR-002/003/006).
+///
+/// Computed by [`plan_mouse_toggle`] from two booleans with no terminal I/O so
+/// the FR/SC behavior is unit-testable; [`dispatch_ui_command`] performs the
+/// thin `execute!` + status wiring from the returned outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseToggleOutcome {
+    /// Mouse support is off for the whole session (`--no-mouse` /
+    /// `ui.mouse=false`); the toggle changes nothing but explains why (FR-006).
+    Disabled,
+    /// Capture was off and is now on (FR-003).
+    EnabledNow,
+    /// Capture was on and is now suspended (FR-002).
+    SuspendedNow,
+}
+
+impl MouseToggleOutcome {
+    /// User-facing status-line message for this outcome (FR-005, transient half).
+    fn status(self) -> &'static str {
+        match self {
+            MouseToggleOutcome::Disabled => {
+                "Mouse support disabled for this session (--no-mouse / ui.mouse=false)"
+            }
+            MouseToggleOutcome::EnabledNow => "Mouse capture: on",
+            MouseToggleOutcome::SuspendedNow => {
+                "Mouse capture: suspended — Shift+drag to select text"
+            }
+        }
+    }
+}
+
+/// Decide what an `M-m` toggle should do (Feature 041, FR-001). Pure: depends
+/// only on whether mouse support is enabled for the session (`supported` =
+/// `config.ui.mouse`) and whether capture is currently active (`currently` =
+/// `UiState.mouse_enabled`).
+fn plan_mouse_toggle(supported: bool, currently: bool) -> MouseToggleOutcome {
+    match (supported, currently) {
+        (false, _) => MouseToggleOutcome::Disabled,
+        (true, false) => MouseToggleOutcome::EnabledNow,
+        (true, true) => MouseToggleOutcome::SuspendedNow,
+    }
 }
 
 /// Which external tool F3/F4 launch.
@@ -1063,6 +1142,36 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
     })
 }
 
+/// Render the persistent mouse-capture indicator right-aligned in the menu-bar
+/// row (Feature 041 US2 / FR-005). Called after `menu.render` so it sits atop
+/// the bar background; menu dropdowns open one row below and never overlap it.
+/// Dimmed when mouse support is disabled for the session.
+fn render_mouse_indicator(
+    buf: &mut ratatui::buffer::Buffer,
+    menu_row: Rect,
+    theme: &Theme,
+    supported: bool,
+    captured: bool,
+) {
+    use ratatui::widgets::Widget;
+    let label = chrome::mouse_indicator(supported, captured);
+    let w = label.len() as u16;
+    if menu_row.width <= w {
+        return; // too narrow — degrade silently (NFR: never panic)
+    }
+    let rect = Rect {
+        x: menu_row.x + menu_row.width - w,
+        y: menu_row.y,
+        width: w,
+        height: menu_row.height.min(1),
+    };
+    let mut style = Style::default().fg(theme.menu_fg).bg(theme.menu_bg);
+    if !supported {
+        style = style.add_modifier(ratatui::style::Modifier::DIM);
+    }
+    Paragraph::new(label).style(style).render(rect, buf);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_frame(
     f: &mut ratatui::Frame,
@@ -1081,6 +1190,8 @@ fn draw_frame(
     view_mode: cargonaut_core::ViewMode,
     qv_preview: &str,
     progress: Option<&str>,
+    mouse_supported: bool,
+    mouse_captured: bool,
 ) -> FrameLayout {
     use cargonaut_core::ViewMode;
     use ratatui::widgets::Widget;
@@ -1144,6 +1255,15 @@ fn draw_frame(
     // US2: function-key bar (bottom) + menu bar (top, may drop down over panes).
     fkeybar.render(main_chunks[3], f.buffer_mut(), theme);
     menu.render(main_chunks[0], f.buffer_mut(), theme);
+    // Feature 041 US2 (FR-005): persistent capture indicator in the menu-row
+    // right gutter (rendered after the menu so it overlays the bar background).
+    render_mouse_indicator(
+        f.buffer_mut(),
+        main_chunks[0],
+        theme,
+        mouse_supported,
+        mouse_captured,
+    );
 
     // US5 (FR-026): transfer progress overlay while a copy/move runs.
     if let Some(p) = progress {
@@ -1242,11 +1362,9 @@ fn draw_progress(f: &mut ratatui::Frame, theme: &Theme, area: Rect, body: &str) 
 }
 
 /// Minimal help overlay (F1). The full hypertext help viewer is deferred.
-fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
-    use ratatui::widgets::{Clear, Widget};
-    let r = centered_rect(60, 50, area);
-    Clear.render(r, f.buffer_mut());
-    let body = "\
+/// Body text of the F1 quick-help overlay. A `const` (not an inline literal) so
+/// its content — e.g. the Feature 041 mouse-toggle line — is unit-testable.
+const HELP_BODY: &str = "\
 Cargonaut — quick help\n\
 \n\
   Arrows / j k     move cursor      Tab        switch pane\n\
@@ -1254,8 +1372,15 @@ Cargonaut — quick help\n\
   F5 Copy  F6 Move  F8 Delete  F7 Mkdir*  F9 Menu  F10 Quit\n\
   F3 View*  F4 Edit*   (* not yet available)\n\
   Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
+  M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
 \n\
   Press any key to close.";
+
+fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
+    use ratatui::widgets::{Clear, Widget};
+    let r = centered_rect(60, 50, area);
+    Clear.render(r, f.buffer_mut());
+    let body = HELP_BODY;
     let block = Block::default()
         .title("Help")
         .borders(Borders::ALL)
@@ -1341,6 +1466,235 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    // Feature 041 (FR-002/003/006): the pure toggle-decision truth table.
+    #[test]
+    fn plan_mouse_toggle_truth_table() {
+        assert_eq!(
+            plan_mouse_toggle(false, false),
+            MouseToggleOutcome::Disabled
+        );
+        assert_eq!(plan_mouse_toggle(false, true), MouseToggleOutcome::Disabled);
+        assert_eq!(
+            plan_mouse_toggle(true, false),
+            MouseToggleOutcome::EnabledNow
+        );
+        assert_eq!(
+            plan_mouse_toggle(true, true),
+            MouseToggleOutcome::SuspendedNow
+        );
+    }
+
+    #[test]
+    fn mouse_toggle_outcome_status_strings() {
+        assert!(MouseToggleOutcome::Disabled
+            .status()
+            .contains("disabled for this session"));
+        assert_eq!(MouseToggleOutcome::EnabledNow.status(), "Mouse capture: on");
+        assert!(MouseToggleOutcome::SuspendedNow
+            .status()
+            .contains("suspended"));
+        assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
+    }
+
+    // Feature 041 (FR-008 / SC-005): exit always releases mouse capture,
+    // regardless of the last toggle state, leaving the terminal clean. We pin
+    // the unconditional teardown helper by asserting it emits the crossterm
+    // mouse-disable control sequence (the `?1000l` family) to any writer.
+    #[test]
+    fn teardown_always_releases_mouse_capture() {
+        let mut buf: Vec<u8> = Vec::new();
+        restore_terminal_modes(&mut buf).unwrap();
+        let s = String::from_utf8_lossy(&buf);
+        assert!(
+            s.contains("1000"),
+            "teardown must emit the mouse-disable sequence; got: {s:?}"
+        );
+    }
+
+    // Feature 041 (FR-010 / SC-006): help documents the M-m toggle + the
+    // terminal Shift-drag bypass for one-off native text selection.
+    #[test]
+    fn help_documents_mouse_toggle_and_shift_bypass() {
+        assert!(
+            HELP_BODY.contains("M-m"),
+            "help must mention the M-m toggle"
+        );
+        assert!(
+            HELP_BODY.contains("Shift"),
+            "help must mention the Shift-drag bypass"
+        );
+    }
+
+    // Feature 041 US2 (FR-005): the persistent indicator renders right-aligned
+    // in the menu-bar row for each capture state.
+    #[test]
+    fn mouse_indicator_renders_in_menu_row() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let theme = Theme::default();
+        let render = |supported: bool, captured: bool| -> String {
+            let backend = TestBackend::new(40, 1);
+            let mut term = Terminal::new(backend).unwrap();
+            term.draw(|f| {
+                let row = f.size();
+                render_mouse_indicator(f.buffer_mut(), row, &theme, supported, captured);
+            })
+            .unwrap();
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                .collect()
+        };
+        assert!(render(true, true).contains("[mouse:on]"), "captured");
+        assert!(render(true, false).contains("[mouse:susp]"), "suspended");
+        assert!(render(false, false).contains("[mouse:off]"), "disabled");
+    }
+
+    // Feature 041 US1 (FR-002/003): dispatching the toggle flips capture and
+    // sets the transient status both ways.
+    #[tokio::test]
+    async fn toggle_mouse_capture_suspends_then_resumes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await; // config.ui.mouse defaults true
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true); // capture currently on
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(!ui.mouse_enabled, "first toggle suspends capture");
+        assert!(status.contains("suspended"), "status was: {status}");
+
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(ui.mouse_enabled, "second toggle resumes capture");
+        assert_eq!(status, "Mouse capture: on");
+    }
+
+    // Feature 041 US3 (FR-006): in a session where mouse support is disabled
+    // (`--no-mouse` / `ui.mouse=false`), the toggle never captures and explains
+    // why. Behavior is implemented by the dispatch arm's `Disabled` branch
+    // (T007); this pins it at the integration level.
+    #[tokio::test]
+    async fn toggle_is_noop_when_session_mouse_disabled() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut config = cargonaut_config::Config::default();
+        config.ui.mouse = false;
+        let mut app = App::new(
+            config,
+            td_l.path().to_str().unwrap(),
+            td_r.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false); // capture off, matching the disabled session
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !ui.mouse_enabled,
+            "capture must stay off in a disabled session"
+        );
+        assert!(
+            status.contains("disabled for this session"),
+            "status was: {status}"
+        );
+    }
+
+    // Feature 041 (FR-007): an external program (F3/F4) suspends and restores
+    // the TUI; restoration must honor the *current* toggle, not the launch
+    // value. The `run_external` call site reads `ui.mouse_enabled` (the live
+    // flag), so a session that launched with capture on but was toggled to
+    // suspended must stay suspended after the external program returns. This
+    // locks the exact field the call site consults. (Manual end-to-end: see
+    // quickstart.md step 5.)
+    #[tokio::test]
+    async fn external_restore_preserves_toggled_capture_state() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await; // launched with mouse on
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        // Toggle to suspended mid-session.
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+
+        // The value `run_external` would receive is `ui.mouse_enabled`; it must
+        // reflect the toggle (suspended), not the launch value (on).
+        assert!(
+            !ui.mouse_enabled,
+            "external restore must use the toggled state, not the launch value"
+        );
     }
 
     // Feature 033: drive one key through the real `handle_key` path.
