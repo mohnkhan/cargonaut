@@ -157,6 +157,27 @@ no capture; indicator stays `[mouse:off]`.
 - [ ] T017 [POLISH] (green) Verify/adjust the `run_external(_, _, ui.mouse_enabled)`
   call site so FR-007 holds; make T016 pass (likely no code change — confirm and
   lock with the test).
+- [ ] T0XA [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+  failing test for FR-008 / SC-005 (clean exit releases capture). Factor the
+  teardown into a small testable helper (e.g. `fn teardown_terminal(out)` that
+  unconditionally issues `DisableMouseCapture` + `disable_raw_mode` +
+  `LeaveAlternateScreen`) and assert — regardless of the last `mouse_enabled`
+  value — that `DisableMouseCapture` is always emitted (assert via a `Vec<u8>`
+  writer capturing the control bytes, or by asserting the helper is called on
+  both Ok and Err loop-exit paths). This is the constitution §II CI gate for
+  SC-005.
+- [ ] T0XB [POLISH] (green) Extract the teardown block in `run()`
+  (`crates/cargonaut-ui-tui/src/lib.rs:72-76`) into the helper from T0XA and call
+  it on every exit path; make T0XA pass. Behavior unchanged (teardown is already
+  unconditional) — this only adds the testable seam + gate.
+- [ ] T0XC [POLISH] FR-011 (graceful degradation): confirm the
+  `Command::ToggleMouseCapture` arm tolerates terminals that ignore mouse
+  capture. Terminals without mouse support silently accept/ignore the control
+  sequence (no error), matching the existing `run()` startup behavior. Document
+  this in a code comment on the dispatch arm; if any environment surfaces an
+  `execute!` error, downgrade that call to best-effort (`let _ = execute!(…)`)
+  so a toggle never crashes the loop. No new test unless an error path is
+  reproducible.
 - [ ] T018 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate). Run `cargo run -p cargonaut-bin` and walk the quickstart.md
   manual steps 1–8. Fix any clippy/fmt issues.
@@ -185,7 +206,8 @@ no capture; indicator stays `[mouse:off]`.
 ## Parallel Opportunities
 
 - T004 (US1 pure-fn test) ∥ T008 (US2 indicator test) — different files/regions.
-- T014 (help test) ∥ T016 (FR-007 regression test) ∥ T019 (docs) in Polish.
+- T014 (help test) ∥ T016 (FR-007 regression test) ∥ T0XA (teardown gate) ∥ T019
+  (docs) in Polish — different files/regions.
 
 ## Independent Test Criteria
 
