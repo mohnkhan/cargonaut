@@ -1474,6 +1474,17 @@ mod tests {
         assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
     }
 
+    // Feature 041 (FR-010 / SC-006): help documents the M-m toggle + the
+    // terminal Shift-drag bypass for one-off native text selection.
+    #[test]
+    fn help_documents_mouse_toggle_and_shift_bypass() {
+        assert!(HELP_BODY.contains("M-m"), "help must mention the M-m toggle");
+        assert!(
+            HELP_BODY.contains("Shift"),
+            "help must mention the Shift-drag bypass"
+        );
+    }
+
     // Feature 041 US2 (FR-005): the persistent indicator renders right-aligned
     // in the menu-bar row for each capture state.
     #[test]
