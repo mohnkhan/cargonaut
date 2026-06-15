@@ -1343,6 +1343,28 @@ mod tests {
         .unwrap()
     }
 
+    // Feature 041 (FR-002/003/006): the pure toggle-decision truth table.
+    #[test]
+    fn plan_mouse_toggle_truth_table() {
+        assert_eq!(plan_mouse_toggle(false, false), MouseToggleOutcome::Disabled);
+        assert_eq!(plan_mouse_toggle(false, true), MouseToggleOutcome::Disabled);
+        assert_eq!(plan_mouse_toggle(true, false), MouseToggleOutcome::EnabledNow);
+        assert_eq!(
+            plan_mouse_toggle(true, true),
+            MouseToggleOutcome::SuspendedNow
+        );
+    }
+
+    #[test]
+    fn mouse_toggle_outcome_status_strings() {
+        assert!(MouseToggleOutcome::Disabled
+            .status()
+            .contains("disabled for this session"));
+        assert_eq!(MouseToggleOutcome::EnabledNow.status(), "Mouse capture: on");
+        assert!(MouseToggleOutcome::SuspendedNow.status().contains("suspended"));
+        assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
+    }
+
     // Feature 033: drive one key through the real `handle_key` path.
     async fn feed_key(
         code: crossterm::event::KeyCode,
