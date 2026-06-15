@@ -241,6 +241,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
         };
         let progress = progress_summary(app);
         let mut layout = FrameLayout::default();
+        // Feature 041 US2 (FR-005): capture state for the persistent indicator,
+        // read out before the partial borrow of `ui` below.
+        let mouse_supported = app.config().ui.mouse;
+        let mouse_captured = ui.mouse_enabled;
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
         let help_open = ui.help_open;
@@ -262,6 +266,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 view_mode,
                 &qv_preview,
                 progress.as_deref(),
+                mouse_supported,
+                mouse_captured,
             );
         })
         .map_err(Error::Terminal)?;
@@ -1125,6 +1131,36 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
     })
 }
 
+/// Render the persistent mouse-capture indicator right-aligned in the menu-bar
+/// row (Feature 041 US2 / FR-005). Called after `menu.render` so it sits atop
+/// the bar background; menu dropdowns open one row below and never overlap it.
+/// Dimmed when mouse support is disabled for the session.
+fn render_mouse_indicator(
+    buf: &mut ratatui::buffer::Buffer,
+    menu_row: Rect,
+    theme: &Theme,
+    supported: bool,
+    captured: bool,
+) {
+    use ratatui::widgets::Widget;
+    let label = chrome::mouse_indicator(supported, captured);
+    let w = label.len() as u16;
+    if menu_row.width <= w {
+        return; // too narrow — degrade silently (NFR: never panic)
+    }
+    let rect = Rect {
+        x: menu_row.x + menu_row.width - w,
+        y: menu_row.y,
+        width: w,
+        height: menu_row.height.min(1),
+    };
+    let mut style = Style::default().fg(theme.menu_fg).bg(theme.menu_bg);
+    if !supported {
+        style = style.add_modifier(ratatui::style::Modifier::DIM);
+    }
+    Paragraph::new(label).style(style).render(rect, buf);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_frame(
     f: &mut ratatui::Frame,
@@ -1143,6 +1179,8 @@ fn draw_frame(
     view_mode: cargonaut_core::ViewMode,
     qv_preview: &str,
     progress: Option<&str>,
+    mouse_supported: bool,
+    mouse_captured: bool,
 ) -> FrameLayout {
     use cargonaut_core::ViewMode;
     use ratatui::widgets::Widget;
@@ -1206,6 +1244,15 @@ fn draw_frame(
     // US2: function-key bar (bottom) + menu bar (top, may drop down over panes).
     fkeybar.render(main_chunks[3], f.buffer_mut(), theme);
     menu.render(main_chunks[0], f.buffer_mut(), theme);
+    // Feature 041 US2 (FR-005): persistent capture indicator in the menu-row
+    // right gutter (rendered after the menu so it overlays the bar background).
+    render_mouse_indicator(
+        f.buffer_mut(),
+        main_chunks[0],
+        theme,
+        mouse_supported,
+        mouse_captured,
+    );
 
     // US5 (FR-026): transfer progress overlay while a copy/move runs.
     if let Some(p) = progress {

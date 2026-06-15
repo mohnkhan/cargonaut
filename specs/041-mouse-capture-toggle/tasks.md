@@ -98,17 +98,17 @@ persistently (menu-bar indicator).
 
 **Independent Test**: Toggle off → UI shows suspended; toggle on → UI shows active.
 
-- [ ] T008 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/chrome.rs`, add a
+- [X] T008 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/chrome.rs`, add a
   failing test for `mouse_indicator(session_supported, captured)` returning
   `"[mouse:on]"` / `"[mouse:susp]"` / `"[mouse:off]"` (contract §5 truth table).
-- [ ] T009 [US2] (green) Implement `mouse_indicator(...)` in
+- [X] T009 [US2] (green) Implement `mouse_indicator(...)` in
   `crates/cargonaut-ui-tui/src/chrome.rs` with a doc comment. Make T008 pass.
-- [ ] T010 [US2] (red) In `crates/cargonaut-ui-tui/src/chrome.rs` (or `lib.rs`
+- [X] T010 [US2] (red) In `crates/cargonaut-ui-tui/src/chrome.rs` (or `lib.rs`
   `draw_frame` tests), add a failing `TestBackend` render test: with
   `captured=true` the menu-bar row contains `[mouse:on]`; with `captured=false`
   + supported it contains `[mouse:susp]`; with `session_supported=false` it
   contains `[mouse:off]`.
-- [ ] T011 [US2] (green) Render the indicator in the right gutter of the menu-bar
+- [X] T011 [US2] (green) Render the indicator in the right gutter of the menu-bar
   row: thread `mouse_enabled` + `config.ui.mouse` into `draw_frame`
   (`crates/cargonaut-ui-tui/src/lib.rs`) and draw `mouse_indicator(...)` right-
   aligned in the menu `Rect` using typed `theme.menu_fg/bg` (dim when `off`).
