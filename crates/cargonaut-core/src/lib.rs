@@ -140,6 +140,16 @@ pub struct PaneState {
     pub dir_history_fwd: Vec<VfsPath>,
 }
 
+/// Feature 040 — what the pane cursor currently points at: the synthetic
+/// `..` parent row, or a real entry (index into `listing.entries`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedRow {
+    /// The synthetic `..` parent row (present only in a non-root directory).
+    Parent,
+    /// A real listing entry at this index into `listing.entries`.
+    Entry(usize),
+}
+
 impl PaneState {
     /// Indices that pass the visibility filters, in listing order.
     pub fn visible_indices(&self) -> Vec<usize> {
@@ -161,9 +171,57 @@ impl PaneState {
             .collect()
     }
 
-    /// Absolute index in `listing.entries` of the cursor's current entry.
+    /// Feature 040 (FR-001/002) — true when the directory has a parent, so a
+    /// synthetic `..` row is shown as the first row.
+    pub fn has_parent(&self) -> bool {
+        self.cwd.parent().is_some()
+    }
+
+    /// Feature 040 — the virtual↔real index shift: 1 when a `..` row is
+    /// present (non-root), 0 at a filesystem root.
+    pub fn parent_offset(&self) -> usize {
+        usize::from(self.has_parent())
+    }
+
+    /// Feature 040 — number of addressable cursor rows: the `..` row (when
+    /// present) plus the visible real entries.
+    pub fn row_count(&self) -> usize {
+        self.parent_offset() + self.visible_indices().len()
+    }
+
+    /// Feature 040 — true when the cursor is on the synthetic `..` row.
+    pub fn on_parent_row(&self) -> bool {
+        self.has_parent() && self.cursor < self.parent_offset()
+    }
+
+    /// Feature 040 — what the cursor currently points at (parent row vs a
+    /// real entry).
+    pub fn focused_row(&self) -> FocusedRow {
+        match self.focused_entry_index() {
+            Some(i) => FocusedRow::Entry(i),
+            None if self.on_parent_row() => FocusedRow::Parent,
+            // Empty real listing with no parent: nothing focusable; treat as
+            // Parent only when a parent row exists, else default to Parent-less
+            // — callers gate on focused_entry_index for real-entry actions.
+            None => FocusedRow::Parent,
+        }
+    }
+
+    /// Absolute index in `listing.entries` of the cursor's current real
+    /// entry, or `None` when the cursor is on the `..` row (Feature 040).
     pub fn focused_entry_index(&self) -> Option<usize> {
-        self.visible_indices().get(self.cursor).copied()
+        let off = self.parent_offset();
+        if self.cursor < off {
+            return None; // on the synthetic `..` row
+        }
+        self.visible_indices().get(self.cursor - off).copied()
+    }
+
+    /// Feature 040 (FR-014) — the cursor position to use for a fresh listing:
+    /// the first real entry (just past the `..` row), or the `..` row itself
+    /// in an empty non-root directory, or 0 at a root.
+    fn default_cursor(&self) -> usize {
+        self.parent_offset().min(self.row_count().saturating_sub(1))
     }
 }
 
@@ -492,7 +550,7 @@ impl App {
 
         let show_hidden = config.ui.show_hidden;
 
-        let panes = [
+        let mut panes = [
             PaneState {
                 cwd: left_p,
                 listing: left_listing,
@@ -516,6 +574,11 @@ impl App {
                 dir_history_fwd: Vec::new(),
             },
         ];
+        // Feature 040 (FR-014): start the cursor on the first real entry, past
+        // the synthetic `..` row in a non-root directory.
+        for p in &mut panes {
+            p.cursor = p.default_cursor();
+        }
 
         // Feature 042 — load the persisted hotlist (best-effort: a missing or
         // malformed state file degrades to an empty list, never blocks launch).
@@ -761,9 +824,10 @@ impl App {
         match cmd {
             CursorDown => {
                 let p = self.active_pane_mut();
-                let v = p.visible_indices();
-                if !v.is_empty() {
-                    p.cursor = (p.cursor + 1).min(v.len() - 1);
+                // Feature 040: clamp to the last virtual row (`..` + entries).
+                let rows = p.row_count();
+                if rows > 0 {
+                    p.cursor = (p.cursor + 1).min(rows - 1);
                 }
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
@@ -774,15 +838,19 @@ impl App {
             }
             CursorTo(n) => {
                 let p = self.active_pane_mut();
-                let v = p.visible_indices();
-                if v.is_empty() {
-                    p.cursor = 0;
-                } else {
-                    p.cursor = n.min(v.len() - 1);
-                }
+                let rows = p.row_count();
+                p.cursor = if rows == 0 { 0 } else { n.min(rows - 1) };
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
-            Descend => self.descend_into_focused().await,
+            // Feature 040 (FR-003): activating the `..` row ascends; otherwise
+            // descend into the focused real entry.
+            Descend => {
+                if self.active_pane_state().on_parent_row() {
+                    self.ascend_to_parent().await
+                } else {
+                    self.descend_into_focused().await
+                }
+            }
             Ascend => self.ascend_to_parent().await,
             FocusSwap => {
                 self.active = self.active.other();
@@ -816,7 +884,7 @@ impl App {
             ToggleHidden => {
                 let p = self.active_pane_mut();
                 p.show_hidden = !p.show_hidden;
-                p.cursor = 0;
+                p.cursor = p.default_cursor(); // Feature 040
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
             TogglePanelFilter => {
@@ -897,12 +965,9 @@ impl App {
         let listing = self.local_fs.list(&cwd, sort).await?;
         let p = self.pane_mut(id);
         p.listing = listing;
-        let v = p.visible_indices();
-        p.cursor = if v.is_empty() {
-            0
-        } else {
-            p.cursor.min(v.len() - 1)
-        };
+        // Feature 040: clamp within the virtual row range (`..` + entries).
+        let rows = p.row_count();
+        p.cursor = if rows == 0 { 0 } else { p.cursor.min(rows - 1) };
         Ok(vec![Event::PaneUpdated(id)])
     }
 
@@ -1158,12 +1223,9 @@ impl App {
         let p = self.active_pane_mut();
         p.listing = listing;
         p.selected.clear();
-        let v = p.visible_indices();
-        if v.is_empty() {
-            p.cursor = 0;
-        } else {
-            p.cursor = p.cursor.min(v.len() - 1);
-        }
+        // Feature 040: clamp within the virtual row range (`..` + entries).
+        let rows = p.row_count();
+        p.cursor = if rows == 0 { 0 } else { p.cursor.min(rows - 1) };
         Ok(vec![Event::PaneUpdated(id)])
     }
 
@@ -1270,7 +1332,7 @@ impl App {
         }
         p.dir_history_fwd.clear();
         p.listing = listing;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040: first real entry, past `..`
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
     }
@@ -1428,7 +1490,7 @@ impl App {
         let id = self.active;
         let p = self.active_pane_mut();
         p.filter = filter;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040: first match, past `..`
         Ok(vec![Event::PaneUpdated(id), Event::Status(status)])
     }
 
@@ -1501,7 +1563,7 @@ impl App {
         let cur = std::mem::replace(&mut p.cwd, prev);
         p.dir_history_fwd.push(cur);
         p.listing = listing;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
     }
@@ -1517,7 +1579,7 @@ impl App {
         let cur = std::mem::replace(&mut p.cwd, next);
         p.dir_history_back.push(cur);
         p.listing = listing;
-        p.cursor = 0;
+        p.cursor = p.default_cursor(); // Feature 040
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
     }
@@ -1862,12 +1924,16 @@ mod tests {
             fs::write(td_l.path().join(n), b"").await.unwrap();
         }
         let mut app = make_app(&td_l, &td_r).await;
-        app.dispatch(Command::CursorDown).await.unwrap();
+        // Feature 040: temp dirs are non-root, so row 0 is the synthetic `..`
+        // and the cursor starts on the first real entry (virtual index 1).
         assert_eq!(app.pane(PaneId::Left).cursor, 1);
         app.dispatch(Command::CursorDown).await.unwrap();
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
         app.dispatch(Command::CursorDown).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+        assert_eq!(app.pane(PaneId::Left).cursor, 3);
+        // Clamp at the last virtual row (`..` + 3 entries → row_count 4 → max 3).
+        app.dispatch(Command::CursorDown).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cursor, 3);
     }
 
     #[tokio::test]
@@ -1880,9 +1946,9 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::CursorTo(2)).await.unwrap();
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
-        // Out-of-range clamps to last visible entry.
+        // Out-of-range clamps to the last virtual row (`..` + 3 entries → 3).
         app.dispatch(Command::CursorTo(99)).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+        assert_eq!(app.pane(PaneId::Left).cursor, 3);
     }
 
     #[tokio::test]
@@ -1897,6 +1963,161 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::CursorTo(3)).await.unwrap();
         assert_eq!(app.active_pane_state().cursor, 3);
+    }
+
+    // =================================================================
+    // Feature 040 — `..` parent row (virtual-row cursor model).
+    // =================================================================
+
+    async fn app_with_three(td_l: &TempDir, td_r: &TempDir) -> App {
+        for n in ["a", "b", "c"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(td_l, td_r).await;
+        app.refresh_active_pane().await.unwrap();
+        app
+    }
+
+    #[test]
+    fn root_pane_has_no_parent_row() {
+        let p = PaneState {
+            cwd: VfsPath::parse("file:///").unwrap(),
+            listing: DirListing {
+                entries: vec![],
+                sort: Sort::NameAsc,
+            },
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden: false,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: Vec::new(),
+            dir_history_fwd: Vec::new(),
+        };
+        assert!(!p.has_parent());
+        assert_eq!(p.parent_offset(), 0);
+        assert!(!p.on_parent_row());
+    }
+
+    #[tokio::test]
+    async fn non_root_pane_has_parent_row_and_offset() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = app_with_three(&td_l, &td_r).await;
+        let p = app.active_pane_state();
+        assert!(p.has_parent());
+        assert_eq!(p.parent_offset(), 1);
+        assert_eq!(p.row_count(), 1 + 3); // `..` + a,b,c
+    }
+
+    #[tokio::test]
+    async fn default_cursor_is_first_real_entry() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = app_with_three(&td_l, &td_r).await;
+        let p = app.active_pane_state();
+        assert_eq!(p.cursor, 1); // past `..`
+        assert!(!p.on_parent_row());
+        assert_eq!(p.focused_entry_index(), Some(0)); // first real entry
+        assert_eq!(p.focused_row(), FocusedRow::Entry(0));
+    }
+
+    #[tokio::test]
+    async fn cursor_up_from_first_entry_lands_on_parent_then_clamps() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::CursorUp).await.unwrap();
+        let p = app.active_pane_state();
+        assert_eq!(p.cursor, 0);
+        assert!(p.on_parent_row());
+        assert_eq!(p.focused_entry_index(), None);
+        assert_eq!(p.focused_row(), FocusedRow::Parent);
+        // Up again stays on `..` (nothing above it).
+        app.dispatch(Command::CursorUp).await.unwrap();
+        assert_eq!(app.active_pane_state().cursor, 0);
+    }
+
+    #[tokio::test]
+    async fn descend_on_parent_row_ascends() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Use a controlled nested dir so ascent returns to OUR temp dir, not
+        // the shared /tmp (which other parallel tests churn — TOCTOU NotFound).
+        std::fs::create_dir(td_l.path().join("sub")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let parent = app.active_pane_state().cwd.clone(); // td_l
+        app.dispatch(Command::Descend).await.unwrap(); // into "sub" (first entry)
+        assert_ne!(app.active_pane_state().cwd, parent);
+        // "sub" is an empty non-root dir → cursor rests on the `..` row.
+        assert!(app.active_pane_state().on_parent_row());
+        app.dispatch(Command::Descend).await.unwrap(); // `..` → ascend
+        assert_eq!(app.active_pane_state().cwd, parent);
+    }
+
+    #[tokio::test]
+    async fn selection_toggle_on_parent_row_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        assert!(app.active_pane_state().selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn selection_invert_and_pattern_exclude_parent_row() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::SelectionInvert).await.unwrap();
+        // All three real entries tagged; the `..` row is never a real index.
+        assert_eq!(app.active_pane_state().selected.len(), 3);
+        // A pattern that textually matches `..` still selects no parent row.
+        app.dispatch(Command::UnselectByPattern("*".into()))
+            .await
+            .unwrap();
+        app.dispatch(Command::SelectByPattern("..".into()))
+            .await
+            .unwrap();
+        assert!(app.active_pane_state().selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn copy_on_parent_row_with_no_selection_targets_nothing() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
+        let events = app.dispatch(Command::Copy).await.unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Nothing"))));
+    }
+
+    #[tokio::test]
+    async fn parent_row_present_regardless_of_filter() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.set_filter("zzz-no-match").unwrap(); // matches zero real entries
+        let p = app.active_pane_state();
+        assert!(p.has_parent());
+        assert_eq!(p.row_count(), 1); // only the `..` row
+        assert!(p.on_parent_row()); // cursor clamped onto `..`
+    }
+
+    #[tokio::test]
+    async fn empty_non_root_dir_focuses_parent_row() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Right pane's temp dir is empty.
+        let app = make_app(&td_l, &td_r).await;
+        let p = app.pane(PaneId::Right);
+        assert!(p.has_parent());
+        assert_eq!(p.row_count(), 1);
+        assert!(p.on_parent_row());
+        assert_eq!(p.focused_entry_index(), None);
     }
 
     #[tokio::test]
@@ -2142,8 +2363,9 @@ mod tests {
         assert!(initial.is_some());
         app.dispatch(Command::ToggleHidden).await.unwrap();
         assert!(app.pane(PaneId::Left).show_hidden);
-        // Cursor reset to 0; both files now visible.
-        assert_eq!(app.pane(PaneId::Left).cursor, 0);
+        // Cursor reset to the first real entry (virtual index 1, past `..`);
+        // both files now visible.
+        assert_eq!(app.pane(PaneId::Left).cursor, 1);
         assert_eq!(app.pane(PaneId::Left).visible_indices().len(), 2);
     }
 
@@ -2212,7 +2434,7 @@ mod tests {
         app.set_filter("*.rs").unwrap();
         let p = app.active_pane_state();
         assert_eq!(p.visible_indices().len(), 2);
-        assert_eq!(p.cursor, 0);
+        assert_eq!(p.cursor, 1); // first real match, past the `..` row
         assert!(p.filter.is_some());
     }
 
@@ -2282,7 +2504,7 @@ mod tests {
         let p = app.active_pane_state();
         assert!(p.filter.is_none());
         assert_eq!(p.visible_indices().len(), 2); // full listing restored
-        assert_eq!(p.cursor, 0);
+        assert_eq!(p.cursor, 1); // first real entry, past the `..` row
     }
 
     #[tokio::test]

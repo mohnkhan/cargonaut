@@ -2150,15 +2150,54 @@ mod tests {
             true,
         );
         let (l, r) = synced_views(&app);
-        // First click on row 0 (the only entry, "sub").
-        let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
+        // Feature 040: row 0 (y=1) is the synthetic `..`; "sub" is row 1 (y=2).
+        // First click on "sub".
+        let _ = mouse(left_click(5, 2), &mut app, &mut ui, &l, &r).await;
         assert!(!app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
         // Second click same cell → double-click → descend.
-        let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
+        let _ = mouse(left_click(5, 2), &mut app, &mut ui, &l, &r).await;
         assert!(
             app.pane(PaneId::Left).cwd.display().ends_with("/sub"),
             "expected descent into sub, cwd = {}",
             app.pane(PaneId::Left).cwd.display()
+        );
+    }
+
+    // Feature 040 (FR-004): double-clicking the `..` row ascends.
+    #[tokio::test]
+    async fn double_click_parent_row_ascends() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("sub")).unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let parent = app.pane(PaneId::Left).cwd.clone(); // td_l
+        app.dispatch(AppCommand::Descend).await.unwrap(); // into "sub"
+        assert!(app.pane(PaneId::Left).cwd.display().ends_with("/sub"));
+        let left_rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(
+            left_rect,
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
+        let (l, r) = synced_views(&app);
+        // "sub" is empty → row 0 (y=1) is the `..` row. Double-click it.
+        let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
+        let (l, r) = synced_views(&app);
+        let _ = mouse(left_click(5, 1), &mut app, &mut ui, &l, &r).await;
+        assert_eq!(
+            app.pane(PaneId::Left).cwd,
+            parent,
+            "double-clicking `..` should ascend to the parent"
         );
     }
 
@@ -2195,8 +2234,9 @@ mod tests {
         );
         assert_eq!(
             app.pane(PaneId::Right).cursor,
-            0,
-            "disabled mouse must not move cursor"
+            1,
+            "disabled mouse must not move cursor (default is the first real \
+             entry, past the `..` row)"
         );
     }
 
