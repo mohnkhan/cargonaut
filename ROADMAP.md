@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-15 (Feature 037 shipped resume-on-launch wiring + the binary-level SC-002 PTY gate, resolving #29; Tier 1 now clear).
+**Last updated**: 2026-06-15 (Feature 042 shipped the directory hotlist / bookmarks, resolving #42; Feature 041 resolved #38 — both rows removed from Tier 3).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,8 +42,6 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#38](https://github.com/mohnkhan/cargonaut/issues/38) | Mouse: in-session toggle key (FR-013) | XS | Feature 031 — `--no-mouse`/config disable already ship |
-| [#42](https://github.com/mohnkhan/cargonaut/issues/42) | Directory hotlist / bookmarks | M | Feature 031 §Out of Scope |
 | [#46](https://github.com/mohnkhan/cargonaut/issues/46) | File attributes: chmod/chown + sym/hardlink | M | Feature 031 §Out of Scope — needs new VFS ops |
 | [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
 | [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |

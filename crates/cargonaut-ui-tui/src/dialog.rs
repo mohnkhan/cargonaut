@@ -643,6 +643,155 @@ impl TasksPanelDialog {
     }
 }
 
+// =====================================================================
+// HotlistDialog (Feature 042 — directory hotlist / bookmarks)
+// =====================================================================
+
+/// One row in the hotlist popup. `index` is the bookmark's original index in
+/// `App::bookmarks()` for selectable entries, or `None` for a non-selectable
+/// group-header row (so grouped display and index→entity mapping coexist).
+#[derive(Debug, Clone)]
+pub struct HotlistRow {
+    /// Pre-formatted display text (caller indents entries / styles headers).
+    pub display: String,
+    /// Original bookmark index, or `None` for a group header / empty-state row.
+    pub index: Option<usize>,
+}
+
+/// What the hotlist popup asks the event loop to do. The `usize` is the
+/// focused bookmark's original index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotlistAction {
+    /// Jump the active pane to the bookmark at this index.
+    Select(usize),
+    /// Add the active pane's current directory as a new bookmark.
+    Add,
+    /// Remove the bookmark at this index.
+    Remove(usize),
+    /// Close the popup.
+    Close,
+}
+
+/// Modal hotlist popup. Modeled on [`TasksPanelDialog`]; holds no core types —
+/// the event loop builds rows from `App::bookmarks()` (or `Hotlist::grouped()`)
+/// and maps a selected row's `index` back to a bookmark on a fresh snapshot.
+/// Selection skips non-selectable header rows (`index == None`).
+#[derive(Debug)]
+pub struct HotlistDialog {
+    rows: Vec<HotlistRow>,
+    state: ListState,
+}
+
+impl HotlistDialog {
+    /// Build the popup, selecting the first selectable row (if any).
+    pub fn new(rows: Vec<HotlistRow>) -> Self {
+        let mut d = Self {
+            rows,
+            state: ListState::default(),
+        };
+        d.state.select(d.first_selectable());
+        d
+    }
+
+    /// True when there are no selectable bookmark rows.
+    pub fn is_empty(&self) -> bool {
+        !self.rows.iter().any(|r| r.index.is_some())
+    }
+
+    /// The focused bookmark's original index, if a bookmark row is selected.
+    pub fn focused_index(&self) -> Option<usize> {
+        self.state.selected().and_then(|i| self.rows.get(i)?.index)
+    }
+
+    fn first_selectable(&self) -> Option<usize> {
+        self.rows.iter().position(|r| r.index.is_some())
+    }
+
+    /// Move the selection to the next selectable row in `dir` (+1/-1),
+    /// skipping non-selectable header rows; stays put if none remain.
+    fn move_selection(&mut self, dir: isize) {
+        let Some(cur) = self.state.selected() else {
+            self.state.select(self.first_selectable());
+            return;
+        };
+        let n = self.rows.len() as isize;
+        let mut i = cur as isize + dir;
+        while i >= 0 && i < n {
+            if self.rows[i as usize].index.is_some() {
+                self.state.select(Some(i as usize));
+                return;
+            }
+            i += dir;
+        }
+        // No further selectable row — keep current.
+    }
+
+    /// Drive the popup with a key. Navigation returns `None`; Enter/Space ⇒
+    /// `Select`, `a` ⇒ `Add`, `d`/Delete ⇒ `Remove`, Esc / Ctrl-b ⇒ `Close`.
+    pub fn handle_key(&mut self, code: KeyCode) -> Option<HotlistAction> {
+        match code {
+            KeyCode::Esc => return Some(HotlistAction::Close),
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_selection(1);
+                return None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_selection(-1);
+                return None;
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => return Some(HotlistAction::Add),
+            _ => {}
+        }
+        let focused = self.focused_index();
+        match code {
+            KeyCode::Enter | KeyCode::Char(' ') => focused.map(HotlistAction::Select),
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                focused.map(HotlistAction::Remove)
+            }
+            _ => None,
+        }
+    }
+
+    /// Render the modal. Clears its rect; shows an explicit empty state.
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title("Hotlist — Enter jump · [a]dd · [d]el · Esc")
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        if self.is_empty() {
+            Paragraph::new("No bookmarks — press [a] to add this directory")
+                .block(block)
+                .style(theme.dialog_style())
+                .render(area, buf);
+            return;
+        }
+        let width = area.width.saturating_sub(4) as usize;
+        let items: Vec<ListItem<'_>> = self
+            .rows
+            .iter()
+            .map(|r| {
+                let line = if width > 1 && r.display.chars().count() > width {
+                    r.display.chars().take(width - 1).collect::<String>() + "…"
+                } else {
+                    r.display.clone()
+                };
+                ListItem::new(line)
+            })
+            .collect();
+        let list = List::new(items)
+            .block(block)
+            .style(theme.dialog_style())
+            .highlight_style(
+                ratatui::style::Style::default()
+                    .fg(theme.dialog_sel_fg)
+                    .bg(theme.dialog_sel_bg),
+            )
+            .highlight_symbol("▶ ");
+        StatefulWidget::render(list, area, buf, &mut self.state);
+    }
+}
+
 // Re-export of crossterm's KeyCode so callers don't need a second use.
 pub use crossterm::event::KeyCode;
 
@@ -655,6 +804,79 @@ mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    // ---------- HotlistDialog (Feature 042) ----------
+
+    fn hl_entry(display: &str, index: usize) -> HotlistRow {
+        HotlistRow {
+            display: display.into(),
+            index: Some(index),
+        }
+    }
+
+    #[test]
+    fn hotlist_new_selects_first_entry_and_renders() {
+        let rows = vec![hl_entry("proj", 0), hl_entry("tmp", 1)];
+        let mut d = HotlistDialog::new(rows);
+        assert_eq!(d.focused_index(), Some(0));
+        let backend = TestBackend::new(40, 8);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme))
+            .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(s.contains("proj") && s.contains("tmp"), "rendered: {s}");
+    }
+
+    #[test]
+    fn hotlist_nav_and_select_and_close() {
+        let rows = vec![hl_entry("a", 0), hl_entry("b", 1)];
+        let mut d = HotlistDialog::new(rows);
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.handle_key(KeyCode::Enter), Some(HotlistAction::Select(1)));
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(HotlistAction::Close));
+    }
+
+    #[test]
+    fn hotlist_add_key_returns_add() {
+        let mut d = HotlistDialog::new(vec![hl_entry("a", 0)]);
+        assert_eq!(d.handle_key(KeyCode::Char('a')), Some(HotlistAction::Add));
+    }
+
+    #[test]
+    fn hotlist_empty_renders_empty_state() {
+        let mut d = HotlistDialog::new(vec![]);
+        assert!(d.is_empty());
+        let backend = TestBackend::new(50, 6);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme))
+            .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(s.contains("No bookmarks"), "empty-state text missing: {s}");
+    }
+
+    #[test]
+    fn hotlist_remove_key_returns_remove() {
+        let mut d = HotlistDialog::new(vec![hl_entry("a", 0), hl_entry("b", 1)]);
+        d.handle_key(KeyCode::Down);
+        assert_eq!(
+            d.handle_key(KeyCode::Char('d')),
+            Some(HotlistAction::Remove(1))
+        );
+    }
 
     // ---------- ConfirmDialog ----------
 

@@ -564,6 +564,118 @@ pub enum ConfigError {
 }
 
 // =====================================================================
+// Directory hotlist / bookmarks (Feature 042, issue #42)
+// =====================================================================
+
+/// A named shortcut to a directory. `path` is a path/URI string in the same
+/// form [`crate`]-consuming navigation accepts; `group` is an optional
+/// single-level category (`None` ⇒ shown in the default/ungrouped section).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bookmark {
+    /// User-visible label (non-empty).
+    pub name: String,
+    /// Target directory (path or `file://` URI).
+    pub path: String,
+    /// Optional group/category label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+/// One group's bucket from [`Hotlist::grouped`]: the group key (`None` =
+/// ungrouped) paired with its bookmarks, each carrying its original index.
+pub type HotlistGroup<'a> = (Option<&'a str>, Vec<(usize, &'a Bookmark)>);
+
+/// The user's directory hotlist: an ordered collection of [`Bookmark`]s,
+/// persisted as a TOML state file (see [`default_hotlist_path`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hotlist {
+    /// Bookmarks in insertion order. Serialized as `[[bookmark]]` tables.
+    #[serde(default, rename = "bookmark")]
+    pub bookmarks: Vec<Bookmark>,
+}
+
+impl Hotlist {
+    /// Load the hotlist from `path`. **Never errors**: a missing, unreadable,
+    /// or malformed file yields an empty hotlist (FR-007/FR-013) — a corrupt
+    /// state file must never block launch.
+    pub fn load(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(text) => toml::from_str(&text).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Persist the hotlist to `path` as TOML, creating parent directories as
+    /// needed. Whole-file rewrite (last-write-wins).
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let text = toml::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, text)
+    }
+
+    /// Append a bookmark.
+    pub fn add(&mut self, bookmark: Bookmark) {
+        self.bookmarks.push(bookmark);
+    }
+
+    /// Remove the bookmark at `index`. Out-of-range is a silent no-op.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.bookmarks.len() {
+            self.bookmarks.remove(index);
+        }
+    }
+
+    /// Display projection: bookmarks bucketed by group, each entry carrying its
+    /// original index (so the popup can map a selection back to a bookmark).
+    /// Groups appear in first-seen order; the ungrouped (`None`) section, if
+    /// any, is placed last. (FR-014 / SC-007.)
+    pub fn grouped(&self) -> Vec<HotlistGroup<'_>> {
+        let mut order: Vec<Option<&str>> = Vec::new();
+        let mut buckets: Vec<HotlistGroup<'_>> = Vec::new();
+        for (i, b) in self.bookmarks.iter().enumerate() {
+            let key = b.group.as_deref();
+            let pos = match order.iter().position(|k| *k == key) {
+                Some(p) => p,
+                None => {
+                    order.push(key);
+                    buckets.push((key, Vec::new()));
+                    buckets.len() - 1
+                }
+            };
+            buckets[pos].1.push((i, b));
+        }
+        // Ungrouped section last.
+        buckets.sort_by_key(|(k, _)| k.is_none());
+        buckets
+    }
+}
+
+/// Resolve the default hotlist state-file path. Honors `$XDG_STATE_HOME`, falls
+/// back to `$HOME/.local/state/cargonaut/hotlist.toml`; if neither is set,
+/// returns a relative path (no panic). Mirrors [`default_config_path`] but uses
+/// the XDG **state** dir (the hotlist is machine-written state, not config).
+pub fn default_hotlist_path() -> std::path::PathBuf {
+    hotlist_path_from(
+        std::env::var("XDG_STATE_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+/// Pure resolver behind [`default_hotlist_path`] (env values injected for tests).
+fn hotlist_path_from(xdg_state: Option<&str>, home: Option<&str>) -> std::path::PathBuf {
+    if let Some(xdg) = xdg_state {
+        std::path::PathBuf::from(xdg).join("cargonaut/hotlist.toml")
+    } else if let Some(home) = home {
+        std::path::PathBuf::from(home).join(".local/state/cargonaut/hotlist.toml")
+    } else {
+        std::path::PathBuf::from(".local/state/cargonaut/hotlist.toml")
+    }
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
@@ -572,6 +684,105 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    // ===== Feature 042: directory hotlist / bookmarks =====
+
+    #[test]
+    fn hotlist_round_trip_preserves_entries_incl_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hotlist.toml");
+        let mut hl = Hotlist::default();
+        hl.add(Bookmark {
+            name: "proj".into(),
+            path: "file:///home/u/work/proj".into(),
+            group: Some("work".into()),
+        });
+        hl.add(Bookmark {
+            name: "tmp".into(),
+            path: "file:///tmp".into(),
+            group: None,
+        });
+        hl.save(&path).unwrap();
+        let loaded = Hotlist::load(&path);
+        assert_eq!(loaded, hl);
+    }
+
+    #[test]
+    fn hotlist_load_absent_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.toml");
+        assert_eq!(Hotlist::load(&path), Hotlist::default());
+    }
+
+    #[test]
+    fn hotlist_load_malformed_is_empty_no_panic() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"this is not valid toml :::: [[[").unwrap();
+        assert_eq!(Hotlist::load(f.path()), Hotlist::default());
+    }
+
+    #[test]
+    fn hotlist_save_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/deeper/hotlist.toml");
+        Hotlist::default().save(&path).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn hotlist_path_resolution() {
+        assert_eq!(
+            hotlist_path_from(Some("/x/state"), Some("/h")),
+            std::path::PathBuf::from("/x/state/cargonaut/hotlist.toml")
+        );
+        assert_eq!(
+            hotlist_path_from(None, Some("/h")),
+            std::path::PathBuf::from("/h/.local/state/cargonaut/hotlist.toml")
+        );
+        assert_eq!(
+            hotlist_path_from(None, None),
+            std::path::PathBuf::from(".local/state/cargonaut/hotlist.toml")
+        );
+    }
+
+    #[test]
+    fn hotlist_grouped_buckets_with_ungrouped_default_and_indices() {
+        let mut hl = Hotlist::default();
+        hl.add(Bookmark {
+            name: "a".into(),
+            path: "/a".into(),
+            group: Some("work".into()),
+        }); // idx 0
+        hl.add(Bookmark {
+            name: "b".into(),
+            path: "/b".into(),
+            group: None,
+        }); // idx 1
+        hl.add(Bookmark {
+            name: "c".into(),
+            path: "/c".into(),
+            group: Some("work".into()),
+        }); // idx 2
+        let grouped = hl.grouped();
+        // work group carries a + c with their original indices.
+        let work = grouped
+            .iter()
+            .find(|(g, _)| *g == Some("work"))
+            .expect("work group present");
+        assert_eq!(
+            work.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        // ungrouped (None) carries b at original index 1.
+        let ungrouped = grouped
+            .iter()
+            .find(|(g, _)| g.is_none())
+            .expect("ungrouped section present");
+        assert_eq!(
+            ungrouped.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
 
     #[test]
     fn defaults_have_documented_values() {
