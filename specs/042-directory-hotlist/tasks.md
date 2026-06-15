@@ -155,16 +155,16 @@ default section.
 **Independent Test**: Add `work/a` and `b` (no group); the popup shows `a` under
 "work" and `b` under the default section.
 
-- [ ] T018 [US4] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
+- [X] T018 [US4] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
   test that the add flow parses a `group/name` `TextInputDialog` submission into
   `app.add_bookmark(name, Some(group))` (and a bare name → `None`).
-- [ ] T019 [US4] (green) Implement the `group/name` split at the add-submit site
+- [X] T019 [US4] (green) Implement the `group/name` split at the add-submit site
   (split on first `/`; no `/` ⇒ whole text is the name, group `None`). Make T018
   pass.
-- [ ] T020 [US4] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a failing
+- [X] T020 [US4] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a failing
   `TestBackend` test: rows built from `Hotlist::grouped()` render a group header
   per group plus its bookmarks, with ungrouped under a default section (SC-007).
-- [ ] T021 [US4] (green) Build the popup rows from `grouped()` (group headers +
+- [X] T021 [US4] (green) Build the popup rows from `grouped()` (group headers +
   entries) so display is organized by group. Make T020 pass.
 
 **Checkpoint**: all four user stories independently testable and green.

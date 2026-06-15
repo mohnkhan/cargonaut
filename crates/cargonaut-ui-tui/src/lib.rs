@@ -459,11 +459,8 @@ async fn handle_key(
                             // Feature 042: bookmark add is a direct App method
                             // (not a core command) and reopens the hotlist.
                             if matches!(kind, InputKind::AddBookmark) {
-                                let (group, name) = match text.split_once('/') {
-                                    Some((g, n)) => (Some(g.trim()), n.trim().to_string()),
-                                    None => (None, text),
-                                };
-                                match app.add_bookmark(&name, group) {
+                                let (group, name) = parse_bookmark_input(&text);
+                                match app.add_bookmark(&name, group.as_deref()) {
                                     Ok(events) => {
                                         for ev in events {
                                             apply_event(
@@ -480,7 +477,7 @@ async fn handle_key(
                                 }
                                 // Reopen the hotlist, refreshed.
                                 *active_dialog = Some(ActiveDialog::Hotlist {
-                                    widget: HotlistDialog::new(build_hotlist_rows(app)),
+                                    widget: HotlistDialog::new(build_hotlist_rows(app.bookmarks())),
                                 });
                                 *mode = Mode::Dialog;
                             } else {
@@ -648,7 +645,7 @@ async fn handle_key(
                     Some(HotlistAction::Remove(i)) => {
                         let _ = app.remove_bookmark(i);
                         if let Some(ActiveDialog::Hotlist { widget }) = active_dialog.as_mut() {
-                            *widget = HotlistDialog::new(build_hotlist_rows(app));
+                            *widget = HotlistDialog::new(build_hotlist_rows(app.bookmarks()));
                         }
                     }
                     Some(HotlistAction::Add) => {
@@ -797,7 +794,7 @@ async fn dispatch_ui_command(
         // the App's bookmarks. In-popup keys add/remove/select (FR-004/005/003).
         Command::BookmarksMenu => {
             *active_dialog = Some(ActiveDialog::Hotlist {
-                widget: HotlistDialog::new(build_hotlist_rows(app)),
+                widget: HotlistDialog::new(build_hotlist_rows(app.bookmarks())),
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -1145,13 +1142,13 @@ fn build_job_rows(app: &App) -> Vec<JobRow> {
         .collect()
 }
 
-/// Feature 042 — build the hotlist popup rows from the App's bookmarks,
-/// organized by group (a non-selectable header per group, ungrouped under a
-/// default section). Each entry row carries its original `bookmarks()` index so
-/// the event loop can map a selection back to a bookmark (SC-007).
-fn build_hotlist_rows(app: &App) -> Vec<HotlistRow> {
+/// Feature 042 — build the hotlist popup rows from the bookmarks, organized by
+/// group (a non-selectable header per group, ungrouped under a default
+/// section). Each entry row carries its original index so the event loop can map
+/// a selection back to a bookmark (SC-007).
+fn build_hotlist_rows(bookmarks: &[cargonaut_config::Bookmark]) -> Vec<HotlistRow> {
     let hl = cargonaut_config::Hotlist {
-        bookmarks: app.bookmarks().to_vec(),
+        bookmarks: bookmarks.to_vec(),
     };
     let mut rows = Vec::new();
     for (group, entries) in hl.grouped() {
@@ -1168,6 +1165,20 @@ fn build_hotlist_rows(app: &App) -> Vec<HotlistRow> {
         }
     }
     rows
+}
+
+/// Feature 042 — parse a bookmark-add prompt into `(group, name)`. Text of the
+/// form `group/name` splits on the first `/` (both sides trimmed); text with no
+/// `/` is the name with no group.
+fn parse_bookmark_input(text: &str) -> (Option<String>, String) {
+    match text.split_once('/') {
+        Some((g, n)) => {
+            let g = g.trim();
+            let group = if g.is_empty() { None } else { Some(g.to_string()) };
+            (group, n.trim().to_string())
+        }
+        None => (None, text.trim().to_string()),
+    }
 }
 
 fn apply_event(
@@ -2267,6 +2278,38 @@ mod tests {
         );
         // A queued/running job can be cancelled or paused, not resumed.
         assert!(rows[0].can_cancel && rows[0].can_pause && !rows[0].can_resume);
+    }
+
+    // Feature 042 US4: the add prompt parses `group/name` into (group, name).
+    #[test]
+    fn parse_bookmark_input_splits_group_and_name() {
+        assert_eq!(
+            parse_bookmark_input("work/proj"),
+            (Some("work".to_string()), "proj".to_string())
+        );
+        assert_eq!(parse_bookmark_input("scratch"), (None, "scratch".to_string()));
+        // surrounding whitespace trimmed on both sides of the separator.
+        assert_eq!(
+            parse_bookmark_input("  work / my proj "),
+            (Some("work".to_string()), "my proj".to_string())
+        );
+    }
+
+    // Feature 042 US4: rows are organized by group with headers (SC-007).
+    #[test]
+    fn hotlist_rows_grouped_with_headers() {
+        let bms = vec![
+            cargonaut_config::Bookmark { name: "a".into(), path: "/a".into(), group: Some("work".into()) },
+            cargonaut_config::Bookmark { name: "b".into(), path: "/b".into(), group: None },
+        ];
+        let rows = build_hotlist_rows(&bms);
+        // A non-selectable header row for "work".
+        assert!(rows.iter().any(|r| r.index.is_none() && r.display.contains("work")));
+        // An ungrouped/default header exists for "b".
+        assert!(rows.iter().any(|r| r.index.is_none() && r.display.contains("ungrouped")));
+        // Entry rows carry bookmark indices.
+        assert!(rows.iter().any(|r| r.index == Some(0)));
+        assert!(rows.iter().any(|r| r.index == Some(1)));
     }
 
     // Feature 042: Ctrl-b (BookmarksMenu) opens the hotlist popup.
