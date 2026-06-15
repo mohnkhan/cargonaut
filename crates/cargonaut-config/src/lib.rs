@@ -573,6 +573,87 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    // ===== Feature 042: directory hotlist / bookmarks =====
+
+    #[test]
+    fn hotlist_round_trip_preserves_entries_incl_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hotlist.toml");
+        let mut hl = Hotlist::default();
+        hl.add(Bookmark {
+            name: "proj".into(),
+            path: "file:///home/u/work/proj".into(),
+            group: Some("work".into()),
+        });
+        hl.add(Bookmark {
+            name: "tmp".into(),
+            path: "file:///tmp".into(),
+            group: None,
+        });
+        hl.save(&path).unwrap();
+        let loaded = Hotlist::load(&path);
+        assert_eq!(loaded, hl);
+    }
+
+    #[test]
+    fn hotlist_load_absent_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.toml");
+        assert_eq!(Hotlist::load(&path), Hotlist::default());
+    }
+
+    #[test]
+    fn hotlist_load_malformed_is_empty_no_panic() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"this is not valid toml :::: [[[").unwrap();
+        assert_eq!(Hotlist::load(f.path()), Hotlist::default());
+    }
+
+    #[test]
+    fn hotlist_save_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/deeper/hotlist.toml");
+        Hotlist::default().save(&path).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn hotlist_path_resolution() {
+        assert_eq!(
+            hotlist_path_from(Some("/x/state"), Some("/h")),
+            std::path::PathBuf::from("/x/state/cargonaut/hotlist.toml")
+        );
+        assert_eq!(
+            hotlist_path_from(None, Some("/h")),
+            std::path::PathBuf::from("/h/.local/state/cargonaut/hotlist.toml")
+        );
+        assert_eq!(
+            hotlist_path_from(None, None),
+            std::path::PathBuf::from(".local/state/cargonaut/hotlist.toml")
+        );
+    }
+
+    #[test]
+    fn hotlist_grouped_buckets_with_ungrouped_default_and_indices() {
+        let mut hl = Hotlist::default();
+        hl.add(Bookmark { name: "a".into(), path: "/a".into(), group: Some("work".into()) }); // idx 0
+        hl.add(Bookmark { name: "b".into(), path: "/b".into(), group: None }); // idx 1
+        hl.add(Bookmark { name: "c".into(), path: "/c".into(), group: Some("work".into()) }); // idx 2
+        let grouped = hl.grouped();
+        // work group carries a + c with their original indices.
+        let work = grouped
+            .iter()
+            .find(|(g, _)| *g == Some("work"))
+            .expect("work group present");
+        assert_eq!(work.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 2]);
+        // ungrouped (None) carries b at original index 1.
+        let ungrouped = grouped
+            .iter()
+            .find(|(g, _)| g.is_none())
+            .expect("ungrouped section present");
+        assert_eq!(ungrouped.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![1]);
+    }
+
     #[test]
     fn defaults_have_documented_values() {
         let c = Config::default();
