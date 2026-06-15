@@ -8,6 +8,14 @@
 
 **Input**: User description: "Directory hotlist / bookmarks. Named shortcuts to frequently-used directories with an add-current hotkey and optional grouping. Persist the hotlist to a file under the user config directory so bookmarks survive across sessions. A popup dialog (reusing the existing shared dialog widgets) lists the bookmarks; selecting one navigates the active pane to that directory. Provide a key to add the active pane's current directory as a new bookmark (prompting for a name), and a way to remove a bookmark. Bind the hotlist popup to Ctrl-b. This implements the deferred directory-hotlist capability from Feature 031 (§Out of Scope), tracked as issue #42."
 
+## Clarifications
+
+### Session 2026-06-15
+
+- Q: Should the MVP support grouping/categories of bookmarks, or ship a single flat list first? → A: **Include grouping now** — bookmarks can carry a group/category label and the popup organizes them by group.
+- Q: How should add/remove be triggered? → A: **In-popup actions** — `Ctrl-b` opens the hotlist; within it a key adds the active pane's current directory (prompting for a name) and another key removes the highlighted entry. One global binding total (orthodox-FM style).
+- Q: Where should the hotlist be persisted? → A: **A dedicated state file under `~/.local/state/cargonaut/`** (honoring `$XDG_STATE_HOME`), mirroring the existing command-history persistence — keeping user-mutated state out of the hand-edited `config.toml`. (Recommended default; selected as the project-consistent option.)
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Bookmark the current directory and jump back to it (Priority: P1)
@@ -58,6 +66,22 @@ A user's bookmarked directory becomes obsolete (project archived, path renamed).
 
 ---
 
+### User Story 4 - Organize bookmarks into groups (Priority: P3)
+
+A user with many bookmarks wants to keep related ones together — e.g. "work", "configs", "scratch" — so the hotlist stays scannable as it grows.
+
+**Why this priority**: Grouping is in scope (per clarification) but is an organizational layer over the core add/jump/remove loop; the feature is fully usable without ever assigning a group. Lowest of the four so the flat loop can land first.
+
+**Independent Test**: Add bookmarks with group labels, open the hotlist, and confirm entries are presented organized by their group; bookmarks with no group fall under a default/ungrouped section.
+
+**Acceptance Scenarios**:
+
+1. **Given** the user adds a bookmark, **When** they supply (or later set) a group label, **Then** the bookmark is associated with that group.
+2. **Given** bookmarks belong to different groups, **When** the hotlist popup is opened, **Then** entries are presented organized by group (with an ungrouped/default section for those without one).
+3. **Given** a bookmark has no group, **When** it is displayed, **Then** it appears under a default/ungrouped section rather than being hidden.
+
+---
+
 ### Edge Cases
 
 - **Bookmark target no longer exists / is inaccessible**: selecting it must fail gracefully with a clear message, leave the panes unchanged, and NOT silently delete the bookmark (the user may want to fix the path or remount the location).
@@ -74,10 +98,11 @@ A user's bookmarked directory becomes obsolete (project archived, path renamed).
 - **FR-001**: Users MUST be able to open a hotlist popup with a single binding (`Ctrl-b`).
 - **FR-002**: The hotlist popup MUST list each saved bookmark, showing its name and target directory.
 - **FR-003**: Selecting a bookmark MUST navigate the active pane to that bookmark's target directory and close the popup.
-- **FR-004**: Users MUST be able to add the active pane's current directory as a new bookmark, supplying a name for it.
-- **FR-005**: Users MUST be able to remove an existing bookmark.
-- **FR-006**: The hotlist MUST be persisted to a file under the user configuration directory so it survives across sessions.
+- **FR-004**: Users MUST be able to add the active pane's current directory as a new bookmark from within the hotlist popup, supplying a name for it (orthodox-FM in-popup action — no separate global add binding).
+- **FR-005**: Users MUST be able to remove the highlighted bookmark from within the hotlist popup.
+- **FR-006**: The hotlist MUST be persisted to a dedicated state file under the user state directory (`~/.local/state/cargonaut/`, honoring `$XDG_STATE_HOME`), separate from `config.toml`, so it survives across sessions.
 - **FR-007**: On startup the system MUST load the persisted hotlist if present; absence of the file MUST yield an empty hotlist without error.
+- **FR-014**: A bookmark MAY carry a group/category label; the hotlist popup MUST present bookmarks organized by group, with bookmarks lacking a group shown under a default/ungrouped section.
 - **FR-008**: Selecting a bookmark whose target is missing or inaccessible MUST fail gracefully (clear message, panes unchanged, bookmark retained).
 - **FR-009**: The hotlist popup MUST use the shared dialog/widget conventions (consistent keyboard navigation: move, select, cancel) rather than an ad-hoc layout.
 - **FR-010**: Opening the hotlist when it is empty MUST still present the popup with a clear empty-state indication.
@@ -87,8 +112,8 @@ A user's bookmarked directory becomes obsolete (project archived, path renamed).
 
 ### Key Entities *(include if feature involves data)*
 
-- **Bookmark**: a named shortcut to a directory. Attributes: a user-visible **name** and a **target directory** path. Optionally a **group/category** label (see Assumptions — grouping scope to be confirmed).
-- **Hotlist**: the ordered collection of bookmarks for the user, persisted as a single file under the user configuration directory. Lifecycle: loaded at startup, mutated by add/remove, saved back to disk.
+- **Bookmark**: a named shortcut to a directory. Attributes: a user-visible **name**, a **target directory** path, and an optional **group/category** label (in scope per clarification).
+- **Hotlist**: the ordered collection of bookmarks for the user, persisted as a single state file under the user state directory (`~/.local/state/cargonaut/`). Lifecycle: loaded at startup, mutated by add/remove, saved back to disk.
 
 ## Success Criteria *(mandatory)*
 
@@ -100,12 +125,13 @@ A user's bookmarked directory becomes obsolete (project archived, path renamed).
 - **SC-004**: Selecting a bookmark whose target no longer exists never crashes and never loses the bookmark (100% of such attempts produce a message and leave state intact).
 - **SC-005**: Removing a bookmark removes it permanently — it is absent on the next open and after relaunch (100%).
 - **SC-006**: Opening an empty hotlist always presents a clear empty state (0 silent no-ops).
+- **SC-007**: Bookmarks assigned to groups are presented organized by group in the popup, and ungrouped bookmarks always remain visible under a default section (never hidden).
 
 ## Assumptions
 
-- **Binding**: `Ctrl-b` opens the hotlist popup (the keymap already reserves `C-b` → `bookmarks-menu`); the add-bookmark action uses a distinct, currently-unbound key, finalized in planning.
-- **Grouping is out of MVP scope**: the issue mentions "optional grouping"; the core feature ships a single flat list. Grouping/categories are treated as a deferred enhancement unless confirmed in-scope during clarification. (If deferred, it is tracked per the project's deferral discipline.)
-- **Persistence format/location**: a single human-diffable file under the user config directory (alongside the existing config), following the project's existing config conventions. No database.
+- **Binding**: `Ctrl-b` opens the hotlist popup (the keymap already reserves `C-b` → `bookmarks-menu`). Add and remove are **in-popup** actions on their own keys within the dialog (finalized in planning); there is no second global binding.
+- **Grouping is in scope**: bookmarks may carry a group label and the popup organizes by group (US4). Bookmarks without a group appear in a default/ungrouped section.
+- **Persistence format/location**: a single human-diffable state file under `~/.local/state/cargonaut/` (honoring `$XDG_STATE_HOME`), mirroring the existing command-history persistence. Separate from `config.toml`. No database.
 - **Scope is the interactive TUI**: bookmarks affect the running pane navigation only; they do not alter unrelated config and have no effect on non-interactive subcommands.
 - **Navigation reuse**: jumping to a bookmark reuses the existing pane navigation path, so directory-history recording and invalid-path rejection behave the same as manual navigation.
 - **Naming**: a bookmark name is a short free-text label; blank names are rejected. A new bookmark whose name duplicates an existing one is allowed to coexist OR replaces it — finalized in clarification (default: allow coexistence, since two names can point at related paths).
