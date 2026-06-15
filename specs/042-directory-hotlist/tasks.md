@@ -88,7 +88,7 @@ pane is at the bookmarked dir.
   failing test for `HotlistDialog`: `new(rows)` renders entries (`TestBackend`);
   nav keys move selection; the select key ⇒ `HotlistAction::Select(i)`; Esc ⇒
   `Close` (contract §3). Add `HotlistAction`.
-- [ ] T009 [US1] (green) Implement `HotlistDialog` + `HotlistAction`
+- [X] T009 [US1] (green) Implement `HotlistDialog` + `HotlistAction`
   (`Select|Add|Remove|Close`) modeled on `TasksPanelDialog` (modal list, `Clear`
   first, `theme.dialog_style()`). Make T008 pass.
 - [ ] T010 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
