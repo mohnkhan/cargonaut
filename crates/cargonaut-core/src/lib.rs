@@ -1653,12 +1653,16 @@ mod tests {
             fs::write(td_l.path().join(n), b"").await.unwrap();
         }
         let mut app = make_app(&td_l, &td_r).await;
-        app.dispatch(Command::CursorDown).await.unwrap();
+        // Feature 040: temp dirs are non-root, so row 0 is the synthetic `..`
+        // and the cursor starts on the first real entry (virtual index 1).
         assert_eq!(app.pane(PaneId::Left).cursor, 1);
         app.dispatch(Command::CursorDown).await.unwrap();
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
         app.dispatch(Command::CursorDown).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+        assert_eq!(app.pane(PaneId::Left).cursor, 3);
+        // Clamp at the last virtual row (`..` + 3 entries → row_count 4 → max 3).
+        app.dispatch(Command::CursorDown).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).cursor, 3);
     }
 
     #[tokio::test]
@@ -1671,9 +1675,9 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::CursorTo(2)).await.unwrap();
         assert_eq!(app.pane(PaneId::Left).cursor, 2);
-        // Out-of-range clamps to last visible entry.
+        // Out-of-range clamps to the last virtual row (`..` + 3 entries → 3).
         app.dispatch(Command::CursorTo(99)).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).cursor, 2);
+        assert_eq!(app.pane(PaneId::Left).cursor, 3);
     }
 
     #[tokio::test]
@@ -1688,6 +1692,155 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::CursorTo(3)).await.unwrap();
         assert_eq!(app.active_pane_state().cursor, 3);
+    }
+
+    // =================================================================
+    // Feature 040 — `..` parent row (virtual-row cursor model).
+    // =================================================================
+
+    async fn app_with_three(td_l: &TempDir, td_r: &TempDir) -> App {
+        for n in ["a", "b", "c"] {
+            fs::write(td_l.path().join(n), b"").await.unwrap();
+        }
+        let mut app = make_app(td_l, td_r).await;
+        app.refresh_active_pane().await.unwrap();
+        app
+    }
+
+    #[test]
+    fn root_pane_has_no_parent_row() {
+        let p = PaneState {
+            cwd: VfsPath::parse("file:///").unwrap(),
+            listing: DirListing {
+                entries: vec![],
+                sort: Sort::NameAsc,
+            },
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden: false,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: Vec::new(),
+            dir_history_fwd: Vec::new(),
+        };
+        assert!(!p.has_parent());
+        assert_eq!(p.parent_offset(), 0);
+        assert!(!p.on_parent_row());
+    }
+
+    #[tokio::test]
+    async fn non_root_pane_has_parent_row_and_offset() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = app_with_three(&td_l, &td_r).await;
+        let p = app.active_pane_state();
+        assert!(p.has_parent());
+        assert_eq!(p.parent_offset(), 1);
+        assert_eq!(p.row_count(), 1 + 3); // `..` + a,b,c
+    }
+
+    #[tokio::test]
+    async fn default_cursor_is_first_real_entry() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = app_with_three(&td_l, &td_r).await;
+        let p = app.active_pane_state();
+        assert_eq!(p.cursor, 1); // past `..`
+        assert!(!p.on_parent_row());
+        assert_eq!(p.focused_entry_index(), Some(0)); // first real entry
+        assert_eq!(p.focused_row(), FocusedRow::Entry(0));
+    }
+
+    #[tokio::test]
+    async fn cursor_up_from_first_entry_lands_on_parent_then_clamps() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::CursorUp).await.unwrap();
+        let p = app.active_pane_state();
+        assert_eq!(p.cursor, 0);
+        assert!(p.on_parent_row());
+        assert_eq!(p.focused_entry_index(), None);
+        assert_eq!(p.focused_row(), FocusedRow::Parent);
+        // Up again stays on `..` (nothing above it).
+        app.dispatch(Command::CursorUp).await.unwrap();
+        assert_eq!(app.active_pane_state().cursor, 0);
+    }
+
+    #[tokio::test]
+    async fn descend_on_parent_row_ascends() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        let here = app.active_pane_state().cwd.clone();
+        let parent = here.parent().unwrap();
+        app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
+        assert!(app.active_pane_state().on_parent_row());
+        app.dispatch(Command::Descend).await.unwrap();
+        assert_eq!(app.active_pane_state().cwd, parent);
+    }
+
+    #[tokio::test]
+    async fn selection_toggle_on_parent_row_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        assert!(app.active_pane_state().selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn selection_invert_and_pattern_exclude_parent_row() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::SelectionInvert).await.unwrap();
+        // All three real entries tagged; the `..` row is never a real index.
+        assert_eq!(app.active_pane_state().selected.len(), 3);
+        // A pattern that textually matches `..` still selects no parent row.
+        app.dispatch(Command::UnselectByPattern("*".into()))
+            .await
+            .unwrap();
+        app.dispatch(Command::SelectByPattern("..".into()))
+            .await
+            .unwrap();
+        assert!(app.active_pane_state().selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn copy_on_parent_row_with_no_selection_targets_nothing() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.dispatch(Command::CursorUp).await.unwrap(); // onto `..`
+        let events = app.dispatch(Command::Copy).await.unwrap();
+        assert!(events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Nothing"))));
+    }
+
+    #[tokio::test]
+    async fn parent_row_present_regardless_of_filter() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with_three(&td_l, &td_r).await;
+        app.set_filter("zzz-no-match").unwrap(); // matches zero real entries
+        let p = app.active_pane_state();
+        assert!(p.has_parent());
+        assert_eq!(p.row_count(), 1); // only the `..` row
+        assert!(p.on_parent_row()); // cursor clamped onto `..`
+    }
+
+    #[tokio::test]
+    async fn empty_non_root_dir_focuses_parent_row() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Right pane's temp dir is empty.
+        let app = make_app(&td_l, &td_r).await;
+        let p = app.pane(PaneId::Right);
+        assert!(p.has_parent());
+        assert_eq!(p.row_count(), 1);
+        assert!(p.on_parent_row());
+        assert_eq!(p.focused_entry_index(), None);
     }
 
     #[tokio::test]
@@ -1933,8 +2086,9 @@ mod tests {
         assert!(initial.is_some());
         app.dispatch(Command::ToggleHidden).await.unwrap();
         assert!(app.pane(PaneId::Left).show_hidden);
-        // Cursor reset to 0; both files now visible.
-        assert_eq!(app.pane(PaneId::Left).cursor, 0);
+        // Cursor reset to the first real entry (virtual index 1, past `..`);
+        // both files now visible.
+        assert_eq!(app.pane(PaneId::Left).cursor, 1);
         assert_eq!(app.pane(PaneId::Left).visible_indices().len(), 2);
     }
 
@@ -2003,7 +2157,7 @@ mod tests {
         app.set_filter("*.rs").unwrap();
         let p = app.active_pane_state();
         assert_eq!(p.visible_indices().len(), 2);
-        assert_eq!(p.cursor, 0);
+        assert_eq!(p.cursor, 1); // first real match, past the `..` row
         assert!(p.filter.is_some());
     }
 
@@ -2073,7 +2227,7 @@ mod tests {
         let p = app.active_pane_state();
         assert!(p.filter.is_none());
         assert_eq!(p.visible_indices().len(), 2); // full listing restored
-        assert_eq!(p.cursor, 0);
+        assert_eq!(p.cursor, 1); // first real entry, past the `..` row
     }
 
     #[tokio::test]
