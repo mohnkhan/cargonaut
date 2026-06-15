@@ -189,15 +189,15 @@ default section.
   failing test that the F1 help text contains "Ctrl-b" and "bookmark".
 - [X] T027 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document
   `Ctrl-b` (open hotlist) + the in-popup add/remove keys. Make T026 pass.
-- [ ] T028 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
+- [X] T028 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate). Then `XDG_STATE_HOME=$(mktemp -d) cargo run -p cargonaut-bin`
   and walk quickstart.md steps 1–8. Fix any clippy/fmt issues.
-- [ ] T029 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
+- [X] T029 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
   `README.md` ("At a Glance" metrics — test count, binary size; Feature History
   one-liner for Feature 042) and append a Feature 042 section to `Learnings.md`
   (≥3 bullets: config-crate persistence seam for race-free gates, jump-reuses-
   quick_cd, in-popup actions + group/name convention). Update `CHANGELOG.md`.
-- [ ] T030 [POLISH] Close issue #42: confirm the hotlist delivered; reference the
+- [X] T030 [POLISH] Close issue #42: confirm the hotlist delivered; reference the
   merged PR. (Resolves a deferral — no new ROADMAP row needed; remove the #42 row
   from `ROADMAP.md` per its "when an issue is closed, delete its row" rule.)
 

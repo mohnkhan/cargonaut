@@ -27,6 +27,9 @@ use cargonaut_transfer::{
 /// depending on `cargonaut-transfer` directly (mirrors the existing
 /// projection seam — see [`JobView`], [`ProgressView`]).
 pub use cargonaut_transfer::{TransferId, TransferMode};
+// Feature 042 — re-export hotlist types so the UI layer can name them without a
+// direct `cargonaut-config` dependency (mirrors the transfer-type re-exports).
+pub use cargonaut_config::{Bookmark, Hotlist};
 use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath};
 use globset::{GlobBuilder, GlobMatcher};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -1354,7 +1357,9 @@ impl App {
         self.hotlist.add(cargonaut_config::Bookmark {
             name: name.to_string(),
             path,
-            group: group.map(|g| g.trim().to_string()).filter(|g| !g.is_empty()),
+            group: group
+                .map(|g| g.trim().to_string())
+                .filter(|g| !g.is_empty()),
         });
         self.persist_hotlist();
         Ok(vec![Event::Status(format!("Bookmarked: {name}"))])
@@ -1364,7 +1369,9 @@ impl App {
     /// [`AppError::BadBookmark`] with no change.
     pub fn remove_bookmark(&mut self, index: usize) -> Result<Vec<Event>, AppError> {
         if index >= self.hotlist.bookmarks.len() {
-            return Err(AppError::BadBookmark(format!("no bookmark at index {index}")));
+            return Err(AppError::BadBookmark(format!(
+                "no bookmark at index {index}"
+            )));
         }
         let removed = self.hotlist.bookmarks[index].name.clone();
         self.hotlist.remove(index);
@@ -1722,7 +1729,9 @@ mod tests {
         assert_eq!(app.bookmarks()[0].name, "proj");
         assert_eq!(app.bookmarks()[0].group.as_deref(), Some("work"));
         // path is the active (left) pane's cwd.
-        assert!(app.bookmarks()[0].path.contains(td_l.path().to_str().unwrap()));
+        assert!(app.bookmarks()[0]
+            .path
+            .contains(td_l.path().to_str().unwrap()));
         // persisted to disk.
         let on_disk = std::fs::read_to_string(&app.hotlist_path).unwrap();
         assert!(on_disk.contains("proj"), "file: {on_disk}");
@@ -1786,7 +1795,10 @@ mod tests {
         // gone on reload too.
         assert_eq!(cargonaut_config::Hotlist::load(&path).bookmarks.len(), 1);
         // out-of-range is a clean error, no panic.
-        assert!(matches!(app.remove_bookmark(9), Err(AppError::BadBookmark(_))));
+        assert!(matches!(
+            app.remove_bookmark(9),
+            Err(AppError::BadBookmark(_))
+        ));
     }
 
     #[tokio::test]

@@ -14,9 +14,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) + Feature 039 (tasks/jobs panel) + Feature 041 (in-session mouse-capture toggle) |
-| **Tests** | 254 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
-| **Binary** | 2.51 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) + Feature 039 (tasks/jobs panel) + Feature 041 (in-session mouse-capture toggle) + Feature 042 (directory hotlist / bookmarks) |
+| **Tests** | 276 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Binary** | 2.59 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **License** | MIT OR Apache-2.0 |
@@ -112,8 +112,12 @@ Phase 1 plus Feature 031 are merged — Cargonaut is a runnable dual-pane TUI:
   text selection (Shift+drag while capture is on) and pick back up. A menu-bar
   indicator shows the live state (`[mouse:on]` / `[mouse:susp]` / `[mouse:off]`);
   `--no-mouse` / `ui.mouse=false` keeps it off for the whole session (Feature 041).
+- **Directory hotlist / bookmarks** (`Ctrl-b`) — a popup of named directory
+  shortcuts organized by group; select to jump the active pane, `[a]`dd the
+  current directory (prompting `group/name`), `[d]`elete an entry. Bookmarks
+  persist to `~/.local/state/cargonaut/hotlist.toml` across sessions (Feature 042).
 
-The full per-feature history (Features 001 → 041) lives in
+The full per-feature history (Features 001 → 042) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Quick start

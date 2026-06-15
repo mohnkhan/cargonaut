@@ -463,14 +463,7 @@ async fn handle_key(
                                 match app.add_bookmark(&name, group.as_deref()) {
                                     Ok(events) => {
                                         for ev in events {
-                                            apply_event(
-                                                ev,
-                                                app,
-                                                mode,
-                                                active_dialog,
-                                                status,
-                                                quit,
-                                            );
+                                            apply_event(ev, app, mode, active_dialog, status, quit);
                                         }
                                     }
                                     Err(e) => *status = e.to_string(),
@@ -652,10 +645,7 @@ async fn handle_key(
                         // Chain into a name prompt (group/name). On submit the
                         // Input arm calls add_bookmark and reopens the hotlist.
                         *active_dialog = Some(ActiveDialog::Input {
-                            widget: TextInputDialog::new(
-                                "Add bookmark",
-                                "Name (or group/name):",
-                            ),
+                            widget: TextInputDialog::new("Add bookmark", "Name (or group/name):"),
                             kind: InputKind::AddBookmark,
                         });
                     }
@@ -1146,8 +1136,8 @@ fn build_job_rows(app: &App) -> Vec<JobRow> {
 /// group (a non-selectable header per group, ungrouped under a default
 /// section). Each entry row carries its original index so the event loop can map
 /// a selection back to a bookmark (SC-007).
-fn build_hotlist_rows(bookmarks: &[cargonaut_config::Bookmark]) -> Vec<HotlistRow> {
-    let hl = cargonaut_config::Hotlist {
+fn build_hotlist_rows(bookmarks: &[cargonaut_core::Bookmark]) -> Vec<HotlistRow> {
+    let hl = cargonaut_core::Hotlist {
         bookmarks: bookmarks.to_vec(),
     };
     let mut rows = Vec::new();
@@ -1174,7 +1164,11 @@ fn parse_bookmark_input(text: &str) -> (Option<String>, String) {
     match text.split_once('/') {
         Some((g, n)) => {
             let g = g.trim();
-            let group = if g.is_empty() { None } else { Some(g.to_string()) };
+            let group = if g.is_empty() {
+                None
+            } else {
+                Some(g.to_string())
+            };
             (group, n.trim().to_string())
         }
         None => (None, text.trim().to_string()),
@@ -1651,7 +1645,10 @@ mod tests {
     // Feature 042: help documents the Ctrl-b hotlist + in-popup add/remove.
     #[test]
     fn help_documents_hotlist() {
-        assert!(HELP_BODY.contains("C-b"), "help must mention the hotlist key");
+        assert!(
+            HELP_BODY.contains("C-b"),
+            "help must mention the hotlist key"
+        );
         assert!(
             HELP_BODY.to_lowercase().contains("bookmark"),
             "help must mention bookmarks"
@@ -2298,7 +2295,10 @@ mod tests {
             parse_bookmark_input("work/proj"),
             (Some("work".to_string()), "proj".to_string())
         );
-        assert_eq!(parse_bookmark_input("scratch"), (None, "scratch".to_string()));
+        assert_eq!(
+            parse_bookmark_input("scratch"),
+            (None, "scratch".to_string())
+        );
         // surrounding whitespace trimmed on both sides of the separator.
         assert_eq!(
             parse_bookmark_input("  work / my proj "),
@@ -2310,14 +2310,26 @@ mod tests {
     #[test]
     fn hotlist_rows_grouped_with_headers() {
         let bms = vec![
-            cargonaut_config::Bookmark { name: "a".into(), path: "/a".into(), group: Some("work".into()) },
-            cargonaut_config::Bookmark { name: "b".into(), path: "/b".into(), group: None },
+            cargonaut_config::Bookmark {
+                name: "a".into(),
+                path: "/a".into(),
+                group: Some("work".into()),
+            },
+            cargonaut_config::Bookmark {
+                name: "b".into(),
+                path: "/b".into(),
+                group: None,
+            },
         ];
         let rows = build_hotlist_rows(&bms);
         // A non-selectable header row for "work".
-        assert!(rows.iter().any(|r| r.index.is_none() && r.display.contains("work")));
+        assert!(rows
+            .iter()
+            .any(|r| r.index.is_none() && r.display.contains("work")));
         // An ungrouped/default header exists for "b".
-        assert!(rows.iter().any(|r| r.index.is_none() && r.display.contains("ungrouped")));
+        assert!(rows
+            .iter()
+            .any(|r| r.index.is_none() && r.display.contains("ungrouped")));
         // Entry rows carry bookmark indices.
         assert!(rows.iter().any(|r| r.index == Some(0)));
         assert!(rows.iter().any(|r| r.index == Some(1)));

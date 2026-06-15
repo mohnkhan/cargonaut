@@ -581,6 +581,10 @@ pub struct Bookmark {
     pub group: Option<String>,
 }
 
+/// One group's bucket from [`Hotlist::grouped`]: the group key (`None` =
+/// ungrouped) paired with its bookmarks, each carrying its original index.
+pub type HotlistGroup<'a> = (Option<&'a str>, Vec<(usize, &'a Bookmark)>);
+
 /// The user's directory hotlist: an ordered collection of [`Bookmark`]s,
 /// persisted as a TOML state file (see [`default_hotlist_path`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -628,9 +632,9 @@ impl Hotlist {
     /// original index (so the popup can map a selection back to a bookmark).
     /// Groups appear in first-seen order; the ungrouped (`None`) section, if
     /// any, is placed last. (FR-014 / SC-007.)
-    pub fn grouped(&self) -> Vec<(Option<&str>, Vec<(usize, &Bookmark)>)> {
+    pub fn grouped(&self) -> Vec<HotlistGroup<'_>> {
         let mut order: Vec<Option<&str>> = Vec::new();
-        let mut buckets: Vec<(Option<&str>, Vec<(usize, &Bookmark)>)> = Vec::new();
+        let mut buckets: Vec<HotlistGroup<'_>> = Vec::new();
         for (i, b) in self.bookmarks.iter().enumerate() {
             let key = b.group.as_deref();
             let pos = match order.iter().position(|k| *k == key) {
@@ -744,22 +748,40 @@ mod tests {
     #[test]
     fn hotlist_grouped_buckets_with_ungrouped_default_and_indices() {
         let mut hl = Hotlist::default();
-        hl.add(Bookmark { name: "a".into(), path: "/a".into(), group: Some("work".into()) }); // idx 0
-        hl.add(Bookmark { name: "b".into(), path: "/b".into(), group: None }); // idx 1
-        hl.add(Bookmark { name: "c".into(), path: "/c".into(), group: Some("work".into()) }); // idx 2
+        hl.add(Bookmark {
+            name: "a".into(),
+            path: "/a".into(),
+            group: Some("work".into()),
+        }); // idx 0
+        hl.add(Bookmark {
+            name: "b".into(),
+            path: "/b".into(),
+            group: None,
+        }); // idx 1
+        hl.add(Bookmark {
+            name: "c".into(),
+            path: "/c".into(),
+            group: Some("work".into()),
+        }); // idx 2
         let grouped = hl.grouped();
         // work group carries a + c with their original indices.
         let work = grouped
             .iter()
             .find(|(g, _)| *g == Some("work"))
             .expect("work group present");
-        assert_eq!(work.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 2]);
+        assert_eq!(
+            work.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
         // ungrouped (None) carries b at original index 1.
         let ungrouped = grouped
             .iter()
             .find(|(g, _)| g.is_none())
             .expect("ungrouped section present");
-        assert_eq!(ungrouped.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            ungrouped.1.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]

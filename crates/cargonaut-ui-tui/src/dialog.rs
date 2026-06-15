@@ -808,7 +808,10 @@ mod tests {
     // ---------- HotlistDialog (Feature 042) ----------
 
     fn hl_entry(display: &str, index: usize) -> HotlistRow {
-        HotlistRow { display: display.into(), index: Some(index) }
+        HotlistRow {
+            display: display.into(),
+            index: Some(index),
+        }
     }
 
     #[test]
@@ -819,7 +822,8 @@ mod tests {
         let backend = TestBackend::new(40, 8);
         let mut term = Terminal::new(backend).unwrap();
         let theme = Theme::default();
-        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme)).unwrap();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme))
+            .unwrap();
         let s: String = term
             .backend()
             .buffer()
@@ -852,7 +856,8 @@ mod tests {
         let backend = TestBackend::new(50, 6);
         let mut term = Terminal::new(backend).unwrap();
         let theme = Theme::default();
-        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme)).unwrap();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme))
+            .unwrap();
         let s: String = term
             .backend()
             .buffer()
@@ -867,7 +872,10 @@ mod tests {
     fn hotlist_remove_key_returns_remove() {
         let mut d = HotlistDialog::new(vec![hl_entry("a", 0), hl_entry("b", 1)]);
         d.handle_key(KeyCode::Down);
-        assert_eq!(d.handle_key(KeyCode::Char('d')), Some(HotlistAction::Remove(1)));
+        assert_eq!(
+            d.handle_key(KeyCode::Char('d')),
+            Some(HotlistAction::Remove(1))
+        );
     }
 
     // ---------- ConfirmDialog ----------
