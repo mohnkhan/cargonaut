@@ -510,6 +510,17 @@ mod tests {
             .collect()
     }
 
+    // Feature 041 US2 (FR-005): the persistent capture indicator label.
+    #[test]
+    fn mouse_indicator_truth_table() {
+        // session disabled wins regardless of captured.
+        assert_eq!(mouse_indicator(false, false), "[mouse:off]");
+        assert_eq!(mouse_indicator(false, true), "[mouse:off]");
+        // supported session: captured vs. suspended.
+        assert_eq!(mouse_indicator(true, true), "[mouse:on]");
+        assert_eq!(mouse_indicator(true, false), "[mouse:susp]");
+    }
+
     // T018: the 10 canonical labels render; hit-test maps a click to a cmd.
     #[test]
     fn fkey_bar_renders_all_labels() {
