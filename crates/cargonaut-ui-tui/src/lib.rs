@@ -1351,11 +1351,9 @@ fn draw_progress(f: &mut ratatui::Frame, theme: &Theme, area: Rect, body: &str) 
 }
 
 /// Minimal help overlay (F1). The full hypertext help viewer is deferred.
-fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
-    use ratatui::widgets::{Clear, Widget};
-    let r = centered_rect(60, 50, area);
-    Clear.render(r, f.buffer_mut());
-    let body = "\
+/// Body text of the F1 quick-help overlay. A `const` (not an inline literal) so
+/// its content — e.g. the Feature 041 mouse-toggle line — is unit-testable.
+const HELP_BODY: &str = "\
 Cargonaut — quick help\n\
 \n\
   Arrows / j k     move cursor      Tab        switch pane\n\
@@ -1363,8 +1361,15 @@ Cargonaut — quick help\n\
   F5 Copy  F6 Move  F8 Delete  F7 Mkdir*  F9 Menu  F10 Quit\n\
   F3 View*  F4 Edit*   (* not yet available)\n\
   Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
+  M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
 \n\
   Press any key to close.";
+
+fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
+    use ratatui::widgets::{Clear, Widget};
+    let r = centered_rect(60, 50, area);
+    Clear.render(r, f.buffer_mut());
+    let body = HELP_BODY;
     let block = Block::default()
         .title("Help")
         .borders(Borders::ALL)
