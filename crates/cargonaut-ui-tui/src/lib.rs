@@ -1549,6 +1549,53 @@ mod tests {
         assert_eq!(status, "Mouse capture: on");
     }
 
+    // Feature 041 US3 (FR-006): in a session where mouse support is disabled
+    // (`--no-mouse` / `ui.mouse=false`), the toggle never captures and explains
+    // why. Behavior is implemented by the dispatch arm's `Disabled` branch
+    // (T007); this pins it at the integration level.
+    #[tokio::test]
+    async fn toggle_is_noop_when_session_mouse_disabled() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut config = cargonaut_config::Config::default();
+        config.ui.mouse = false;
+        let mut app = App::new(
+            config,
+            td_l.path().to_str().unwrap(),
+            td_r.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false); // capture off, matching the disabled session
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(!ui.mouse_enabled, "capture must stay off in a disabled session");
+        assert!(
+            status.contains("disabled for this session"),
+            "status was: {status}"
+        );
+    }
+
     // Feature 033: drive one key through the real `handle_key` path.
     async fn feed_key(
         code: crossterm::event::KeyCode,

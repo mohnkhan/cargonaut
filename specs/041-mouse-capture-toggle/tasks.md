@@ -126,11 +126,11 @@ silently doing nothing.
 **Independent Test**: Launch `--no-mouse`, press `M-m` → status explains disabled;
 no capture; indicator stays `[mouse:off]`.
 
-- [ ] T012 [US3] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
+- [X] T012 [US3] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
   test: dispatch `Command::ToggleMouseCapture` with a config where
   `ui.mouse=false` (and `mouse_enabled=false`); assert `mouse_enabled` stays
   `false` and `status` contains "disabled for this session".
-- [ ] T013 [US3] (green) Confirm the `Disabled` outcome path in the
+- [X] T013 [US3] (green) Confirm the `Disabled` outcome path in the
   `dispatch_ui_command` arm sets the explanatory status and performs **no**
   `execute!` and **no** flag change (already routed via `plan_mouse_toggle` from
   T007 — wire/verify the status text). Make T012 pass.
