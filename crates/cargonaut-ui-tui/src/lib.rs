@@ -696,6 +696,47 @@ async fn dispatch_ui_command(
     Ok(())
 }
 
+/// Outcome of an `M-m` mouse-capture toggle (Feature 041, FR-002/003/006).
+///
+/// Computed by [`plan_mouse_toggle`] from two booleans with no terminal I/O so
+/// the FR/SC behavior is unit-testable; [`dispatch_ui_command`] performs the
+/// thin `execute!` + status wiring from the returned outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseToggleOutcome {
+    /// Mouse support is off for the whole session (`--no-mouse` /
+    /// `ui.mouse=false`); the toggle changes nothing but explains why (FR-006).
+    Disabled,
+    /// Capture was off and is now on (FR-003).
+    EnabledNow,
+    /// Capture was on and is now suspended (FR-002).
+    SuspendedNow,
+}
+
+impl MouseToggleOutcome {
+    /// User-facing status-line message for this outcome (FR-005, transient half).
+    fn status(self) -> &'static str {
+        match self {
+            MouseToggleOutcome::Disabled => {
+                "Mouse support disabled for this session (--no-mouse / ui.mouse=false)"
+            }
+            MouseToggleOutcome::EnabledNow => "Mouse capture: on",
+            MouseToggleOutcome::SuspendedNow => "Mouse capture: suspended — Shift+drag to select text",
+        }
+    }
+}
+
+/// Decide what an `M-m` toggle should do (Feature 041, FR-001). Pure: depends
+/// only on whether mouse support is enabled for the session (`supported` =
+/// `config.ui.mouse`) and whether capture is currently active (`currently` =
+/// `UiState.mouse_enabled`).
+fn plan_mouse_toggle(supported: bool, currently: bool) -> MouseToggleOutcome {
+    match (supported, currently) {
+        (false, _) => MouseToggleOutcome::Disabled,
+        (true, false) => MouseToggleOutcome::EnabledNow,
+        (true, true) => MouseToggleOutcome::SuspendedNow,
+    }
+}
+
 /// Which external tool F3/F4 launch.
 #[derive(Debug, Clone, Copy)]
 enum ExternalTool {
