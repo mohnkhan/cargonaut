@@ -76,8 +76,9 @@ pane is at the bookmarked dir.
   `#[tokio::test]`s (tempdir + injected `app.hotlist_path`): `add_bookmark("x",
   Some("g"))` uses the active pane cwd as `path`, appears in `bookmarks()`, and
   the on-disk file contains it; `add_bookmark("", _)` ⇒ `AppError`, unchanged
-  (FR-011); `jump_to_bookmark(i)` to a valid dir navigates the active pane
-  (contract §2).
+  (FR-011); adding two bookmarks with the **same name** ⇒ both coexist (FR-011
+  duplicate-name default); `jump_to_bookmark(i)` to a valid dir navigates the
+  active pane (contract §2).
 - [ ] T007 [US1] (green) Add `hotlist: Hotlist` + `hotlist_path: PathBuf` fields
   to `App`; load in `App::new` via `default_hotlist_path()` (best-effort).
   Implement `bookmarks()`, `add_bookmark(name, group)` (build from active pane
