@@ -20,8 +20,8 @@
 #![warn(missing_docs)]
 
 use cargonaut_transfer::{
-    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError, TransferJob,
-    TransferOptions, TransferState,
+    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError,
+    TransferJob, TransferOptions, TransferState,
 };
 /// Re-exported transfer identity + mode so UI layers can name jobs without
 /// depending on `cargonaut-transfer` directly (mirrors the existing
@@ -2474,7 +2474,12 @@ mod tests {
     /// pane to the right pane via the App, returning its id. The throttle
     /// keeps the copy in flight long enough for deterministic pause/cancel
     /// assertions.
-    async fn submit_one_copy(app: &mut App, td_l: &TempDir, name: &str, bytes: usize) -> TransferId {
+    async fn submit_one_copy(
+        app: &mut App,
+        td_l: &TempDir,
+        name: &str,
+        bytes: usize,
+    ) -> TransferId {
         std::env::set_var("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "8");
         fs::write(td_l.path().join(name), vec![0u8; bytes])
             .await

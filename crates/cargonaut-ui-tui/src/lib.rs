@@ -1799,7 +1799,12 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = app_with(&td_l, &td_r).await;
         let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, true);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -1824,7 +1829,15 @@ mod tests {
         assert!(matches!(mode, Mode::Dialog));
 
         // Esc closes; SC-005: panes unchanged on close.
-        feed_key(KeyCode::Esc, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Esc,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(dlg.is_none());
         assert!(matches!(mode, Mode::Pane));
         assert_eq!(app.pane(PaneId::Left).cwd, left_before);
@@ -1840,7 +1853,12 @@ mod tests {
         submit_running_copy(&mut app, &td_l, "a.bin").await;
         let id = app.transfer_ids()[0];
         let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, true);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -1848,11 +1866,25 @@ mod tests {
         let mut quit = false;
 
         dispatch_ui_command(
-            Command::ShowTasksPanel, &mut app, &mut mode, &mut dlg, &mut status, &mut quit, &mut ui,
+            Command::ShowTasksPanel,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
         )
         .await
         .unwrap();
-        feed_key(KeyCode::Char('c'), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Char('c'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(app.transfer(id).unwrap().cancel.is_cancelled());
         // Panel stays open after an action.
         assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
@@ -1867,7 +1899,12 @@ mod tests {
         submit_running_copy(&mut app, &td_l, "a.bin").await;
         let id = app.transfer_ids()[0];
         let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, true);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -1875,18 +1912,40 @@ mod tests {
         let mut quit = false;
 
         dispatch_ui_command(
-            Command::ShowTasksPanel, &mut app, &mut mode, &mut dlg, &mut status, &mut quit, &mut ui,
+            Command::ShowTasksPanel,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
         )
         .await
         .unwrap();
-        feed_key(KeyCode::Char('p'), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Char('p'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(app.transfer(id).unwrap().cancel.is_cancelled());
         assert!(matches!(
             app.job_views()[0].status,
             cargonaut_core::JobStatus::Paused
         ));
         // Resume the paused job; panel stays open and the action is handled.
-        feed_key(KeyCode::Char('r'), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Char('r'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
         assert!(!app.job_views().is_empty());
     }

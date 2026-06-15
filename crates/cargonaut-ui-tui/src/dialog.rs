@@ -973,7 +973,10 @@ mod tests {
 
     #[test]
     fn tasks_panel_new_selects_first_row() {
-        let d = TasksPanelDialog::new(vec![job_row("a → x", "Running 10%"), job_row("b → y", "Queued")]);
+        let d = TasksPanelDialog::new(vec![
+            job_row("a → x", "Running 10%"),
+            job_row("b → y", "Queued"),
+        ]);
         assert_eq!(d.focused_index(), Some(0));
         assert_eq!(d.len(), 2);
         assert!(!d.is_empty());
@@ -981,10 +984,7 @@ mod tests {
 
     #[test]
     fn tasks_panel_navigation_moves_and_clamps() {
-        let mut d = TasksPanelDialog::new(vec![
-            job_row("a", "Running"),
-            job_row("b", "Running"),
-        ]);
+        let mut d = TasksPanelDialog::new(vec![job_row("a", "Running"), job_row("b", "Running")]);
         assert_eq!(d.handle_key(KeyCode::Up), None); // clamp at top
         assert_eq!(d.focused_index(), Some(0));
         assert_eq!(d.handle_key(KeyCode::Down), None);
@@ -999,9 +999,18 @@ mod tests {
     fn tasks_panel_action_keys_return_actions_for_focused_row() {
         let mut d = TasksPanelDialog::new(vec![job_row("a", "Running"), job_row("b", "Paused")]);
         d.handle_key(KeyCode::Down); // focus index 1
-        assert_eq!(d.handle_key(KeyCode::Char('c')), Some(TasksAction::Cancel(1)));
-        assert_eq!(d.handle_key(KeyCode::Char('p')), Some(TasksAction::Pause(1)));
-        assert_eq!(d.handle_key(KeyCode::Char('r')), Some(TasksAction::Resume(1)));
+        assert_eq!(
+            d.handle_key(KeyCode::Char('c')),
+            Some(TasksAction::Cancel(1))
+        );
+        assert_eq!(
+            d.handle_key(KeyCode::Char('p')),
+            Some(TasksAction::Pause(1))
+        );
+        assert_eq!(
+            d.handle_key(KeyCode::Char('r')),
+            Some(TasksAction::Resume(1))
+        );
         assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
     }
 

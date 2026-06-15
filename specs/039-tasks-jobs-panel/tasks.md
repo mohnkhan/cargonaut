@@ -114,8 +114,8 @@ while the other two complete; resume it and assert it completes.
 
 **Purpose**: Gates, docs, and the deferral/issue paper trail.
 
-- [ ] T021 Run `make ci-local` (clippy `-D warnings` → `cargo test --workspace` → release build → docs-gate); fix any clippy/fmt/`missing_docs` findings across the touched files.
-- [ ] T022 [P] Run the quickstart manual smoke test (`specs/039-tasks-jobs-panel/quickstart.md`) against `make build` and confirm all SC scenarios; capture the result in the PR body.
+- [x] T021 Run `make ci-local` (clippy `-D warnings` → `cargo test --workspace` → release build → docs-gate); fix any clippy/fmt/`missing_docs` findings across the touched files.
+- [x] T022 [P] Run the quickstart manual smoke test (`specs/039-tasks-jobs-panel/quickstart.md`) against `make build` and confirm all SC scenarios; capture the result in the PR body.
 - [x] T023 [P] Update `README.md`: bump the "At a Glance" metrics table (test count, feature count, binary size) and add a one-line "Feature History" entry for Feature 039. (MANDATORY docs-gate.)
 - [x] T024 [P] Append a Feature 039 section to `Learnings.md` (≥3 bullets): pause-as-cancel+checkpoint vs in-place suspend (and why the engine seam forced it); reusing `scan_resumable` to locate the in-session checkpoint instead of a new transfer-crate API; the `paused` marker as the paused-vs-cancelled source of truth (because `TransferJob` exposes no `watch::Sender`). (MANDATORY docs-gate.)
 - [x] T025 [P] Update `CHANGELOG.md`; add/confirm a `ROADMAP.md` note if anything was descoped (none expected — full FR set ships); close issue #32 referencing the PR once merged.
