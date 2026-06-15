@@ -12,8 +12,9 @@
 //! - **Hidden-file masking** (FR-015 `Alt-.` toggle). Indices in
 //!   [`PaneView::selected`] are stable across toggles — the prefix
 //!   filter just changes what's visible, not what's tagged.
-//! - **String-substring filter** (placeholder for the FR-013 glob
-//!   filter — T1.26 will swap in `globset`).
+//! - **Name filter** (FR-013) — a compiled [`cargonaut_core::PaneFilter`]
+//!   (glob, with substring fallback for metacharacter-free patterns);
+//!   entries whose name doesn't match are hidden.
 //! - Cursor movement via [`PaneView::cursor_down`] / [`PaneView::cursor_up`]
 //!   that respects the visible (filtered + hidden-masked) subset.
 
@@ -47,9 +48,11 @@ pub struct PaneView {
     pub selected: BTreeSet<usize>,
     /// Show Unix dotfiles in the listing.
     pub show_hidden: bool,
-    /// Substring filter — entries whose name doesn't contain this string
-    /// are hidden. `None` = no filter. T1.26 swaps this for a real glob.
-    pub filter: Option<String>,
+    /// Active name filter (FR-013) — entries whose name doesn't match are
+    /// hidden. `None` = no filter. Mirrors the authoritative
+    /// [`cargonaut_core::PaneState::filter`], cloned each frame in
+    /// [`PaneView::sync_from`].
+    pub filter: Option<cargonaut_core::PaneFilter>,
     /// Cursor position within the **visible** subset (filtered + hidden-masked).
     list_state: ListState,
 }
@@ -116,8 +119,8 @@ impl PaneView {
                 if !self.show_hidden && e.meta.is_hidden {
                     return None;
                 }
-                if let Some(pat) = &self.filter {
-                    if !e.name.as_str().contains(pat.as_str()) {
+                if let Some(pf) = &self.filter {
+                    if !pf.is_match(e.name.as_str()) {
                         return None;
                     }
                 }
@@ -361,7 +364,7 @@ mod tests {
                 entry("apricot", VfsKind::File, 30, false),
             ]),
         );
-        p.filter = Some("ap".into());
+        p.filter = Some(cargonaut_core::PaneFilter::compile("ap").unwrap());
         assert_eq!(p.visible_indices(), vec![0, 2]); // apple, apricot
     }
 
@@ -494,7 +497,7 @@ mod tests {
                 entry("apricot", VfsKind::File, 0, false),
             ]),
         );
-        p.filter = Some("ap".into());
+        p.filter = Some(cargonaut_core::PaneFilter::compile("ap").unwrap());
         // Visible: [apple(0), apricot(2)]
         // Cursor starts at 0 (apple)
         assert_eq!(p.focused_entry_index(), Some(0));

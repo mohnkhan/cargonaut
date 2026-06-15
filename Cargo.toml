@@ -46,6 +46,7 @@ toml = "0.8"
 smol_str = "0.3"
 smallvec = { version = "1", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+globset = "0.4"
 
 # Hashing / integrity
 sha2 = "0.10"

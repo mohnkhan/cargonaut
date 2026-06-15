@@ -20,6 +20,8 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 
 > ✅ **Resolved**: [#31](https://github.com/mohnkhan/cargonaut/issues/31) (T1.25 — full quick-cd popup w/ tab-completion, FR-012) shipped in **Feature 038** (`038-quick-cd-popup`). Alt-c now opens an inline prompt (prefilled with the active pane's cwd) that Tab-completes directories against the pane's VFS + recent-dir history and navigates via the existing `navigate_to` path. It also delivers the shared, caller-driven `PathInputDialog` widget, which **unblocks [#32](https://github.com/mohnkhan/cargonaut/issues/32) and [#33](https://github.com/mohnkhan/cargonaut/issues/33)** (both were waiting on a reusable text-input dialog).
 
+> ✅ **Resolved**: [#33](https://github.com/mohnkhan/cargonaut/issues/33) (FR-013 — panel filter prompt dialog, was clear-only) shipped in **Feature 033** (`033-panel-filter-prompt`). Alt-! now opens an inline prompt (prefilled with the active filter) reusing the shared `PathInputDialog`; on accept it compiles the pattern with `globset` (case-insensitive; metacharacter-free patterns match as `*word*` substrings) and applies it to the focused pane, empty submit clears, invalid patterns show an inline error and keep the prompt open. The filter became a compiled `PaneFilter` (`Option<String>` → `Option<PaneFilter>`) across core and the pane view. NB: the deferral's "globset plumbing present" note was inaccurate — only a substring placeholder existed.
+
 ---
 
 ## Tier 2 — near-term, well-scoped features
@@ -42,7 +44,6 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 | [#46](https://github.com/mohnkhan/cargonaut/issues/46) | File attributes: chmod/chown + sym/hardlink | M | Feature 031 §Out of Scope — needs new VFS ops |
 | [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
 | [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
-| [#33](https://github.com/mohnkhan/cargonaut/issues/33) | FR-013 — panel filter prompt dialog (currently clear-only) | 0.25 ew | Feature 022 — `globset` plumbing present; prompt deferred pending shared input dialog (#31). **Unblocked**: shared `PathInputDialog` landed in Feature 038. |
 
 ---
 

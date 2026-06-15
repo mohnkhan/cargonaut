@@ -24,6 +24,7 @@ use cargonaut_transfer::{
     TransferJob, TransferOptions, TransferState,
 };
 use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath};
+use globset::{GlobBuilder, GlobMatcher};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use thiserror::Error;
@@ -51,6 +52,59 @@ impl PaneId {
     }
 }
 
+/// A compiled, applied name filter for one pane (FR-013).
+///
+/// Carries both the original `pattern` text — so the prompt can be
+/// re-opened prefilled (FR-002) — and a compiled, case-insensitive
+/// [`GlobMatcher`] used by [`PaneState::visible_indices`] each frame.
+///
+/// Compilation rule (see spec FR-003a): a pattern containing any glob
+/// metacharacter (`* ? [ ] { }`) is matched as a glob against the full
+/// entry name; a metacharacter-free pattern is matched as a substring,
+/// i.e. wrapped as `*pattern*`. Matching is case-insensitive (FR-003b).
+#[derive(Debug, Clone)]
+pub struct PaneFilter {
+    pattern: String,
+    matcher: GlobMatcher,
+}
+
+impl PaneFilter {
+    /// Compile raw prompt text into a filter.
+    ///
+    /// The caller guarantees `pattern` is non-empty after trimming (empty
+    /// input takes the clear path and is never compiled). Returns
+    /// [`AppError::BadFilter`] if the (possibly auto-wrapped) pattern is not
+    /// a valid glob.
+    pub fn compile(pattern: &str) -> Result<PaneFilter, AppError> {
+        let trimmed = pattern.trim();
+        let has_meta = trimmed.contains(['*', '?', '[', ']', '{', '}']);
+        let glob_src = if has_meta {
+            trimmed.to_string()
+        } else {
+            format!("*{trimmed}*")
+        };
+        let matcher = GlobBuilder::new(&glob_src)
+            .case_insensitive(true)
+            .build()
+            .map_err(|e| AppError::BadFilter(e.to_string()))?
+            .compile_matcher();
+        Ok(PaneFilter {
+            pattern: trimmed.to_string(),
+            matcher,
+        })
+    }
+
+    /// True when `name` matches this filter.
+    pub fn is_match(&self, name: &str) -> bool {
+        self.matcher.is_match(name)
+    }
+
+    /// The original pattern text, for re-opening the prompt prefilled.
+    pub fn pattern(&self) -> &str {
+        &self.pattern
+    }
+}
+
 /// Pure state for one pane. Renderable by the UI (ui-tui's `PaneView`
 /// builds itself from a `&PaneState` per frame) and mutated by the
 /// `App::dispatch` state machine.
@@ -68,8 +122,9 @@ pub struct PaneState {
     pub show_hidden: bool,
     /// Active sort order for this pane's listing (FR-021).
     pub sort: Sort,
-    /// Substring filter (placeholder for FR-013 globset).
-    pub filter: Option<String>,
+    /// Active name filter (FR-013). `None` = no filter. Persists across
+    /// directory navigation until explicitly cleared (FR-003c).
+    pub filter: Option<PaneFilter>,
     /// FR-011 back history: cwds visited before the current one, most
     /// recent at the end. Bounded by `Config::ui.history.directory_depth`.
     pub dir_history_back: Vec<VfsPath>,
@@ -89,8 +144,8 @@ impl PaneState {
                 if !self.show_hidden && e.meta.is_hidden {
                     return None;
                 }
-                if let Some(pat) = &self.filter {
-                    if !e.name.as_str().contains(pat.as_str()) {
+                if let Some(pf) = &self.filter {
+                    if !pf.is_match(e.name.as_str()) {
                         return None;
                     }
                 }
@@ -137,8 +192,10 @@ pub enum Command {
     SelectionInvert,
     /// Toggle hidden-file visibility on the active pane.
     ToggleHidden,
-    /// FR-013 Alt-! — clear the active pane's filter. (Setting a filter
-    /// requires the prompt dialog — deferred; Phase 1 just clears.)
+    /// FR-013 Alt-! — open the panel filter prompt for the active pane.
+    /// The popup is a UI-side modal (Feature 033); the set/clear logic
+    /// lives in [`App::set_filter`]. Dispatching this command directly into
+    /// core is a no-op — the TUI intercepts Alt-! to open the dialog.
     TogglePanelFilter,
     /// FR-014 Alt-i — copy the OTHER pane's cwd into the active pane.
     SyncOtherPanelPath,
@@ -314,6 +371,10 @@ pub enum AppError {
     /// Path argument couldn't be parsed as a `file://` URI.
     #[error("bad path: {0}")]
     BadPath(String),
+
+    /// A filter pattern failed to compile as a glob (FR-006).
+    #[error("bad filter: {0}")]
+    BadFilter(String),
 }
 
 // =====================================================================
@@ -534,16 +595,11 @@ impl App {
                 Ok(vec![Event::PaneUpdated(self.active)])
             }
             TogglePanelFilter => {
-                // FR-013 Phase 1: just clear the filter when invoked.
-                // A future iteration ships the glob-pattern prompt
-                // dialog and replaces this with a request_filter_dialog().
-                let p = self.active_pane_mut();
-                p.filter = None;
-                p.cursor = 0;
-                Ok(vec![
-                    Event::PaneUpdated(self.active),
-                    Event::Status("Panel filter cleared".into()),
-                ])
+                // FR-013 (Feature 033): the filter prompt is a UI-side modal.
+                // The TUI intercepts this command to open the dialog (mirroring
+                // `QuickCdPopup`); set/clear is performed by [`App::set_filter`].
+                // Dispatching directly into core is therefore a no-op.
+                Ok(vec![])
             }
             SyncOtherPanelPath => self.sync_other_panel_path().await,
             ShowFocusedInOtherPanel => self.show_focused_in_other_panel().await,
@@ -1056,6 +1112,37 @@ impl App {
         let target = self.resolve_cd_target(trimmed)?;
         let id = self.active;
         self.navigate_to(id, target).await
+    }
+
+    /// Feature 033 (FR-003/004/005/006/009): set or clear the active pane's
+    /// name filter from raw prompt text.
+    ///
+    /// - Empty / whitespace-only `pattern` clears the filter (no error),
+    ///   restoring the full listing (FR-005).
+    /// - A non-empty pattern is compiled into a case-insensitive glob
+    ///   ([`PaneFilter::compile`]; metacharacter-free patterns match as a
+    ///   substring) and applied to the active pane (FR-003).
+    /// - A pattern that fails to compile returns [`AppError::BadFilter`]
+    ///   and leaves all pane state unchanged (FR-006).
+    ///
+    /// On any successful set or clear the active pane's cursor is reset to
+    /// the top of the (now-)visible list (FR-004). Only the active pane is
+    /// touched (FR-009).
+    pub fn set_filter(&mut self, pattern: &str) -> Result<Vec<Event>, AppError> {
+        let trimmed = pattern.trim();
+        let (filter, status) = if trimmed.is_empty() {
+            (None, "Panel filter cleared".to_string())
+        } else {
+            // Compile BEFORE mutating so an invalid pattern is atomic.
+            let pf = PaneFilter::compile(trimmed)?;
+            let status = format!("Filter: {}", pf.pattern());
+            (Some(pf), status)
+        };
+        let id = self.active;
+        let p = self.active_pane_mut();
+        p.filter = filter;
+        p.cursor = 0;
+        Ok(vec![Event::PaneUpdated(id), Event::Status(status)])
     }
 
     /// Feature 038 (FR-007/008/009): compute directory completion
@@ -1634,22 +1721,173 @@ mod tests {
         assert_eq!(app.split_orient(), SplitOrient::Horizontal);
     }
 
+    // ---- Feature 033: PaneFilter compile rules (FR-003a/b, FR-006) ----
+
+    #[test]
+    fn pane_filter_glob_matches_extension() {
+        let pf = PaneFilter::compile("*.rs").unwrap();
+        assert!(pf.is_match("lib.rs"));
+        assert!(!pf.is_match("readme.md"));
+    }
+
+    #[test]
+    fn pane_filter_bare_word_matches_as_substring() {
+        // No glob metacharacters → wrapped as `*rs*` (FR-003a).
+        let pf = PaneFilter::compile("rs").unwrap();
+        assert!(pf.is_match("lib.rs"));
+        assert!(pf.is_match("parser.md"));
+        assert!(!pf.is_match("readme.txt"));
+    }
+
+    #[test]
+    fn pane_filter_is_case_insensitive() {
+        // FR-003b.
+        let pf = PaneFilter::compile("*.RS").unwrap();
+        assert!(pf.is_match("lib.rs"));
+    }
+
+    #[test]
+    fn pane_filter_invalid_pattern_errors() {
+        // Unterminated character class → BadFilter (FR-006).
+        let err = PaneFilter::compile("[").unwrap_err();
+        assert!(matches!(err, AppError::BadFilter(_)));
+    }
+
+    #[test]
+    fn pane_filter_pattern_accessor_returns_trimmed_original() {
+        // FR-002: prefill text is the original (trimmed) pattern.
+        let pf = PaneFilter::compile("  *.rs  ").unwrap();
+        assert_eq!(pf.pattern(), "*.rs");
+    }
+
+    // ---- Feature 033: App::set_filter (FR-003/004/005/006/009) ----
+
     #[tokio::test]
-    async fn toggle_panel_filter_clears_existing_filter() {
+    async fn set_filter_applies_glob_and_resets_cursor() {
+        // FR-003, FR-003a, FR-004.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("a.rs"), b"").await.unwrap();
+        fs::write(td_l.path().join("b.rs"), b"").await.unwrap();
+        fs::write(td_l.path().join("c.md"), b"").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("*.rs").unwrap();
+        let p = app.active_pane_state();
+        assert_eq!(p.visible_indices().len(), 2);
+        assert_eq!(p.cursor, 0);
+        assert!(p.filter.is_some());
+    }
+
+    #[tokio::test]
+    async fn set_filter_bare_word_is_substring() {
+        // FR-003a.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("cargo.toml"), b"")
+            .await
+            .unwrap();
+        fs::write(td_l.path().join("Cargo.lock"), b"")
+            .await
+            .unwrap();
+        fs::write(td_l.path().join("readme.md"), b"").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("car").unwrap(); // case-insensitive substring
+        assert_eq!(app.active_pane_state().visible_indices().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_filter_only_affects_active_pane() {
+        // FR-009.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("a.rs"), b"").await.unwrap();
+        fs::write(td_r.path().join("x.rs"), b"").await.unwrap();
+        fs::write(td_r.path().join("y.md"), b"").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("*.rs").unwrap();
+        // Right (inactive) pane is unfiltered: both entries still visible.
+        assert!(app.pane(PaneId::Right).filter.is_none());
+        assert_eq!(app.pane(PaneId::Right).visible_indices().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_filter_persists_across_navigation() {
+        // FR-003c: filter survives a directory change.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("sub")).await.unwrap();
+        fs::write(td_l.path().join("sub/keep.rs"), b"")
+            .await
+            .unwrap();
+        fs::write(td_l.path().join("sub/skip.md"), b"")
+            .await
+            .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("*.rs").unwrap();
+        app.quick_cd("sub").await.unwrap();
+        let p = app.active_pane_state();
+        assert!(p.filter.is_some(), "filter must persist across navigation");
+        assert_eq!(p.visible_indices().len(), 1); // only keep.rs
+    }
+
+    #[tokio::test]
+    async fn set_filter_empty_clears_existing_filter() {
+        // FR-005 (set then clear via empty input).
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("a.rs"), b"").await.unwrap();
+        fs::write(td_l.path().join("b.md"), b"").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("*.rs").unwrap();
+        assert_eq!(app.active_pane_state().visible_indices().len(), 1);
+        app.set_filter("").unwrap();
+        let p = app.active_pane_state();
+        assert!(p.filter.is_none());
+        assert_eq!(p.visible_indices().len(), 2); // full listing restored
+        assert_eq!(p.cursor, 0);
+    }
+
+    #[tokio::test]
+    async fn set_filter_whitespace_clears_and_noop_when_none() {
+        // FR-005: whitespace-only == empty; clearing when none is a safe no-op.
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
-        {
-            let p = app.active_pane_state();
-            assert!(p.filter.is_none());
-        }
-        // Manually plant a filter, then dispatch the toggle to clear.
-        // (Setting via dispatch requires the prompt dialog, deferred.)
-        // We reach in by mutating App's internal panes via dispatch is
-        // not possible without exposing more state, so just test the
-        // toggle clears when nothing's set (idempotent).
-        app.dispatch(Command::TogglePanelFilter).await.unwrap();
         assert!(app.active_pane_state().filter.is_none());
+        app.set_filter("   ").unwrap(); // no-op clear, no error
+        assert!(app.active_pane_state().filter.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_filter_invalid_pattern_leaves_pane_unchanged() {
+        // FR-006, SC-003: invalid glob errors atomically.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("a.rs"), b"").await.unwrap();
+        fs::write(td_l.path().join("b.md"), b"").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("*.rs").unwrap();
+        let before = app.active_pane_state().visible_indices();
+        let err = app.set_filter("[").unwrap_err();
+        assert!(matches!(err, AppError::BadFilter(_)));
+        let p = app.active_pane_state();
+        // Prior filter intact, listing unchanged.
+        assert_eq!(p.filter.as_ref().map(|f| f.pattern()), Some("*.rs"));
+        assert_eq!(p.visible_indices(), before);
+    }
+
+    #[tokio::test]
+    async fn toggle_panel_filter_dispatch_is_noop_in_core() {
+        // Feature 033: the TUI intercepts Alt-! to open the dialog; core
+        // dispatch is a no-op (R-007).
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("*.rs").unwrap();
+        let events = app.dispatch(Command::TogglePanelFilter).await.unwrap();
+        assert!(events.is_empty());
+        // Filter untouched by the no-op dispatch.
+        assert!(app.active_pane_state().filter.is_some());
     }
 
     #[tokio::test]
