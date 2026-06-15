@@ -1479,6 +1479,21 @@ mod tests {
         assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
     }
 
+    // Feature 041 (FR-008 / SC-005): exit always releases mouse capture,
+    // regardless of the last toggle state, leaving the terminal clean. We pin
+    // the unconditional teardown helper by asserting it emits the crossterm
+    // mouse-disable control sequence (the `?1000l` family) to any writer.
+    #[test]
+    fn teardown_always_releases_mouse_capture() {
+        let mut buf: Vec<u8> = Vec::new();
+        restore_terminal_modes(&mut buf).unwrap();
+        let s = String::from_utf8_lossy(&buf);
+        assert!(
+            s.contains("1000"),
+            "teardown must emit the mouse-disable sequence; got: {s:?}"
+        );
+    }
+
     // Feature 041 (FR-010 / SC-006): help documents the M-m toggle + the
     // terminal Shift-drag bypass for one-off native text selection.
     #[test]
@@ -1609,6 +1624,51 @@ mod tests {
         assert!(
             status.contains("disabled for this session"),
             "status was: {status}"
+        );
+    }
+
+    // Feature 041 (FR-007): an external program (F3/F4) suspends and restores
+    // the TUI; restoration must honor the *current* toggle, not the launch
+    // value. The `run_external` call site reads `ui.mouse_enabled` (the live
+    // flag), so a session that launched with capture on but was toggled to
+    // suspended must stay suspended after the external program returns. This
+    // locks the exact field the call site consults. (Manual end-to-end: see
+    // quickstart.md step 5.)
+    #[tokio::test]
+    async fn external_restore_preserves_toggled_capture_state() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await; // launched with mouse on
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        // Toggle to suspended mid-session.
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+
+        // The value `run_external` would receive is `ui.mouse_enabled`; it must
+        // reflect the toggle (suspended), not the launch value (on).
+        assert!(
+            !ui.mouse_enabled,
+            "external restore must use the toggled state, not the launch value"
         );
     }
 
