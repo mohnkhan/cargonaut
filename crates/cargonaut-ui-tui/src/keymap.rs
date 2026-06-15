@@ -532,6 +532,23 @@ action = "this-action-does-not-exist"
     }
 
     #[test]
+    fn lookup_resolves_alt_m_to_toggle_mouse_capture() {
+        // FR-001: M-m toggles mouse capture. Bound in `global` mode, so it must
+        // resolve from any active mode (like F10/F12). FR-009: no other binding
+        // claims M-m — asserting the resolved command *is* ToggleMouseCapture
+        // (and not something else) in Pane mode proves there's no collision.
+        let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
+        let ev = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT);
+        for mode in [Mode::Pane, Mode::Preview, Mode::Search] {
+            assert_eq!(
+                km.lookup(mode, ev),
+                Some(Command::ToggleMouseCapture),
+                "M-m must resolve to ToggleMouseCapture from mode {mode:?}"
+            );
+        }
+    }
+
+    #[test]
     fn lookup_resolves_pane_j_to_cursor_down() {
         let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
         let ev = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
