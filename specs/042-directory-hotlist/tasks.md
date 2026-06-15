@@ -113,12 +113,12 @@ pane is at the bookmarked dir.
 **Independent Test**: Add a bookmark, drop the `App`, reconstruct from the same
 `hotlist_path`, confirm it's loaded.
 
-- [ ] T012 [US2] (red) In `crates/cargonaut-core/src/lib.rs`, add a failing
+- [X] T012 [US2] (red) In `crates/cargonaut-core/src/lib.rs`, add a failing
   `#[tokio::test]`: add a bookmark with `app.hotlist_path` = tempfile, drop and
   rebuild an `App` pointed at the same file (or reload), and assert the bookmark
   is present with name/group/path intact (SC-002). Also assert a malformed file
   yields an empty hotlist without panic at construction (FR-013).
-- [ ] T013 [US2] (green) Ensure `App::new` loads from `hotlist_path` and
+- [X] T013 [US2] (green) Ensure `App::new` loads from `hotlist_path` and
   `add_bookmark`/`remove_bookmark` persist via `Hotlist::save`. Make T012 pass.
   (Mostly verifies T007 wiring + adds the malformed-at-construction guard/log.)
 

@@ -1751,6 +1751,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bookmarks_persist_and_reload(/* SC-002 */) {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let hl_file = TempDir::new().unwrap();
+        let path = hl_file.path().join("hotlist.toml");
+        let mut app = make_app(&td_l, &td_r).await;
+        app.hotlist_path = path.clone();
+        app.add_bookmark("proj", Some("work")).unwrap();
+        app.add_bookmark("scratch", None).unwrap();
+
+        // Reload from the same file (simulates a fresh session's App::new load).
+        let reloaded = cargonaut_config::Hotlist::load(&path);
+        assert_eq!(reloaded.bookmarks, app.bookmarks());
+        assert_eq!(reloaded.bookmarks[0].name, "proj");
+        assert_eq!(reloaded.bookmarks[0].group.as_deref(), Some("work"));
+        assert_eq!(reloaded.bookmarks[1].group, None);
+    }
+
+    #[tokio::test]
     async fn jump_to_bookmark_navigates_active_pane() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
