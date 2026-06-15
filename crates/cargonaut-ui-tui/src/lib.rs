@@ -2146,6 +2146,39 @@ mod tests {
         assert!(rows[0].can_cancel && rows[0].can_pause && !rows[0].can_resume);
     }
 
+    // Feature 042: Ctrl-b (BookmarksMenu) opens the hotlist popup.
+    #[tokio::test]
+    async fn bookmarks_menu_opens_hotlist_dialog() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::BookmarksMenu,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(dlg, Some(ActiveDialog::Hotlist { .. })));
+        assert!(matches!(mode, Mode::Dialog));
+    }
+
     #[tokio::test]
     async fn show_tasks_panel_opens_and_close_is_inert() {
         use crossterm::event::KeyCode;
