@@ -629,7 +629,9 @@ mod tests {
                 entries: vec![entry],
                 sort: Sort::NameAsc,
             },
-            cursor: 0,
+            // Feature 040: `/tmp` is non-root, so row 0 is the `..` row; the
+            // real entry is at virtual cursor 1.
+            cursor: 1,
             selected: BTreeSet::new(),
             show_hidden: false,
             sort: Sort::NameAsc,

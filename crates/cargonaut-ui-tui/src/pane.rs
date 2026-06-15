@@ -61,17 +61,27 @@ impl PaneView {
     /// Build a new view rooted at `cwd` with the given pre-sorted `listing`.
     /// Cursor starts on the first visible entry (or unset if empty).
     pub fn new(cwd: VfsPath, listing: DirListing) -> Self {
-        let mut list_state = ListState::default();
-        if !listing.entries.is_empty() {
-            list_state.select(Some(0));
-        }
-        Self {
+        let mut view = Self {
             cwd,
             listing,
             selected: BTreeSet::new(),
             show_hidden: false,
             filter: None,
-            list_state,
+            list_state: ListState::default(),
+        };
+        // Feature 040: focus the first real entry (past the `..` row), or the
+        // `..` row itself in an empty non-root dir, or nothing when empty.
+        view.reset_cursor_to_default();
+        view
+    }
+
+    /// Feature 040 — set the selection to the default row for a fresh listing.
+    fn reset_cursor_to_default(&mut self) {
+        let rows = self.row_count();
+        if rows == 0 {
+            self.list_state.select(None);
+        } else {
+            self.list_state.select(Some(self.parent_offset().min(rows - 1)));
         }
     }
 
@@ -86,13 +96,14 @@ impl PaneView {
         self.selected = state.selected.clone();
         self.show_hidden = state.show_hidden;
         self.filter = state.filter.clone();
-        // Translate visible-relative cursor (state.cursor) to ListState.
-        let visible_len = self.visible_indices().len();
-        if visible_len == 0 {
+        // Feature 040: state.cursor is a virtual-row index (the `..` row plus
+        // visible entries); clamp it to the row range and copy it verbatim so
+        // the rendered selection matches core exactly.
+        let rows = self.row_count();
+        if rows == 0 {
             self.list_state.select(None);
         } else {
-            let clamped = state.cursor.min(visible_len - 1);
-            self.list_state.select(Some(clamped));
+            self.list_state.select(Some(state.cursor.min(rows - 1)));
         }
     }
 
@@ -101,11 +112,7 @@ impl PaneView {
     pub fn set_listing(&mut self, listing: DirListing) {
         self.listing = listing;
         self.selected.clear();
-        if self.listing.entries.is_empty() {
-            self.list_state.select(None);
-        } else {
-            self.list_state.select(Some(0));
-        }
+        self.reset_cursor_to_default();
     }
 
     /// Indices into `self.listing.entries` that pass the visibility
@@ -132,27 +139,27 @@ impl PaneView {
     /// Move cursor down one visible entry. Clamped at the last visible
     /// entry (no wrap).
     pub fn cursor_down(&mut self) {
-        let visible = self.visible_indices();
-        if visible.is_empty() {
+        // Feature 040: move within the virtual row range (`..` + entries).
+        let rows = self.row_count();
+        if rows == 0 {
             self.list_state.select(None);
             return;
         }
         let cur = self.list_state.selected().unwrap_or(0);
-        let next = (cur + 1).min(visible.len().saturating_sub(1));
+        let next = (cur + 1).min(rows - 1);
         self.list_state.select(Some(next));
     }
 
     /// Move cursor up one visible entry. Clamped at the first visible
     /// entry (no wrap).
     pub fn cursor_up(&mut self) {
-        let visible = self.visible_indices();
-        if visible.is_empty() {
+        let rows = self.row_count();
+        if rows == 0 {
             self.list_state.select(None);
             return;
         }
         let cur = self.list_state.selected().unwrap_or(0);
-        let prev = cur.saturating_sub(1);
-        self.list_state.select(Some(prev));
+        self.list_state.select(Some(cur.saturating_sub(1)));
     }
 
     /// Toggle selection on the entry currently under the cursor. No-op if
@@ -173,12 +180,33 @@ impl PaneView {
         self.list_state.offset()
     }
 
+    /// Feature 040 — true when the directory has a parent, so a synthetic
+    /// `..` row is rendered as the first row.
+    pub fn has_parent(&self) -> bool {
+        self.cwd.parent().is_some()
+    }
+
+    /// Feature 040 — the virtual↔real index shift (1 with a `..` row, else 0).
+    fn parent_offset(&self) -> usize {
+        usize::from(self.has_parent())
+    }
+
+    /// Feature 040 — addressable rows: the `..` row (when present) plus the
+    /// visible real entries.
+    pub fn row_count(&self) -> usize {
+        self.parent_offset() + self.visible_indices().len()
+    }
+
     /// Index into `listing.entries` of the cursor's current entry, or
-    /// `None` if no visible entry is focused.
+    /// `None` if the cursor is on the `..` row or no entry is focused
+    /// (Feature 040).
     pub fn focused_entry_index(&self) -> Option<usize> {
-        let visible = self.visible_indices();
+        let off = self.parent_offset();
         let cur = self.list_state.selected()?;
-        visible.get(cur).copied()
+        if cur < off {
+            return None; // on the synthetic `..` row
+        }
+        self.visible_indices().get(cur - off).copied()
     }
 
     /// Render the pane to a ratatui buffer. Uses ratatui's `List` +
@@ -187,7 +215,17 @@ impl PaneView {
     /// viewport are skipped, and `list_state` tracks the scroll offset
     /// implicitly via the selected index.
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme, layout: PaneLayout) {
-        let items: Vec<ListItem<'_>> = self
+        let mut items: Vec<ListItem<'_>> = Vec::new();
+        // Feature 040 (FR-001/012): synthetic `..` parent row, first, styled
+        // as a directory. Not a real entry — never marked/selected.
+        if self.has_parent() {
+            let style = theme.entry_style(&VfsKind::Dir, None, false, false);
+            items.push(ListItem::new(Line::from(Span::styled(
+                " ..".to_string(),
+                style,
+            ))));
+        }
+        let entry_items = self
             .visible_indices()
             .into_iter()
             .map(|i| {
@@ -236,8 +274,8 @@ impl PaneView {
                     marked,
                 );
                 ListItem::new(Line::from(Span::styled(line, style)))
-            })
-            .collect();
+            });
+        items.extend(entry_items);
 
         let list = List::new(items)
             .highlight_style(theme.cursor_style())
@@ -279,8 +317,16 @@ mod tests {
         }
     }
 
+    /// Root path — no parent, so no synthetic `..` row. Existing tests use
+    /// this so the virtual-row model collapses to the visible-row model and
+    /// their assertions are unaffected by Feature 040.
     fn vfs_path() -> VfsPath {
-        VfsPath::parse("file:///tmp").unwrap()
+        VfsPath::parse("file:///").unwrap()
+    }
+
+    /// A non-root path (has a parent → a `..` row is shown).
+    fn nonroot_path() -> VfsPath {
+        VfsPath::parse("file:///home/u").unwrap()
     }
 
     #[test]
@@ -506,5 +552,87 @@ mod tests {
         p.cursor_down();
         // Clamped at last visible
         assert_eq!(p.focused_entry_index(), Some(2));
+    }
+
+    // ---------- Feature 040: `..` parent row ----------
+
+    fn render_string(p: &mut PaneView, w: u16, h: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| p.render(f.size(), f.buffer_mut(), &Theme::default(), PaneLayout::Brief))
+            .unwrap();
+        term.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn render_prepends_parent_row_in_non_root_dir() {
+        let mut p = PaneView::new(
+            nonroot_path(),
+            listing(vec![
+                entry("alpha", VfsKind::File, 10, false),
+                entry("beta", VfsKind::File, 20, false),
+            ]),
+        );
+        assert!(p.has_parent());
+        assert_eq!(p.row_count(), 3); // `..` + alpha + beta
+        // Default cursor is the first real entry, past the `..` row.
+        assert_eq!(p.focused_entry_index(), Some(0));
+        let s = render_string(&mut p, 30, 6);
+        assert!(s.contains(".."), "first row should show `..`: {s:?}");
+        assert!(s.contains("alpha"));
+    }
+
+    #[test]
+    fn render_has_no_parent_row_at_root() {
+        let p = PaneView::new(
+            vfs_path(), // root
+            listing(vec![entry("alpha", VfsKind::File, 10, false)]),
+        );
+        assert!(!p.has_parent());
+        assert_eq!(p.row_count(), 1);
+        assert_eq!(p.focused_entry_index(), Some(0));
+    }
+
+    #[test]
+    fn parent_row_present_with_zero_match_filter() {
+        let mut p = PaneView::new(
+            nonroot_path(),
+            listing(vec![entry("alpha", VfsKind::File, 10, false)]),
+        );
+        p.filter = Some(cargonaut_core::PaneFilter::compile("zzz-no-match").unwrap());
+        assert!(p.has_parent());
+        assert_eq!(p.row_count(), 1); // only the `..` row
+        let s = render_string(&mut p, 30, 6);
+        assert!(s.contains(".."), "`..` must remain under a zero-match filter: {s:?}");
+    }
+
+    #[test]
+    fn sync_from_maps_virtual_cursor_to_parent_or_entry() {
+        use std::collections::BTreeSet;
+        let mut p = PaneView::new(
+            nonroot_path(),
+            listing(vec![entry("alpha", VfsKind::File, 10, false)]),
+        );
+        let mk = |cursor: usize| cargonaut_core::PaneState {
+            cwd: nonroot_path(),
+            listing: listing(vec![entry("alpha", VfsKind::File, 10, false)]),
+            cursor,
+            selected: BTreeSet::new(),
+            show_hidden: false,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: Vec::new(),
+            dir_history_fwd: Vec::new(),
+        };
+        // Virtual cursor 0 → the `..` row (no real entry focused).
+        p.sync_from(&mk(0));
+        assert_eq!(p.focused_entry_index(), None);
+        // Virtual cursor 1 → first real entry.
+        p.sync_from(&mk(1));
+        assert_eq!(p.focused_entry_index(), Some(0));
     }
 }
