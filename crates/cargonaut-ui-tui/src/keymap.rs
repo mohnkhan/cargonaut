@@ -190,6 +190,9 @@ pub enum Command {
     // FR-210 fuzzy filter
     /// Open the fuzzy filter prompt (`<`).
     OpenFuzzyFilter,
+    // Feature 041 (FR-013 follow-up, #38)
+    /// Toggle runtime mouse capture on/off (Alt-m).
+    ToggleMouseCapture,
 }
 
 // ============================================================

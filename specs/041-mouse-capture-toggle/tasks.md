@@ -30,7 +30,7 @@ a red→green pair; git history MUST show `(red)` before `(green)`. The pure
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
+- [X] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
   baseline builds + tests (`make build && make test`). Verify no `Cargo.toml`
   changes are needed (no new dependencies).
 
@@ -43,12 +43,12 @@ the binding + variant exist, no toggle behavior can be wired or tested.
 
 **⚠️ No user-story phase can start until this is complete.**
 
-- [ ] T002 [FOUND] (red) In `crates/cargonaut-ui-tui/src/keymap.rs`, add a failing
+- [X] T002 [FOUND] (red) In `crates/cargonaut-ui-tui/src/keymap.rs`, add a failing
   test asserting `Keymap::load(DEFAULT_KEYMAP_TOML)` succeeds and
   `lookup(Mode::Global, M-m)` resolves to `Command::ToggleMouseCapture`
   (contract §1/§2). Add a non-collision assertion: no other binding resolves
   `M-m`. (Will not compile until the variant exists — that is the red state.)
-- [ ] T003 [FOUND] (green) Add the `ToggleMouseCapture` variant to the `Command`
+- [X] T003 [FOUND] (green) Add the `ToggleMouseCapture` variant to the `Command`
   enum in `crates/cargonaut-ui-tui/src/keymap.rs` with a doc comment
   (`/// Toggle runtime mouse capture on/off (FR-001).`). Add the binding block to
   `design/contracts/keymap.toml` (`mode = "global"`, `key = "M-m"`,
