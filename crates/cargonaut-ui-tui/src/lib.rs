@@ -13,9 +13,9 @@ pub mod pane;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
-    ConfirmDialog, ConfirmOutcome, InputOutcome, JobRow, PathInputAction, PathInputDialog,
-    ResumableSummary, ResumeChoice, ResumePromptDialog, TasksAction, TasksPanelDialog,
-    TextInputDialog,
+    ConfirmDialog, ConfirmOutcome, HotlistAction, HotlistDialog, HotlistRow, InputOutcome, JobRow,
+    PathInputAction, PathInputDialog, ResumableSummary, ResumeChoice, ResumePromptDialog,
+    TasksAction, TasksPanelDialog, TextInputDialog,
 };
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
@@ -143,6 +143,12 @@ enum ActiveDialog {
         /// The shared list widget; rows refreshed from `job_views()`.
         widget: TasksPanelDialog,
     },
+    /// Feature 042 — `Ctrl-b` directory hotlist popup. Rows built from
+    /// `app.bookmarks()`/`grouped()`; in-popup add/remove/select.
+    Hotlist {
+        /// The hotlist list widget.
+        widget: HotlistDialog,
+    },
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -151,6 +157,8 @@ enum InputKind {
     Mkdir,
     SelectPattern,
     UnselectPattern,
+    /// Feature 042 — bookmark name prompt; text is `group/name` or `name`.
+    AddBookmark,
 }
 
 /// An external program to run (F3/F4), suspending the TUI around it.
@@ -448,17 +456,49 @@ async fn handle_key(
                     if let InputOutcome::Submit(text) = outcome {
                         let text = text.trim().to_string();
                         if !text.is_empty() {
-                            let core = match kind {
-                                InputKind::Mkdir => AppCommand::Mkdir(text),
-                                InputKind::SelectPattern => AppCommand::SelectByPattern(text),
-                                InputKind::UnselectPattern => AppCommand::UnselectByPattern(text),
-                            };
-                            let events = app
-                                .dispatch(core)
-                                .await
-                                .map_err(|e| Error::Other(e.to_string()))?;
-                            for ev in events {
-                                apply_event(ev, app, mode, active_dialog, status, quit);
+                            // Feature 042: bookmark add is a direct App method
+                            // (not a core command) and reopens the hotlist.
+                            if matches!(kind, InputKind::AddBookmark) {
+                                let (group, name) = match text.split_once('/') {
+                                    Some((g, n)) => (Some(g.trim()), n.trim().to_string()),
+                                    None => (None, text),
+                                };
+                                match app.add_bookmark(&name, group) {
+                                    Ok(events) => {
+                                        for ev in events {
+                                            apply_event(
+                                                ev,
+                                                app,
+                                                mode,
+                                                active_dialog,
+                                                status,
+                                                quit,
+                                            );
+                                        }
+                                    }
+                                    Err(e) => *status = e.to_string(),
+                                }
+                                // Reopen the hotlist, refreshed.
+                                *active_dialog = Some(ActiveDialog::Hotlist {
+                                    widget: HotlistDialog::new(build_hotlist_rows(app)),
+                                });
+                                *mode = Mode::Dialog;
+                            } else {
+                                let core = match kind {
+                                    InputKind::Mkdir => AppCommand::Mkdir(text),
+                                    InputKind::SelectPattern => AppCommand::SelectByPattern(text),
+                                    InputKind::UnselectPattern => {
+                                        AppCommand::UnselectByPattern(text)
+                                    }
+                                    InputKind::AddBookmark => unreachable!("handled above"),
+                                };
+                                let events = app
+                                    .dispatch(core)
+                                    .await
+                                    .map_err(|e| Error::Other(e.to_string()))?;
+                                for ev in events {
+                                    apply_event(ev, app, mode, active_dialog, status, quit);
+                                }
                             }
                         }
                     }
@@ -573,6 +613,54 @@ async fn handle_key(
                         if let Some(ActiveDialog::TasksPanel { widget }) = active_dialog.as_mut() {
                             widget.set_rows(build_job_rows(app));
                         }
+                    }
+                    None => {}
+                }
+                return Ok(true);
+            }
+            ActiveDialog::Hotlist { widget } => {
+                // Feature 042 (FR-003/004/005/012): map the focused row → bookmark
+                // index, run the action against a fresh snapshot, keep the popup
+                // open except on Select/Close.
+                match widget.handle_key(key.code) {
+                    Some(HotlistAction::Close) => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    Some(HotlistAction::Select(i)) => {
+                        // Jump; a bad target surfaces as a status, panes/hotlist
+                        // unchanged (FR-008). Close the popup either way.
+                        match app.jump_to_bookmark(i).await {
+                            Ok(events) => {
+                                *active_dialog = None;
+                                *mode = Mode::Pane;
+                                for ev in events {
+                                    apply_event(ev, app, mode, active_dialog, status, quit);
+                                }
+                            }
+                            Err(e) => {
+                                *active_dialog = None;
+                                *mode = Mode::Pane;
+                                *status = e.to_string();
+                            }
+                        }
+                    }
+                    Some(HotlistAction::Remove(i)) => {
+                        let _ = app.remove_bookmark(i);
+                        if let Some(ActiveDialog::Hotlist { widget }) = active_dialog.as_mut() {
+                            *widget = HotlistDialog::new(build_hotlist_rows(app));
+                        }
+                    }
+                    Some(HotlistAction::Add) => {
+                        // Chain into a name prompt (group/name). On submit the
+                        // Input arm calls add_bookmark and reopens the hotlist.
+                        *active_dialog = Some(ActiveDialog::Input {
+                            widget: TextInputDialog::new(
+                                "Add bookmark",
+                                "Name (or group/name):",
+                            ),
+                            kind: InputKind::AddBookmark,
+                        });
                     }
                     None => {}
                 }
@@ -701,6 +789,15 @@ async fn dispatch_ui_command(
         Command::ShowTasksPanel => {
             *active_dialog = Some(ActiveDialog::TasksPanel {
                 widget: TasksPanelDialog::new(build_job_rows(app)),
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 042 (FR-001): Ctrl-b opens the directory hotlist popup over
+        // the App's bookmarks. In-popup keys add/remove/select (FR-004/005/003).
+        Command::BookmarksMenu => {
+            *active_dialog = Some(ActiveDialog::Hotlist {
+                widget: HotlistDialog::new(build_hotlist_rows(app)),
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -1048,6 +1145,31 @@ fn build_job_rows(app: &App) -> Vec<JobRow> {
         .collect()
 }
 
+/// Feature 042 — build the hotlist popup rows from the App's bookmarks,
+/// organized by group (a non-selectable header per group, ungrouped under a
+/// default section). Each entry row carries its original `bookmarks()` index so
+/// the event loop can map a selection back to a bookmark (SC-007).
+fn build_hotlist_rows(app: &App) -> Vec<HotlistRow> {
+    let hl = cargonaut_config::Hotlist {
+        bookmarks: app.bookmarks().to_vec(),
+    };
+    let mut rows = Vec::new();
+    for (group, entries) in hl.grouped() {
+        let header = group.unwrap_or("(ungrouped)");
+        rows.push(HotlistRow {
+            display: format!("▸ {header}"),
+            index: None,
+        });
+        for (idx, b) in entries {
+            rows.push(HotlistRow {
+                display: format!("   {}  —  {}", b.name, b.path),
+                index: Some(idx),
+            });
+        }
+    }
+    rows
+}
+
 fn apply_event(
     ev: AppEvent,
     _app: &mut App,
@@ -1283,6 +1405,7 @@ fn draw_frame(
             ActiveDialog::QuickCd { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::TasksPanel { widget } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::Hotlist { widget } => widget.render(darea, f.buffer_mut(), theme),
         }
     }
 

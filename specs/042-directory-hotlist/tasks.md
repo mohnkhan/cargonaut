@@ -84,18 +84,18 @@ pane is at the bookmarked dir.
   Implement `bookmarks()`, `add_bookmark(name, group)` (build from active pane
   cwd, push, `save`, status), and `jump_to_bookmark(index)` (reuse
   `quick_cd(path)`). Make T006 pass.
-- [ ] T008 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
+- [X] T008 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for `HotlistDialog`: `new(rows)` renders entries (`TestBackend`);
   nav keys move selection; the select key ⇒ `HotlistAction::Select(i)`; Esc ⇒
   `Close` (contract §3). Add `HotlistAction`.
 - [X] T009 [US1] (green) Implement `HotlistDialog` + `HotlistAction`
   (`Select|Add|Remove|Close`) modeled on `TasksPanelDialog` (modal list, `Clear`
   first, `theme.dialog_style()`). Make T008 pass.
-- [ ] T010 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
+- [X] T010 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
   test that `dispatch_ui_command(Command::BookmarksMenu, …)` opens
   `ActiveDialog::Hotlist` from `app.bookmarks()` and sets `Mode::Dialog`
   (replacing the "not yet available" path).
-- [ ] T011 [US1] (green) Add `ActiveDialog::Hotlist { widget: HotlistDialog }`;
+- [X] T011 [US1] (green) Add `ActiveDialog::Hotlist { widget: HotlistDialog }`;
   wire `Command::BookmarksMenu` in `dispatch_ui_command` to open it; add the
   render arm; handle the dialog keys — `Select(i)` → `app.jump_to_bookmark(i)`
   then close; `Add` → open a `TextInputDialog` (group/name) then
