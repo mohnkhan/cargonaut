@@ -756,7 +756,9 @@ impl MouseToggleOutcome {
                 "Mouse support disabled for this session (--no-mouse / ui.mouse=false)"
             }
             MouseToggleOutcome::EnabledNow => "Mouse capture: on",
-            MouseToggleOutcome::SuspendedNow => "Mouse capture: suspended — Shift+drag to select text",
+            MouseToggleOutcome::SuspendedNow => {
+                "Mouse capture: suspended — Shift+drag to select text"
+            }
         }
     }
 }
@@ -1469,9 +1471,15 @@ mod tests {
     // Feature 041 (FR-002/003/006): the pure toggle-decision truth table.
     #[test]
     fn plan_mouse_toggle_truth_table() {
-        assert_eq!(plan_mouse_toggle(false, false), MouseToggleOutcome::Disabled);
+        assert_eq!(
+            plan_mouse_toggle(false, false),
+            MouseToggleOutcome::Disabled
+        );
         assert_eq!(plan_mouse_toggle(false, true), MouseToggleOutcome::Disabled);
-        assert_eq!(plan_mouse_toggle(true, false), MouseToggleOutcome::EnabledNow);
+        assert_eq!(
+            plan_mouse_toggle(true, false),
+            MouseToggleOutcome::EnabledNow
+        );
         assert_eq!(
             plan_mouse_toggle(true, true),
             MouseToggleOutcome::SuspendedNow
@@ -1484,7 +1492,9 @@ mod tests {
             .status()
             .contains("disabled for this session"));
         assert_eq!(MouseToggleOutcome::EnabledNow.status(), "Mouse capture: on");
-        assert!(MouseToggleOutcome::SuspendedNow.status().contains("suspended"));
+        assert!(MouseToggleOutcome::SuspendedNow
+            .status()
+            .contains("suspended"));
         assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
     }
 
@@ -1507,7 +1517,10 @@ mod tests {
     // terminal Shift-drag bypass for one-off native text selection.
     #[test]
     fn help_documents_mouse_toggle_and_shift_bypass() {
-        assert!(HELP_BODY.contains("M-m"), "help must mention the M-m toggle");
+        assert!(
+            HELP_BODY.contains("M-m"),
+            "help must mention the M-m toggle"
+        );
         assert!(
             HELP_BODY.contains("Shift"),
             "help must mention the Shift-drag bypass"
@@ -1629,7 +1642,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!ui.mouse_enabled, "capture must stay off in a disabled session");
+        assert!(
+            !ui.mouse_enabled,
+            "capture must stay off in a disabled session"
+        );
         assert!(
             status.contains("disabled for this session"),
             "status was: {status}"

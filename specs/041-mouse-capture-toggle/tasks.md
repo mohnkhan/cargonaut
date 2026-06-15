@@ -178,10 +178,10 @@ no capture; indicator stays `[mouse:off]`.
   `execute!` error, downgrade that call to best-effort (`let _ = execute!(…)`)
   so a toggle never crashes the loop. No new test unless an error path is
   reproducible.
-- [ ] T018 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
+- [X] T018 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate). Run `cargo run -p cargonaut-bin` and walk the quickstart.md
   manual steps 1–8. Fix any clippy/fmt issues.
-- [ ] T019 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
+- [X] T019 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
   `README.md` ("At a Glance" metrics — test count, feature count, binary size;
   + Feature History one-liner for Feature 041) and append a Feature 041 section
   to `Learnings.md` (≥3 bullets: the single-flag reuse, the pure-function
