@@ -656,6 +656,46 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    // ---------- HotlistDialog (Feature 042) ----------
+
+    fn hl_entry(display: &str, index: usize) -> HotlistRow {
+        HotlistRow { display: display.into(), index: Some(index) }
+    }
+
+    #[test]
+    fn hotlist_new_selects_first_entry_and_renders() {
+        let rows = vec![hl_entry("proj", 0), hl_entry("tmp", 1)];
+        let mut d = HotlistDialog::new(rows);
+        assert_eq!(d.focused_index(), Some(0));
+        let backend = TestBackend::new(40, 8);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme)).unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(s.contains("proj") && s.contains("tmp"), "rendered: {s}");
+    }
+
+    #[test]
+    fn hotlist_nav_and_select_and_close() {
+        let rows = vec![hl_entry("a", 0), hl_entry("b", 1)];
+        let mut d = HotlistDialog::new(rows);
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.handle_key(KeyCode::Enter), Some(HotlistAction::Select(1)));
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(HotlistAction::Close));
+    }
+
+    #[test]
+    fn hotlist_add_key_returns_add() {
+        let mut d = HotlistDialog::new(vec![hl_entry("a", 0)]);
+        assert_eq!(d.handle_key(KeyCode::Char('a')), Some(HotlistAction::Add));
+    }
+
     // ---------- ConfirmDialog ----------
 
     #[test]
