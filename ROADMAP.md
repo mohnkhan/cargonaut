@@ -22,6 +22,8 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 
 > ✅ **Resolved**: [#33](https://github.com/mohnkhan/cargonaut/issues/33) (FR-013 — panel filter prompt dialog, was clear-only) shipped in **Feature 033** (`033-panel-filter-prompt`). Alt-! now opens an inline prompt (prefilled with the active filter) reusing the shared `PathInputDialog`; on accept it compiles the pattern with `globset` (case-insensitive; metacharacter-free patterns match as `*word*` substrings) and applies it to the focused pane, empty submit clears, invalid patterns show an inline error and keep the prompt open. The filter became a compiled `PaneFilter` (`Option<String>` → `Option<PaneFilter>`) across core and the pane view. NB: the deferral's "globset plumbing present" note was inaccurate — only a substring placeholder existed.
 
+> ✅ **Resolved**: [#37](https://github.com/mohnkhan/cargonaut/issues/37) (FR-020 — `..` parent entry as first row) shipped in **Feature 040** (`040-parent-row`). Every non-root pane shows a `..` row first; Enter/double-click on it ascends. Implemented as a core-owned virtual-row cursor (`PaneState.cursor` indexes `[..] ++ visible entries` via a `parent_offset`); `focused_entry_index()` returns `None` on the row so the existing selection/copy guards exclude it for free; `Descend` ascends on the parent row; the cursor defaults to the first real entry (clarified). No keymap change. The predicted ~10-test break stayed contained by pinning pane unit tests to a root cwd.
+
 > ✅ **Resolved**: [#32](https://github.com/mohnkhan/cargonaut/issues/32) (T1.29 — tasks/jobs panel popup, FR-016/NFR-004) shipped in **Feature 039** (`039-tasks-jobs-panel`). F12 now opens a modal `TasksPanelDialog` over the App transfer registry listing each transfer's `source → destination` + live state/progress, with per-row cancel (`c`), pause (`p`), and resume (`r`). Pause reuses the cancellation token (leaving the checkpoint) + an `App.paused` marker so the job holds as `Paused` while siblings continue; resume re-arms via the existing `resume_transfer` checkpoint path (same id, fresh token). Core gained UI-agnostic `JobView`/`JobStatus` + `job_views()`/`cancel_transfer`/`pause_transfer`/`resume_paused`; no transfer-crate changes. The SC-003 three-job pause/resume scenario is a CI integration test.
 
 ---
@@ -30,7 +32,7 @@ Pick from here first. These are issues whose fix unblocks downstream work or who
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#37](https://github.com/mohnkhan/cargonaut/issues/37) | Panel: `..` parent entry as first row (FR-020) | S | Feature 031 — ascent works via key/menu/mouse; needs an index model separating the synthetic row from real entries |
+| _(none — Tier 2 is clear; see Tier 3 for diagnostics/follow-ups)_ | | | |
 
 ---
 

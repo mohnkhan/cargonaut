@@ -14,8 +14,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) + Feature 039 (tasks/jobs panel) |
-| **Tests** | 244 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) + Feature 039 (tasks/jobs panel) + Feature 040 (`..` parent row) |
+| **Tests** | 259 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
 | **Binary** | 2.04 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -107,8 +107,11 @@ Phase 1 plus Feature 031 are merged — Cargonaut is a runnable dual-pane TUI:
   cancel (`c`), pause (`p`), and resume (`r`); pause holds a transfer on its
   checkpoint while the others keep running, and resume picks it up where it left
   off (Feature 039).
+- **`..` parent row** — every non-root pane shows a `..` row as its first row;
+  press Enter on it or double-click it to go up. It can't be tagged and is never
+  part of a copy/move/delete; it's hidden at a filesystem root (Feature 040).
 
-The full per-feature history (Features 001 → 039) lives in
+The full per-feature history (Features 001 → 040) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Quick start
