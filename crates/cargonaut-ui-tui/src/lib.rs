@@ -1775,6 +1775,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_job_rows_formats_label_status_and_eligibility() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        submit_running_copy(&mut app, &td_l, "a.bin").await;
+        let rows = build_job_rows(&app);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].label.contains("a.bin"));
+        assert!(
+            rows[0].status_label.starts_with("Running") || rows[0].status_label == "Queued",
+            "unexpected status_label {:?}",
+            rows[0].status_label
+        );
+        // A queued/running job can be cancelled or paused, not resumed.
+        assert!(rows[0].can_cancel && rows[0].can_pause && !rows[0].can_resume);
+    }
+
+    #[tokio::test]
     async fn show_tasks_panel_opens_and_close_is_inert() {
         use crossterm::event::KeyCode;
         let td_l = TempDir::new().unwrap();
