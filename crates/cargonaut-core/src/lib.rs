@@ -20,12 +20,16 @@
 #![warn(missing_docs)]
 
 use cargonaut_transfer::{
-    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError, TransferId,
+    resume_transfer, scan_resumable, submit_transfer, ResumableTransfer, TransferError,
     TransferJob, TransferOptions, TransferState,
 };
+/// Re-exported transfer identity + mode so UI layers can name jobs without
+/// depending on `cargonaut-transfer` directly (mirrors the existing
+/// projection seam — see [`JobView`], [`ProgressView`]).
+pub use cargonaut_transfer::{TransferId, TransferMode};
 use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath};
 use globset::{GlobBuilder, GlobMatcher};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -270,6 +274,59 @@ pub struct ProgressView {
     pub throughput_mibs: f32,
 }
 
+/// Feature 039 — UI-agnostic status of one transfer as rendered by the
+/// tasks/jobs panel. Projects the transfer engine's `TransferState` (plus
+/// the App's user-paused marker) into the states the panel distinguishes,
+/// keeping `cargonaut-transfer`'s types out of the UI.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobStatus {
+    /// Submitted, not yet progressing.
+    Queued,
+    /// In flight, with progress.
+    Running {
+        /// Bytes copied so far.
+        bytes_done: u64,
+        /// Total bytes to copy.
+        bytes_total: u64,
+        /// Estimated seconds remaining.
+        eta_secs: u32,
+        /// Current throughput in MiB/s.
+        throughput_mibs: f32,
+    },
+    /// Paused by the user (resumable).
+    Paused,
+    /// Finished; `verified` mirrors the post-copy SHA-256 check.
+    Completed {
+        /// True if the destination SHA-256 matched the source.
+        verified: bool,
+    },
+    /// Errored; `resumable` is true if a checkpoint exists for retry.
+    Failed {
+        /// Can the transfer be resumed from its checkpoint?
+        resumable: bool,
+    },
+    /// Cancelled by the user (distinct from [`JobStatus::Paused`]).
+    Cancelled,
+}
+
+/// Feature 039 — UI-facing projection of one registry transfer (one row of
+/// the tasks/jobs panel). Built by [`App::job_views`]; mirrors the role of
+/// [`ProgressView`] / [`ResumeOfferView`] so the UI never touches the
+/// transfer crate's types.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobView {
+    /// Stable identity; the target of per-row actions.
+    pub id: TransferId,
+    /// Source path/URI for display (caller may shorten).
+    pub src: String,
+    /// Destination path/URI for display.
+    pub dst: String,
+    /// Copy or move.
+    pub mode: TransferMode,
+    /// Classified status, including progress.
+    pub status: JobStatus,
+}
+
 /// Feature 037 — UI-agnostic projection of one resumable transfer found
 /// on launch. Lets the UI build its resume prompt without depending on
 /// the transfer crate's types (mirrors [`ProgressView`]). The UI maps
@@ -392,6 +449,10 @@ pub struct App {
     transfers: HashMap<TransferId, TransferJob>,
     /// IDs in submit order — used by `CancelCurrentTransfer`.
     transfer_order: Vec<TransferId>,
+    /// Feature 039 — ids the user has paused (vs. cancelled). Source of
+    /// truth for the [`JobStatus::Paused`] classification and for resume
+    /// eligibility; the engine's `TransferState` can't express "paused".
+    paused: HashSet<TransferId>,
     /// Feature 037 — resumable transfers discovered on launch, in scan
     /// order. Drained one at a time as the user answers the resume prompt.
     pending_resumes: Vec<ResumableTransfer>,
@@ -450,6 +511,7 @@ impl App {
             local_fs,
             transfers: HashMap::new(),
             transfer_order: Vec::new(),
+            paused: HashSet::new(),
             pending_resumes: Vec::new(),
             status: String::new(),
             split: SplitOrient::Horizontal,
@@ -526,6 +588,149 @@ impl App {
     /// Borrow a transfer by id (for the UI to read its `watch::Receiver`).
     pub fn transfer(&self, id: TransferId) -> Option<&TransferJob> {
         self.transfers.get(&id)
+    }
+
+    /// Feature 039 (FR-002/003/004) — a read-only projection of every
+    /// transfer in the registry, in submit order, for the tasks/jobs panel.
+    /// Pure (no I/O). The user-paused marker overrides a raw `Canceled`
+    /// snapshot so a deliberately-paused transfer renders as `Paused`; a
+    /// transfer that reached a terminal state before the pause took effect
+    /// still renders with its terminal status.
+    pub fn job_views(&self) -> Vec<JobView> {
+        self.transfer_order
+            .iter()
+            .filter_map(|id| {
+                let job = self.transfers.get(id)?;
+                let raw = transfer_state_snapshot(job);
+                let paused = self.paused.contains(id);
+                let status = job_status_from(raw, paused);
+                Some(JobView {
+                    id: *id,
+                    src: job.src.1.display(),
+                    dst: job.dst.1.display(),
+                    mode: job.mode,
+                    status,
+                })
+            })
+            .collect()
+    }
+
+    /// Feature 039 (FR-009, SC-002) — cancel the transfer with `id` through
+    /// the engine's cancellation token. Clears any user-paused marker first
+    /// so the job renders as `Cancelled`, not `Paused`. Affects only this
+    /// transfer; unknown ids are a safe no-op.
+    pub fn cancel_transfer(&mut self, id: TransferId) -> Vec<Event> {
+        self.paused.remove(&id);
+        match self.transfers.get(&id) {
+            Some(job) => {
+                job.cancel.cancel();
+                vec![Event::Status(format!("Canceled transfer {id:?}"))]
+            }
+            None => vec![Event::Status("No such transfer".into())],
+        }
+    }
+
+    /// Feature 039 (FR-010/012/016/017) — pause the transfer with `id`.
+    /// Signals its cancellation token (which stops the copy loop while
+    /// leaving the checkpoint sidecar in place) and records the id as
+    /// user-paused so it renders as `Paused` and is resume-eligible. A
+    /// no-op on unknown, already-paused, or terminal transfers.
+    pub fn pause_transfer(&mut self, id: TransferId) -> Vec<Event> {
+        if self.paused.contains(&id) {
+            return vec![];
+        }
+        let pausable = match self.transfers.get(&id) {
+            None => return vec![],
+            Some(job) => match transfer_state_snapshot(job) {
+                TransferState::Completed { .. }
+                | TransferState::Failed { .. }
+                | TransferState::Canceled => false,
+                _ => {
+                    job.cancel.cancel();
+                    true
+                }
+            },
+        };
+        if pausable {
+            self.paused.insert(id);
+            vec![Event::Status(format!("Paused transfer {id:?}"))]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Feature 039 (FR-011/012) — resume a user-paused transfer. Locates
+    /// the job's checkpoint sidecar (via `scan_resumable` on the destination
+    /// directory) and re-arms it through [`resume_transfer`] with a fresh
+    /// cancellation token, preserving its `TransferId`. If no checkpoint
+    /// exists yet (paused before the first checkpoint interval), the
+    /// transfer is restarted from scratch. A no-op when `id` is not paused.
+    pub async fn resume_paused(&mut self, id: TransferId) -> Result<Vec<Event>, AppError> {
+        if !self.paused.contains(&id) {
+            return Ok(vec![]);
+        }
+        let (src_path, dst_path) = match self.transfers.get(&id) {
+            Some(job) => (job.src.1.clone(), job.dst.1.clone()),
+            None => {
+                self.paused.remove(&id);
+                return Ok(vec![]);
+            }
+        };
+        let dst_parent = dst_path
+            .parent()
+            .ok_or_else(|| AppError::BadPath("destination path has no parent".into()))?;
+        let opts = self.transfer_opts();
+
+        // Find this job's checkpoint sidecar in the destination directory.
+        let found = scan_resumable(Arc::clone(&self.local_fs), dst_parent)
+            .await?
+            .into_iter()
+            .find(|rt| rt.checkpoint.job_id == id.0.to_string());
+
+        match found {
+            Some(rt) => {
+                match resume_transfer(
+                    Arc::clone(&self.local_fs),
+                    Arc::clone(&self.local_fs),
+                    rt.checkpoint,
+                    opts,
+                )
+                .await
+                {
+                    Ok(job) => {
+                        // resume_transfer preserves the id, so this replaces
+                        // the paused entry in place; transfer_order is intact.
+                        let new_id = job.id;
+                        self.transfers.insert(new_id, job);
+                        self.paused.remove(&id);
+                        Ok(vec![Event::TransferProgressed(new_id)])
+                    }
+                    Err(e) => Ok(vec![Event::Status(format!("Cannot resume: {e}"))]),
+                }
+            }
+            None => {
+                // No checkpoint yet — restart from scratch. submit_transfer
+                // mints a fresh id, so swap it into transfer_order in place.
+                let job = submit_transfer(
+                    Arc::clone(&self.local_fs),
+                    src_path,
+                    Arc::clone(&self.local_fs),
+                    dst_path,
+                    opts,
+                )
+                .await?;
+                let new_id = job.id;
+                self.transfers.insert(new_id, job);
+                if let Some(pos) = self.transfer_order.iter().position(|x| *x == id) {
+                    self.transfer_order[pos] = new_id;
+                } else {
+                    self.transfer_order.push(new_id);
+                }
+                self.transfers.remove(&id);
+                self.paused.remove(&id);
+                Ok(vec![Event::TransferProgressed(new_id)])
+            }
+        }
     }
 
     /// Apply a command. Returns the events the UI should react to.
@@ -615,23 +820,17 @@ impl App {
             // Feature 038: opened UI-side (the TUI builds the dialog and
             // calls `complete_cd`/`quick_cd`). A direct dispatch is a no-op.
             QuickCdPopup => Ok(vec![]),
-            ShowTasksPanel => {
-                let n = self.transfer_order.len();
-                Ok(vec![Event::Status(format!(
-                    "Tasks panel not yet implemented (T1.29 stub) — {n} active transfer(s)"
-                ))])
-            }
+            // Feature 039: the tasks panel is opened UI-side (the TUI builds
+            // the modal from `job_views()` and routes per-row actions to
+            // `cancel_transfer`/`pause_transfer`/`resume_paused`). A direct
+            // dispatch is a no-op, like `QuickCdPopup`/`TogglePanelFilter`.
+            ShowTasksPanel => Ok(vec![]),
             Copy => self.request_copy_confirmation(),
             Move => self.request_move_confirmation(),
             Delete => self.request_delete_confirmation(),
             CancelCurrentTransfer => {
                 if let Some(id) = self.transfer_order.last().copied() {
-                    if let Some(job) = self.transfers.get(&id) {
-                        job.cancel.cancel();
-                        Ok(vec![Event::Status(format!("Canceled transfer {id:?}"))])
-                    } else {
-                        Ok(vec![])
-                    }
+                    Ok(self.cancel_transfer(id))
                 } else {
                     Ok(vec![Event::Status("No active transfer to cancel".into())])
                 }
@@ -1374,6 +1573,36 @@ fn parse_path(s: &str) -> Result<VfsPath, AppError> {
 /// borrow across awaits.
 pub fn transfer_state_snapshot(job: &TransferJob) -> TransferState {
     job.state.borrow().clone()
+}
+
+/// Feature 039 — classify a raw `TransferState` into the panel's
+/// [`JobStatus`], honoring the user-paused marker. A paused, still-active
+/// transfer renders as `Paused`; one that already reached a terminal state
+/// keeps that terminal status (defensive: a finished job is never shown as
+/// paused).
+fn job_status_from(raw: TransferState, paused: bool) -> JobStatus {
+    match raw {
+        TransferState::Completed { sha256_match } => JobStatus::Completed {
+            verified: sha256_match,
+        },
+        TransferState::Failed { resumable, .. } => JobStatus::Failed { resumable },
+        TransferState::Canceled if paused => JobStatus::Paused,
+        TransferState::Canceled => JobStatus::Cancelled,
+        _ if paused => JobStatus::Paused,
+        TransferState::Queued => JobStatus::Queued,
+        TransferState::Paused => JobStatus::Paused,
+        TransferState::Running {
+            bytes_done,
+            bytes_total,
+            eta_secs,
+            throughput_mibs,
+        } => JobStatus::Running {
+            bytes_done,
+            bytes_total,
+            eta_secs,
+            throughput_mibs,
+        },
+    }
 }
 
 // =====================================================================
@@ -2236,20 +2465,251 @@ mod tests {
         assert_eq!(app.pane(PaneId::Right).cwd, right_before);
     }
 
+    // =================================================================
+    // Feature 039 — tasks/jobs panel: job_views projection + per-row
+    // pause/resume/cancel actions.
+    // =================================================================
+
+    /// Submit one throttled copy of `name` (sized `bytes`) from the left
+    /// pane to the right pane via the App, returning its id. The throttle
+    /// keeps the copy in flight long enough for deterministic pause/cancel
+    /// assertions.
+    async fn submit_one_copy(
+        app: &mut App,
+        td_l: &TempDir,
+        name: &str,
+        bytes: usize,
+    ) -> TransferId {
+        std::env::set_var("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "8");
+        fs::write(td_l.path().join(name), vec![0u8; bytes])
+            .await
+            .unwrap();
+        // Re-list the left pane so the new file is visible, then select it.
+        app.refresh_active_pane().await.unwrap();
+        app.dispatch(Command::SelectByPattern(name.to_string()))
+            .await
+            .unwrap();
+        app.confirm_copy().await.unwrap();
+        app.dispatch(Command::UnselectByPattern(name.to_string()))
+            .await
+            .unwrap();
+        *app.transfer_ids().last().unwrap()
+    }
+
     #[tokio::test]
-    async fn show_tasks_panel_emits_status_with_transfer_count() {
+    async fn show_tasks_panel_dispatch_is_noop() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
+        // The TUI intercepts ShowTasksPanel to open the modal; the core
+        // dispatch arm is a no-op (like QuickCdPopup).
         let events = app.dispatch(Command::ShowTasksPanel).await.unwrap();
-        let has_status = events.iter().any(|e| match e {
-            Event::Status(s) => s.contains("0 active"),
-            _ => false,
-        });
+        assert!(events.is_empty(), "expected no events, got {events:?}");
+    }
+
+    #[tokio::test]
+    async fn job_views_empty_when_no_transfers() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        assert!(app.job_views().is_empty());
+    }
+
+    #[tokio::test]
+    async fn job_views_lists_transfers_in_submit_order() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id_a = submit_one_copy(&mut app, &td_l, "a.bin", 16 * 1024 * 1024).await;
+        let id_b = submit_one_copy(&mut app, &td_l, "b.bin", 16 * 1024 * 1024).await;
+        let views = app.job_views();
+        assert_eq!(views.len(), 2);
+        assert_eq!(views[0].id, id_a);
+        assert_eq!(views[1].id, id_b);
+        assert!(views[0].src.contains("a.bin"));
+        assert!(views[0].dst.contains("a.bin"));
+        // A fresh, throttled copy is queued or running — never terminal yet.
+        assert!(matches!(
+            views[0].status,
+            JobStatus::Running { .. } | JobStatus::Queued
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancel_transfer_signals_only_that_job() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id_a = submit_one_copy(&mut app, &td_l, "a.bin", 16 * 1024 * 1024).await;
+        let id_b = submit_one_copy(&mut app, &td_l, "b.bin", 16 * 1024 * 1024).await;
+        let events = app.cancel_transfer(id_a);
+        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+        assert!(app.transfer(id_a).unwrap().cancel.is_cancelled());
+        assert!(!app.transfer(id_b).unwrap().cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_transfer_unknown_id_is_safe_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let bogus = TransferId(uuid::Uuid::nil());
+        let _ = app.cancel_transfer(bogus); // must not panic
+        assert!(app.job_views().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pause_transfer_marks_paused_and_cancels_token() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id = submit_one_copy(&mut app, &td_l, "big.bin", 32 * 1024 * 1024).await;
+        let _ = app.pause_transfer(id);
+        // Token is signalled so the running task stops (leaving its checkpoint).
+        assert!(app.transfer(id).unwrap().cancel.is_cancelled());
+        // The throttled copy is still mid-flight, so it classifies as Paused.
+        let v = app.job_views();
+        assert!(matches!(v[0].status, JobStatus::Paused));
+    }
+
+    #[tokio::test]
+    async fn pause_transfer_unknown_id_is_safe_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let bogus = TransferId(uuid::Uuid::nil());
+        let events = app.pause_transfer(bogus);
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resume_paused_noop_when_not_paused() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id = submit_one_copy(&mut app, &td_l, "a.bin", 16 * 1024 * 1024).await;
+        // Never paused → resume is a no-op (no events).
+        let events = app.resume_paused(id).await.unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancel_transfer_clears_paused_marker() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id = submit_one_copy(&mut app, &td_l, "big.bin", 32 * 1024 * 1024).await;
+        let _ = app.pause_transfer(id);
+        assert!(matches!(app.job_views()[0].status, JobStatus::Paused));
+        let _ = app.cancel_transfer(id);
+        // After cancel the user-paused marker is cleared, so the job no
+        // longer classifies as Paused (it renders as Cancelled once the
+        // task observes the token — never Paused again). The deterministic
+        // invariant is "not Paused".
         assert!(
-            has_status,
-            "expected '0 active transfer' status, got {events:?}"
+            !matches!(app.job_views()[0].status, JobStatus::Paused),
+            "cancel must clear the paused marker"
         );
+        assert!(app.transfer(id).unwrap().cancel.is_cancelled());
+    }
+
+    /// Poll a job's status until it reaches a terminal state or `deadline`
+    /// elapses, yielding so background transfer tasks make progress.
+    async fn wait_status<F>(app: &App, id: TransferId, deadline_ms: u64, pred: F) -> bool
+    where
+        F: Fn(&JobStatus) -> bool,
+    {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(v) = app.job_views().into_iter().find(|v| v.id == id) {
+                if pred(&v.status) {
+                    return true;
+                }
+            }
+            if start.elapsed().as_millis() as u64 > deadline_ms {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    }
+
+    /// SC-003 (the issue's headline acceptance test): submit three throttled
+    /// transfers, pause one, and assert the other two run to completion while
+    /// the paused one is held; then resume it and assert it completes too.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn three_jobs_pause_one_others_continue() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::env::set_var("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "16");
+        for name in ["a.bin", "b.bin", "c.bin"] {
+            fs::write(td_l.path().join(name), vec![0x5Au8; 24 * 1024 * 1024])
+                .await
+                .unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        app.refresh_active_pane().await.unwrap();
+        app.dispatch(Command::SelectByPattern("*.bin".into()))
+            .await
+            .unwrap();
+        app.confirm_copy().await.unwrap();
+
+        let ids = app.transfer_ids();
+        assert_eq!(ids.len(), 3, "expected 3 transfers, got {}", ids.len());
+        let paused_id = ids[1];
+
+        // Pause the middle job immediately (still in flight under throttle).
+        let _ = app.pause_transfer(paused_id);
+        assert!(app.transfer(paused_id).unwrap().cancel.is_cancelled());
+
+        // The other two must complete.
+        assert!(
+            wait_status(&app, ids[0], 30_000, |s| matches!(
+                s,
+                JobStatus::Completed { .. }
+            ))
+            .await,
+            "sibling 0 did not complete"
+        );
+        assert!(
+            wait_status(&app, ids[2], 30_000, |s| matches!(
+                s,
+                JobStatus::Completed { .. }
+            ))
+            .await,
+            "sibling 2 did not complete"
+        );
+
+        // The paused job did NOT complete — it is held as Paused.
+        let paused_status = app
+            .job_views()
+            .into_iter()
+            .find(|v| v.id == paused_id)
+            .unwrap()
+            .status;
+        assert!(
+            matches!(paused_status, JobStatus::Paused),
+            "paused job should be Paused, was {paused_status:?}"
+        );
+
+        // Resume it and assert it completes.
+        let _ = app.resume_paused(paused_id).await.unwrap();
+        // resume_transfer preserves the id; the from-scratch fallback would
+        // swap it, so resolve the (possibly new) middle id from order.
+        let resumed_id = app.transfer_ids()[1];
+        assert!(
+            wait_status(&app, resumed_id, 30_000, |s| matches!(
+                s,
+                JobStatus::Completed { .. }
+            ))
+            .await,
+            "resumed job did not complete"
+        );
+
+        // All three destinations exist and match the source size.
+        for name in ["a.bin", "b.bin", "c.bin"] {
+            let meta = std::fs::metadata(td_r.path().join(name)).unwrap();
+            assert_eq!(meta.len(), 24 * 1024 * 1024, "{name} wrong size");
+        }
     }
 
     #[tokio::test]

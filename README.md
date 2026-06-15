@@ -14,8 +14,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) |
-| **Tests** | 224 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Status** | Phase 1 shipped + Feature 031 (visual & interactive parity) + Feature 037 (resume-on-launch + SC-002 binary gate) + Feature 038 (quick-cd popup) + Feature 033 (panel filter prompt) + Feature 039 (tasks/jobs panel) |
+| **Tests** | 244 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
 | **Binary** | 2.04 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -102,8 +102,13 @@ Phase 1 plus Feature 031 are merged — Cargonaut is a runnable dual-pane TUI:
   filter) to narrow the focused pane by glob (`*.rs`) or bare-word substring,
   case-insensitive; empty submit clears, invalid patterns show an inline error
   (Feature 033).
+- **Tasks/jobs panel** (F12) — a modal list of the session's transfers showing
+  each one's source → destination and live state/progress, with per-row
+  cancel (`c`), pause (`p`), and resume (`r`); pause holds a transfer on its
+  checkpoint while the others keep running, and resume picks it up where it left
+  off (Feature 039).
 
-The full per-feature history (Features 001 → 038) lives in
+The full per-feature history (Features 001 → 039) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Quick start

@@ -479,6 +479,170 @@ impl ResumePromptDialog {
     }
 }
 
+// =====================================================================
+// TasksPanelDialog (Feature 039 — F12 tasks/jobs panel)
+// =====================================================================
+
+/// One row of the tasks panel: pre-formatted display strings plus which
+/// per-row actions are eligible. The App builds these from core `JobView`s
+/// before constructing/refreshing the dialog, so the widget stays free of
+/// transfer/core types; the event loop maps a row index back to a job id
+/// via `job_views()` (mirrors how the resume prompt maps index → offer).
+#[derive(Debug, Clone)]
+pub struct JobRow {
+    /// `"<src> → <dst>"`, display-shortened by the caller.
+    pub label: String,
+    /// Human-readable state, e.g. `"Running 62%"`, `"Paused"`, `"Completed ✓"`.
+    pub status_label: String,
+    /// Whether cancel is eligible for this row (rendering hint only).
+    pub can_cancel: bool,
+    /// Whether pause is eligible for this row.
+    pub can_pause: bool,
+    /// Whether resume is eligible for this row.
+    pub can_resume: bool,
+}
+
+/// What the tasks panel asks the event loop to do with the focused row.
+/// The `usize` is the focused row index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TasksAction {
+    /// Cancel the transfer at this row.
+    Cancel(usize),
+    /// Pause the transfer at this row.
+    Pause(usize),
+    /// Resume the transfer at this row.
+    Resume(usize),
+    /// Close the panel.
+    Close,
+}
+
+/// Modal list of transfers with per-row cancel/pause/resume. Modeled on
+/// [`ResumePromptDialog`]; the App refreshes its rows from `job_views()`
+/// each frame so progress updates show live (FR-008).
+#[derive(Debug)]
+pub struct TasksPanelDialog {
+    rows: Vec<JobRow>,
+    state: ListState,
+}
+
+impl TasksPanelDialog {
+    /// Build a panel from row data; selects the first row when non-empty.
+    pub fn new(rows: Vec<JobRow>) -> Self {
+        let mut state = ListState::default();
+        if !rows.is_empty() {
+            state.select(Some(0));
+        }
+        Self { rows, state }
+    }
+
+    /// Replace the rows (live refresh), preserving the selection clamped to
+    /// the new bounds (or `None` when the list becomes empty).
+    pub fn set_rows(&mut self, rows: Vec<JobRow>) {
+        let sel = if rows.is_empty() {
+            None
+        } else {
+            Some(self.state.selected().unwrap_or(0).min(rows.len() - 1))
+        };
+        self.rows = rows;
+        self.state.select(sel);
+    }
+
+    /// Number of rows.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// True when there are no rows.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Index of the focused row, if any.
+    pub fn focused_index(&self) -> Option<usize> {
+        self.state.selected()
+    }
+
+    /// The focused row, if any.
+    pub fn focused(&self) -> Option<&JobRow> {
+        self.state.selected().and_then(|i| self.rows.get(i))
+    }
+
+    /// Drive the panel with a key. Navigation returns `None`; an action key
+    /// returns the action for the focused row; Esc / F12 returns `Close`.
+    /// Eligibility is not enforced here — the App's action method no-ops on
+    /// ineligible jobs (FR-012); `can_*` are rendering hints only.
+    pub fn handle_key(&mut self, code: KeyCode) -> Option<TasksAction> {
+        match code {
+            KeyCode::Esc | KeyCode::F(12) => return Some(TasksAction::Close),
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(cur) = self.state.selected() {
+                    let next = (cur + 1).min(self.rows.len().saturating_sub(1));
+                    self.state.select(Some(next));
+                }
+                return None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(cur) = self.state.selected() {
+                    self.state.select(Some(cur.saturating_sub(1)));
+                }
+                return None;
+            }
+            _ => {}
+        }
+        let focused = self.state.selected()?;
+        match code {
+            KeyCode::Char('c') | KeyCode::Char('C') => Some(TasksAction::Cancel(focused)),
+            KeyCode::Char('p') | KeyCode::Char('P') => Some(TasksAction::Pause(focused)),
+            KeyCode::Char('r') | KeyCode::Char('R') => Some(TasksAction::Resume(focused)),
+            _ => None,
+        }
+    }
+
+    /// Render the modal. Clears its rect first; renders an explicit empty
+    /// state (FR-014) and truncates over-long rows to the panel width.
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title(format!(
+                "Transfers ({}) — [c]ancel [p]ause [r]esume / Esc",
+                self.rows.len()
+            ))
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        if self.rows.is_empty() {
+            Paragraph::new("No transfers")
+                .block(block)
+                .style(theme.dialog_style())
+                .render(area, buf);
+            return;
+        }
+        let width = area.width.saturating_sub(4) as usize;
+        let items: Vec<ListItem<'_>> = self
+            .rows
+            .iter()
+            .map(|r| {
+                let line = format!("{}   {}", r.label, r.status_label);
+                let line = if width > 1 && line.chars().count() > width {
+                    line.chars().take(width - 1).collect::<String>() + "…"
+                } else {
+                    line
+                };
+                ListItem::new(line)
+            })
+            .collect();
+        let list = List::new(items)
+            .block(block)
+            .style(theme.dialog_style())
+            .highlight_style(
+                ratatui::style::Style::default()
+                    .fg(theme.dialog_sel_fg)
+                    .bg(theme.dialog_sel_bg),
+            )
+            .highlight_symbol("▶ ");
+        StatefulWidget::render(list, area, buf, &mut self.state);
+    }
+}
+
 // Re-export of crossterm's KeyCode so callers don't need a second use.
 pub use crossterm::event::KeyCode;
 
@@ -781,5 +945,117 @@ mod tests {
             !rendered2.contains("not a directory"),
             "error should clear on edit"
         );
+    }
+
+    // ---------- TasksPanelDialog (Feature 039) ----------
+
+    fn job_row(label: &str, status: &str) -> JobRow {
+        JobRow {
+            label: label.into(),
+            status_label: status.into(),
+            can_cancel: true,
+            can_pause: true,
+            can_resume: false,
+        }
+    }
+
+    fn render_to_string(d: &mut TasksPanelDialog, w: u16, h: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &Theme::default()))
+            .unwrap();
+        term.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn tasks_panel_new_selects_first_row() {
+        let d = TasksPanelDialog::new(vec![
+            job_row("a → x", "Running 10%"),
+            job_row("b → y", "Queued"),
+        ]);
+        assert_eq!(d.focused_index(), Some(0));
+        assert_eq!(d.len(), 2);
+        assert!(!d.is_empty());
+    }
+
+    #[test]
+    fn tasks_panel_navigation_moves_and_clamps() {
+        let mut d = TasksPanelDialog::new(vec![job_row("a", "Running"), job_row("b", "Running")]);
+        assert_eq!(d.handle_key(KeyCode::Up), None); // clamp at top
+        assert_eq!(d.focused_index(), Some(0));
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.focused_index(), Some(1));
+        assert_eq!(d.handle_key(KeyCode::Char('j')), None); // clamp at bottom
+        assert_eq!(d.focused_index(), Some(1));
+        assert_eq!(d.handle_key(KeyCode::Char('k')), None);
+        assert_eq!(d.focused_index(), Some(0));
+    }
+
+    #[test]
+    fn tasks_panel_action_keys_return_actions_for_focused_row() {
+        let mut d = TasksPanelDialog::new(vec![job_row("a", "Running"), job_row("b", "Paused")]);
+        d.handle_key(KeyCode::Down); // focus index 1
+        assert_eq!(
+            d.handle_key(KeyCode::Char('c')),
+            Some(TasksAction::Cancel(1))
+        );
+        assert_eq!(
+            d.handle_key(KeyCode::Char('p')),
+            Some(TasksAction::Pause(1))
+        );
+        assert_eq!(
+            d.handle_key(KeyCode::Char('r')),
+            Some(TasksAction::Resume(1))
+        );
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
+    }
+
+    #[test]
+    fn tasks_panel_renders_one_line_per_row_with_status() {
+        let mut d = TasksPanelDialog::new(vec![
+            job_row("alpha → dst", "Running 62%"),
+            job_row("beta → dst", "Paused"),
+        ]);
+        let s = render_to_string(&mut d, 60, 8);
+        assert!(s.contains("alpha"));
+        assert!(s.contains("Running 62%"));
+        assert!(s.contains("Paused"));
+    }
+
+    #[test]
+    fn tasks_panel_renders_empty_state() {
+        let mut d = TasksPanelDialog::new(vec![]);
+        assert!(d.is_empty());
+        assert_eq!(d.focused_index(), None);
+        let s = render_to_string(&mut d, 60, 8);
+        assert!(s.contains("No transfers"), "empty state missing: {s:?}");
+    }
+
+    #[test]
+    fn tasks_panel_set_rows_clamps_selection() {
+        let mut d = TasksPanelDialog::new(vec![
+            job_row("a", "Running"),
+            job_row("b", "Running"),
+            job_row("c", "Running"),
+        ]);
+        d.handle_key(KeyCode::Down);
+        d.handle_key(KeyCode::Down); // focus index 2
+        assert_eq!(d.focused_index(), Some(2));
+        d.set_rows(vec![job_row("a", "Running")]); // shrink to 1
+        assert_eq!(d.focused_index(), Some(0), "selection must clamp in-bounds");
+        d.set_rows(vec![]); // empty
+        assert_eq!(d.focused_index(), None);
+    }
+
+    #[test]
+    fn tasks_panel_keys_inert_when_empty_except_close() {
+        let mut d = TasksPanelDialog::new(vec![]);
+        assert_eq!(d.handle_key(KeyCode::Char('c')), None);
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
     }
 }
