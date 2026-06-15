@@ -173,21 +173,21 @@ default section.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T022 [US1] (red) In `crates/cargonaut-core/src/lib.rs`, add a failing
+- [X] T022 [US1] (red) In `crates/cargonaut-core/src/lib.rs`, add a failing
   `#[tokio::test]` for FR-008/SC-004: `jump_to_bookmark` to a removed/missing
   directory returns an error/status, leaves both panes unchanged, and keeps the
   bookmark in `bookmarks()`.
-- [ ] T023 [US1] (green) Confirm `jump_to_bookmark` surfaces the `quick_cd`
+- [X] T023 [US1] (green) Confirm `jump_to_bookmark` surfaces the `quick_cd`
   resolution error without mutating panes or the hotlist; make T022 pass (likely
   no new code beyond T007 — lock it with the test).
-- [ ] T024 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs` (or `lib.rs`),
+- [X] T024 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs` (or `lib.rs`),
   add a failing test that opening the hotlist with **zero** bookmarks renders a
   clear empty-state row (FR-010/SC-006).
-- [ ] T025 [POLISH] (green) Render an empty-state row when there are no
+- [X] T025 [POLISH] (green) Render an empty-state row when there are no
   bookmarks. Make T024 pass.
-- [ ] T026 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+- [X] T026 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
   failing test that the F1 help text contains "Ctrl-b" and "bookmark".
-- [ ] T027 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document
+- [X] T027 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document
   `Ctrl-b` (open hotlist) + the in-popup add/remove keys. Make T026 pass.
 - [ ] T028 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate). Then `XDG_STATE_HOME=$(mktemp -d) cargo run -p cargonaut-bin`

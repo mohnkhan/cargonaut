@@ -846,6 +846,24 @@ mod tests {
     }
 
     #[test]
+    fn hotlist_empty_renders_empty_state() {
+        let mut d = HotlistDialog::new(vec![]);
+        assert!(d.is_empty());
+        let backend = TestBackend::new(50, 6);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &theme)).unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(s.contains("No bookmarks"), "empty-state text missing: {s}");
+    }
+
+    #[test]
     fn hotlist_remove_key_returns_remove() {
         let mut d = HotlistDialog::new(vec![hl_entry("a", 0), hl_entry("b", 1)]);
         d.handle_key(KeyCode::Down);

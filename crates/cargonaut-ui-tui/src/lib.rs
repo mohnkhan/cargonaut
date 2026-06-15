@@ -1507,6 +1507,7 @@ Cargonaut — quick help\n\
   F3 View*  F4 Edit*   (* not yet available)\n\
   Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
   M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
+  C-b: directory hotlist (bookmarks) — [a]dd · [d]el · Enter jumps\n\
 \n\
   Press any key to close.";
 
@@ -1644,6 +1645,16 @@ mod tests {
         assert!(
             s.contains("1000"),
             "teardown must emit the mouse-disable sequence; got: {s:?}"
+        );
+    }
+
+    // Feature 042: help documents the Ctrl-b hotlist + in-popup add/remove.
+    #[test]
+    fn help_documents_hotlist() {
+        assert!(HELP_BODY.contains("C-b"), "help must mention the hotlist key");
+        assert!(
+            HELP_BODY.to_lowercase().contains("bookmark"),
+            "help must mention bookmarks"
         );
     }
 

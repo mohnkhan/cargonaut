@@ -1790,6 +1790,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn jump_to_missing_target_is_graceful_and_retains_bookmark(/* FR-008/SC-004 */) {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let before = app.active_pane_state().cwd.clone();
+        app.hotlist.add(cargonaut_config::Bookmark {
+            name: "gone".into(),
+            path: "file:///no/such/cargonaut/dir/xyz".into(),
+            group: None,
+        });
+        let res = app.jump_to_bookmark(0).await;
+        assert!(res.is_err(), "jumping to a missing dir must error");
+        // panes unchanged, bookmark retained.
+        assert_eq!(app.active_pane_state().cwd, before);
+        assert_eq!(app.bookmarks().len(), 1);
+    }
+
+    #[tokio::test]
     async fn jump_to_bookmark_navigates_active_pane() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
