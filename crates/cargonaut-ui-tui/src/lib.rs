@@ -1427,6 +1427,33 @@ mod tests {
         assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
     }
 
+    // Feature 041 US2 (FR-005): the persistent indicator renders right-aligned
+    // in the menu-bar row for each capture state.
+    #[test]
+    fn mouse_indicator_renders_in_menu_row() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let theme = Theme::default();
+        let render = |supported: bool, captured: bool| -> String {
+            let backend = TestBackend::new(40, 1);
+            let mut term = Terminal::new(backend).unwrap();
+            term.draw(|f| {
+                let row = f.size();
+                render_mouse_indicator(f.buffer_mut(), row, &theme, supported, captured);
+            })
+            .unwrap();
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                .collect()
+        };
+        assert!(render(true, true).contains("[mouse:on]"), "captured");
+        assert!(render(true, false).contains("[mouse:susp]"), "suspended");
+        assert!(render(false, false).contains("[mouse:off]"), "disabled");
+    }
+
     // Feature 041 US1 (FR-002/003): dispatching the toggle flips capture and
     // sets the transient status both ways.
     #[tokio::test]
