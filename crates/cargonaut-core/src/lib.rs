@@ -432,6 +432,10 @@ pub enum AppError {
     /// A filter pattern failed to compile as a glob (FR-006).
     #[error("bad filter: {0}")]
     BadFilter(String),
+
+    /// A bookmark could not be created (e.g. blank name) — Feature 042.
+    #[error("bad bookmark: {0}")]
+    BadBookmark(String),
 }
 
 // =====================================================================
@@ -459,6 +463,12 @@ pub struct App {
     status: String,
     split: SplitOrient,
     view_mode: ViewMode,
+    /// Feature 042 — the directory hotlist, loaded at construction and
+    /// persisted to `hotlist_path` on every add/remove.
+    hotlist: cargonaut_config::Hotlist,
+    /// Feature 042 — where the hotlist is persisted (resolved at construction;
+    /// overridable in tests).
+    hotlist_path: std::path::PathBuf,
 }
 
 impl App {
@@ -504,6 +514,11 @@ impl App {
             },
         ];
 
+        // Feature 042 — load the persisted hotlist (best-effort: a missing or
+        // malformed state file degrades to an empty list, never blocks launch).
+        let hotlist_path = cargonaut_config::default_hotlist_path();
+        let hotlist = cargonaut_config::Hotlist::load(&hotlist_path);
+
         Ok(Self {
             config,
             panes,
@@ -516,6 +531,8 @@ impl App {
             status: String::new(),
             split: SplitOrient::Horizontal,
             view_mode: ViewMode::Full,
+            hotlist,
+            hotlist_path,
         })
     }
 
@@ -1311,6 +1328,70 @@ impl App {
         let target = self.resolve_cd_target(trimmed)?;
         let id = self.active;
         self.navigate_to(id, target).await
+    }
+
+    // ===== Feature 042: directory hotlist / bookmarks =====
+
+    /// Read-only view of the saved bookmarks (UI snapshot source).
+    pub fn bookmarks(&self) -> &[cargonaut_config::Bookmark] {
+        &self.hotlist.bookmarks
+    }
+
+    /// Add the **active pane's current directory** as a new bookmark under
+    /// `name` (and optional `group`), then persist. A blank name is rejected
+    /// ([`AppError::BadBookmark`], FR-011) and nothing is saved. Duplicate
+    /// names are allowed to coexist.
+    pub fn add_bookmark(
+        &mut self,
+        name: &str,
+        group: Option<&str>,
+    ) -> Result<Vec<Event>, AppError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::BadBookmark("name must not be blank".into()));
+        }
+        let path = self.active_pane_state().cwd.display();
+        self.hotlist.add(cargonaut_config::Bookmark {
+            name: name.to_string(),
+            path,
+            group: group.map(|g| g.trim().to_string()).filter(|g| !g.is_empty()),
+        });
+        self.persist_hotlist();
+        Ok(vec![Event::Status(format!("Bookmarked: {name}"))])
+    }
+
+    /// Remove the bookmark at `index` and persist. Out-of-range ⇒
+    /// [`AppError::BadBookmark`] with no change.
+    pub fn remove_bookmark(&mut self, index: usize) -> Result<Vec<Event>, AppError> {
+        if index >= self.hotlist.bookmarks.len() {
+            return Err(AppError::BadBookmark(format!("no bookmark at index {index}")));
+        }
+        let removed = self.hotlist.bookmarks[index].name.clone();
+        self.hotlist.remove(index);
+        self.persist_hotlist();
+        Ok(vec![Event::Status(format!("Removed bookmark: {removed}"))])
+    }
+
+    /// Navigate the active pane to the bookmark at `index`, reusing
+    /// [`Self::quick_cd`] (so a missing/invalid target is reported without
+    /// mutating pane state — FR-008 — and directory history is recorded).
+    /// Out-of-range ⇒ [`AppError::BadBookmark`].
+    pub async fn jump_to_bookmark(&mut self, index: usize) -> Result<Vec<Event>, AppError> {
+        let path = self
+            .hotlist
+            .bookmarks
+            .get(index)
+            .ok_or_else(|| AppError::BadBookmark(format!("no bookmark at index {index}")))?
+            .path
+            .clone();
+        self.quick_cd(&path).await
+    }
+
+    /// Best-effort persist of the hotlist; a write failure is logged, not fatal.
+    fn persist_hotlist(&self) {
+        if let Err(e) = self.hotlist.save(&self.hotlist_path) {
+            tracing::warn!("could not save hotlist to {:?}: {e}", self.hotlist_path);
+        }
     }
 
     /// Feature 033 (FR-003/004/005/006/009): set or clear the active pane's

@@ -79,7 +79,7 @@ pane is at the bookmarked dir.
   (FR-011); adding two bookmarks with the **same name** ⇒ both coexist (FR-011
   duplicate-name default); `jump_to_bookmark(i)` to a valid dir navigates the
   active pane (contract §2).
-- [ ] T007 [US1] (green) Add `hotlist: Hotlist` + `hotlist_path: PathBuf` fields
+- [X] T007 [US1] (green) Add `hotlist: Hotlist` + `hotlist_path: PathBuf` fields
   to `App`; load in `App::new` via `default_hotlist_path()` (best-effort).
   Implement `bookmarks()`, `add_bookmark(name, group)` (build from active pane
   cwd, push, `save`, status), and `jump_to_bookmark(index)` (reuse
