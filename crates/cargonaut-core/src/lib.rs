@@ -2236,20 +2236,140 @@ mod tests {
         assert_eq!(app.pane(PaneId::Right).cwd, right_before);
     }
 
+    // =================================================================
+    // Feature 039 — tasks/jobs panel: job_views projection + per-row
+    // pause/resume/cancel actions.
+    // =================================================================
+
+    /// Submit one throttled copy of `name` (sized `bytes`) from the left
+    /// pane to the right pane via the App, returning its id. The throttle
+    /// keeps the copy in flight long enough for deterministic pause/cancel
+    /// assertions.
+    async fn submit_one_copy(app: &mut App, td_l: &TempDir, name: &str, bytes: usize) -> TransferId {
+        std::env::set_var("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "8");
+        fs::write(td_l.path().join(name), vec![0u8; bytes])
+            .await
+            .unwrap();
+        // Re-list the left pane so the new file is visible, then select it.
+        app.refresh_active_pane().await.unwrap();
+        app.dispatch(Command::SelectByPattern(name.to_string()))
+            .await
+            .unwrap();
+        app.confirm_copy().await.unwrap();
+        app.dispatch(Command::UnselectByPattern(name.to_string()))
+            .await
+            .unwrap();
+        *app.transfer_ids().last().unwrap()
+    }
+
     #[tokio::test]
-    async fn show_tasks_panel_emits_status_with_transfer_count() {
+    async fn show_tasks_panel_dispatch_is_noop() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
+        // The TUI intercepts ShowTasksPanel to open the modal; the core
+        // dispatch arm is a no-op (like QuickCdPopup).
         let events = app.dispatch(Command::ShowTasksPanel).await.unwrap();
-        let has_status = events.iter().any(|e| match e {
-            Event::Status(s) => s.contains("0 active"),
-            _ => false,
-        });
-        assert!(
-            has_status,
-            "expected '0 active transfer' status, got {events:?}"
-        );
+        assert!(events.is_empty(), "expected no events, got {events:?}");
+    }
+
+    #[tokio::test]
+    async fn job_views_empty_when_no_transfers() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        assert!(app.job_views().is_empty());
+    }
+
+    #[tokio::test]
+    async fn job_views_lists_transfers_in_submit_order() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id_a = submit_one_copy(&mut app, &td_l, "a.bin", 16 * 1024 * 1024).await;
+        let id_b = submit_one_copy(&mut app, &td_l, "b.bin", 16 * 1024 * 1024).await;
+        let views = app.job_views();
+        assert_eq!(views.len(), 2);
+        assert_eq!(views[0].id, id_a);
+        assert_eq!(views[1].id, id_b);
+        assert!(views[0].src.contains("a.bin"));
+        assert!(views[0].dst.contains("a.bin"));
+        // A fresh, throttled copy is queued or running — never terminal yet.
+        assert!(matches!(
+            views[0].status,
+            JobStatus::Running { .. } | JobStatus::Queued
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancel_transfer_signals_only_that_job() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id_a = submit_one_copy(&mut app, &td_l, "a.bin", 16 * 1024 * 1024).await;
+        let id_b = submit_one_copy(&mut app, &td_l, "b.bin", 16 * 1024 * 1024).await;
+        let events = app.cancel_transfer(id_a);
+        assert!(events.iter().any(|e| matches!(e, Event::Status(_))));
+        assert!(app.transfer(id_a).unwrap().cancel.is_cancelled());
+        assert!(!app.transfer(id_b).unwrap().cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_transfer_unknown_id_is_safe_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let bogus = TransferId(uuid::Uuid::nil());
+        let _ = app.cancel_transfer(bogus); // must not panic
+        assert!(app.job_views().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pause_transfer_marks_paused_and_cancels_token() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id = submit_one_copy(&mut app, &td_l, "big.bin", 32 * 1024 * 1024).await;
+        let _ = app.pause_transfer(id);
+        // Token is signalled so the running task stops (leaving its checkpoint).
+        assert!(app.transfer(id).unwrap().cancel.is_cancelled());
+        // The throttled copy is still mid-flight, so it classifies as Paused.
+        let v = app.job_views();
+        assert!(matches!(v[0].status, JobStatus::Paused));
+    }
+
+    #[tokio::test]
+    async fn pause_transfer_unknown_id_is_safe_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let bogus = TransferId(uuid::Uuid::nil());
+        let events = app.pause_transfer(bogus);
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resume_paused_noop_when_not_paused() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id = submit_one_copy(&mut app, &td_l, "a.bin", 16 * 1024 * 1024).await;
+        // Never paused → resume is a no-op (no events).
+        let events = app.resume_paused(id).await.unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancel_transfer_clears_paused_marker() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let id = submit_one_copy(&mut app, &td_l, "big.bin", 32 * 1024 * 1024).await;
+        let _ = app.pause_transfer(id);
+        assert!(matches!(app.job_views()[0].status, JobStatus::Paused));
+        let _ = app.cancel_transfer(id);
+        // After cancel, the job must render as Cancelled, not Paused.
+        assert!(matches!(app.job_views()[0].status, JobStatus::Cancelled));
     }
 
     #[tokio::test]
