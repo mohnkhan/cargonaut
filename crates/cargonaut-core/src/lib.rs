@@ -1626,6 +1626,65 @@ mod tests {
         .unwrap()
     }
 
+    // ===== Feature 042: directory hotlist / bookmarks =====
+
+    #[tokio::test]
+    async fn add_bookmark_uses_active_cwd_and_persists() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let hl_file = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.hotlist_path = hl_file.path().join("hotlist.toml");
+
+        app.add_bookmark("proj", Some("work")).unwrap();
+        assert_eq!(app.bookmarks().len(), 1);
+        assert_eq!(app.bookmarks()[0].name, "proj");
+        assert_eq!(app.bookmarks()[0].group.as_deref(), Some("work"));
+        // path is the active (left) pane's cwd.
+        assert!(app.bookmarks()[0].path.contains(td_l.path().to_str().unwrap()));
+        // persisted to disk.
+        let on_disk = std::fs::read_to_string(&app.hotlist_path).unwrap();
+        assert!(on_disk.contains("proj"), "file: {on_disk}");
+    }
+
+    #[tokio::test]
+    async fn add_bookmark_rejects_blank_name() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let res = app.add_bookmark("   ", None);
+        assert!(matches!(res, Err(AppError::BadBookmark(_))));
+        assert_eq!(app.bookmarks().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn add_bookmark_allows_duplicate_names() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let hl_file = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.hotlist_path = hl_file.path().join("hotlist.toml");
+        app.add_bookmark("dup", None).unwrap();
+        app.add_bookmark("dup", None).unwrap();
+        assert_eq!(app.bookmarks().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn jump_to_bookmark_navigates_active_pane() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let sub = td_l.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.hotlist.add(cargonaut_config::Bookmark {
+            name: "s".into(),
+            path: format!("file://{}", sub.to_str().unwrap()),
+            group: None,
+        });
+        app.jump_to_bookmark(0).await.unwrap();
+        assert!(app.active_pane_state().cwd.display().ends_with("sub"));
+    }
+
     #[tokio::test]
     async fn new_loads_both_pane_listings() {
         let td_l = TempDir::new().unwrap();
