@@ -564,6 +564,114 @@ pub enum ConfigError {
 }
 
 // =====================================================================
+// Directory hotlist / bookmarks (Feature 042, issue #42)
+// =====================================================================
+
+/// A named shortcut to a directory. `path` is a path/URI string in the same
+/// form [`crate`]-consuming navigation accepts; `group` is an optional
+/// single-level category (`None` ⇒ shown in the default/ungrouped section).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bookmark {
+    /// User-visible label (non-empty).
+    pub name: String,
+    /// Target directory (path or `file://` URI).
+    pub path: String,
+    /// Optional group/category label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+/// The user's directory hotlist: an ordered collection of [`Bookmark`]s,
+/// persisted as a TOML state file (see [`default_hotlist_path`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hotlist {
+    /// Bookmarks in insertion order. Serialized as `[[bookmark]]` tables.
+    #[serde(default, rename = "bookmark")]
+    pub bookmarks: Vec<Bookmark>,
+}
+
+impl Hotlist {
+    /// Load the hotlist from `path`. **Never errors**: a missing, unreadable,
+    /// or malformed file yields an empty hotlist (FR-007/FR-013) — a corrupt
+    /// state file must never block launch.
+    pub fn load(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(text) => toml::from_str(&text).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Persist the hotlist to `path` as TOML, creating parent directories as
+    /// needed. Whole-file rewrite (last-write-wins).
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let text = toml::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, text)
+    }
+
+    /// Append a bookmark.
+    pub fn add(&mut self, bookmark: Bookmark) {
+        self.bookmarks.push(bookmark);
+    }
+
+    /// Remove the bookmark at `index`. Out-of-range is a silent no-op.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.bookmarks.len() {
+            self.bookmarks.remove(index);
+        }
+    }
+
+    /// Display projection: bookmarks bucketed by group, each entry carrying its
+    /// original index (so the popup can map a selection back to a bookmark).
+    /// Groups appear in first-seen order; the ungrouped (`None`) section, if
+    /// any, is placed last. (FR-014 / SC-007.)
+    pub fn grouped(&self) -> Vec<(Option<&str>, Vec<(usize, &Bookmark)>)> {
+        let mut order: Vec<Option<&str>> = Vec::new();
+        let mut buckets: Vec<(Option<&str>, Vec<(usize, &Bookmark)>)> = Vec::new();
+        for (i, b) in self.bookmarks.iter().enumerate() {
+            let key = b.group.as_deref();
+            let pos = match order.iter().position(|k| *k == key) {
+                Some(p) => p,
+                None => {
+                    order.push(key);
+                    buckets.push((key, Vec::new()));
+                    buckets.len() - 1
+                }
+            };
+            buckets[pos].1.push((i, b));
+        }
+        // Ungrouped section last.
+        buckets.sort_by_key(|(k, _)| k.is_none());
+        buckets
+    }
+}
+
+/// Resolve the default hotlist state-file path. Honors `$XDG_STATE_HOME`, falls
+/// back to `$HOME/.local/state/cargonaut/hotlist.toml`; if neither is set,
+/// returns a relative path (no panic). Mirrors [`default_config_path`] but uses
+/// the XDG **state** dir (the hotlist is machine-written state, not config).
+pub fn default_hotlist_path() -> std::path::PathBuf {
+    hotlist_path_from(
+        std::env::var("XDG_STATE_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+/// Pure resolver behind [`default_hotlist_path`] (env values injected for tests).
+fn hotlist_path_from(xdg_state: Option<&str>, home: Option<&str>) -> std::path::PathBuf {
+    if let Some(xdg) = xdg_state {
+        std::path::PathBuf::from(xdg).join("cargonaut/hotlist.toml")
+    } else if let Some(home) = home {
+        std::path::PathBuf::from(home).join(".local/state/cargonaut/hotlist.toml")
+    } else {
+        std::path::PathBuf::from(".local/state/cargonaut/hotlist.toml")
+    }
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 

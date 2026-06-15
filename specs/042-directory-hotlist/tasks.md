@@ -31,7 +31,7 @@ config-crate persistence round-trip is the gating SC-002/SC-005 test.
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
+- [X] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
   baseline builds + tests (`make build && make test`). Verify no `Cargo.toml`
   changes are needed (no new dependencies).
 
@@ -44,21 +44,21 @@ every user story builds on. This is also the SC-002/SC-005 persistence gate.
 
 **⚠️ No user-story phase can start until this is complete.**
 
-- [ ] T002 [P] [FOUND] (red) In `crates/cargonaut-config/src/lib.rs`, add failing
+- [X] T002 [P] [FOUND] (red) In `crates/cargonaut-config/src/lib.rs`, add failing
   tests for `Bookmark`/`Hotlist`: TOML round-trip (`save`→`load` equal, incl.
   `group`), absent-file `load` ⇒ empty, malformed-file `load` ⇒ empty (no
   panic), `save` creates missing parent dirs, and `default_hotlist_path()`
   honors `$XDG_STATE_HOME` else `~/.local/state/cargonaut/hotlist.toml`
   (contract §1). Use `tempfile` + scoped env for the path test.
-- [ ] T003 [FOUND] (green) Implement `Bookmark { name, path, group: Option<String> }`,
+- [X] T003 [FOUND] (green) Implement `Bookmark { name, path, group: Option<String> }`,
   `Hotlist { bookmarks: Vec<Bookmark> }` (serde, `#[serde(rename = "bookmark")]`
   array-of-tables), `default_hotlist_path()` (mirror `default_config_path()`),
   and `Hotlist::load`(never-errors)/`save`/`add`/`remove`. Make T002 pass.
   `#![warn(missing_docs)]` clean.
-- [ ] T004 [P] [FOUND] (red) In `crates/cargonaut-config/src/lib.rs`, add a
+- [X] T004 [P] [FOUND] (red) In `crates/cargonaut-config/src/lib.rs`, add a
   failing test for `Hotlist::grouped()` — buckets by group, ungrouped in a
   default section, original indices preserved (contract §1 / SC-007).
-- [ ] T005 [FOUND] (green) Implement `Hotlist::grouped()`. Make T004 pass.
+- [X] T005 [FOUND] (green) Implement `Hotlist::grouped()`. Make T004 pass.
 
 **Checkpoint**: hotlist data + persistence are solid and gated, independent of UI.
 
