@@ -1406,6 +1406,54 @@ mod tests {
         assert!(MouseToggleOutcome::SuspendedNow.status().contains("Shift"));
     }
 
+    // Feature 041 US1 (FR-002/003): dispatching the toggle flips capture and
+    // sets the transient status both ways.
+    #[tokio::test]
+    async fn toggle_mouse_capture_suspends_then_resumes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await; // config.ui.mouse defaults true
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true); // capture currently on
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(!ui.mouse_enabled, "first toggle suspends capture");
+        assert!(status.contains("suspended"), "status was: {status}");
+
+        dispatch_ui_command(
+            Command::ToggleMouseCapture,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(ui.mouse_enabled, "second toggle resumes capture");
+        assert_eq!(status, "Mouse capture: on");
+    }
+
     // Feature 033: drive one key through the real `handle_key` path.
     async fn feed_key(
         code: crossterm::event::KeyCode,
