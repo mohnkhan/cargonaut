@@ -141,23 +141,23 @@ no capture; indicator stays `[mouse:off]`.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T014 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+- [X] T014 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
   failing test asserting the help-overlay text contains both `M-m` and `Shift`
   (FR-010 / SC-006).
-- [ ] T015 [POLISH] (green) Update the help-overlay mouse line in
+- [X] T015 [POLISH] (green) Update the help-overlay mouse line in
   `crates/cargonaut-ui-tui/src/lib.rs` (the existing `Mouse: …` text, ~lib.rs:1256)
   to document the `M-m` toggle and the Shift-drag native-selection bypass. Make
   T014 pass.
-- [ ] T016 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+- [X] T016 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
   regression test for FR-007: simulate a suspended state (`mouse_enabled=false`)
   and assert the value passed to `run_external` is `false` (i.e. external
   suspend/restore preserves the *current* toggle, not the launch value). If a
   direct test is impractical, assert via a small helper that reads
   `ui.mouse_enabled` at the call site; document the manual quickstart step 5.
-- [ ] T017 [POLISH] (green) Verify/adjust the `run_external(_, _, ui.mouse_enabled)`
+- [X] T017 [POLISH] (green) Verify/adjust the `run_external(_, _, ui.mouse_enabled)`
   call site so FR-007 holds; make T016 pass (likely no code change — confirm and
   lock with the test).
-- [ ] T0XA [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+- [X] T0XA [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
   failing test for FR-008 / SC-005 (clean exit releases capture). Factor the
   teardown into a small testable helper (e.g. `fn teardown_terminal(out)` that
   unconditionally issues `DisableMouseCapture` + `disable_raw_mode` +
@@ -166,11 +166,11 @@ no capture; indicator stays `[mouse:off]`.
   writer capturing the control bytes, or by asserting the helper is called on
   both Ok and Err loop-exit paths). This is the constitution §II CI gate for
   SC-005.
-- [ ] T0XB [POLISH] (green) Extract the teardown block in `run()`
+- [X] T0XB [POLISH] (green) Extract the teardown block in `run()`
   (`crates/cargonaut-ui-tui/src/lib.rs:72-76`) into the helper from T0XA and call
   it on every exit path; make T0XA pass. Behavior unchanged (teardown is already
   unconditional) — this only adds the testable seam + gate.
-- [ ] T0XC [POLISH] FR-011 (graceful degradation): confirm the
+- [X] T0XC [POLISH] FR-011 (graceful degradation): confirm the
   `Command::ToggleMouseCapture` arm tolerates terminals that ignore mouse
   capture. Terminals without mouse support silently accept/ignore the control
   sequence (no error), matching the existing `run()` startup behavior. Document

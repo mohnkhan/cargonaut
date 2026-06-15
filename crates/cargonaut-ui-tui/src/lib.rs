@@ -69,13 +69,22 @@ pub async fn run(app: &mut App) -> Result<(), Error> {
 
     let result = run_loop(&mut term, app, mouse_enabled).await;
 
-    // Teardown — always best-effort, even on error from the loop.
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    // Teardown — always best-effort, even on error from the loop. Mouse
+    // capture is released unconditionally regardless of the runtime toggle
+    // state (Feature 041 FR-008 / SC-005).
+    let _ = restore_terminal_modes(&mut std::io::stdout());
     let _ = disable_raw_mode();
-    let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
     let _ = term.show_cursor();
 
     result
+}
+
+/// Write the terminal-restore control sequences — release mouse capture, then
+/// leave the alternate screen — to `out`. Always emits `DisableMouseCapture`
+/// so a session that exits while capture is active still leaves the terminal
+/// clean (Feature 041 FR-008 / SC-005), independent of the runtime toggle.
+fn restore_terminal_modes<W: std::io::Write>(out: &mut W) -> std::io::Result<()> {
+    execute!(out, DisableMouseCapture, LeaveAlternateScreen)
 }
 
 /// On-screen rectangles for the most recent frame, used for mouse
