@@ -1638,4 +1638,120 @@ mod tests {
         assert!(!rect_contains(r, 10, 8)); // y past bottom edge
         assert!(!rect_contains(r, 9, 5));
     }
+
+    // ---------- Feature 039: tasks/jobs panel wiring ----------
+
+    /// Submit one throttled copy through the App so a transfer is registered
+    /// and still in flight for panel-action assertions.
+    async fn submit_running_copy(app: &mut App, td_l: &TempDir, name: &str) {
+        std::env::set_var("CARGONAUT_TRANSFER_THROTTLE_MIBPS", "8");
+        std::fs::write(td_l.path().join(name), vec![0u8; 24 * 1024 * 1024]).unwrap();
+        app.refresh_active_pane().await.unwrap();
+        app.dispatch(AppCommand::SelectByPattern(name.into()))
+            .await
+            .unwrap();
+        app.confirm_copy().await.unwrap();
+        app.dispatch(AppCommand::UnselectByPattern(name.into()))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn show_tasks_panel_opens_and_close_is_inert() {
+        use crossterm::event::KeyCode;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        let left_before = app.pane(PaneId::Left).cwd.clone();
+        let right_before = app.pane(PaneId::Right).cwd.clone();
+
+        dispatch_ui_command(
+            Command::ShowTasksPanel,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
+        assert!(matches!(mode, Mode::Dialog));
+
+        // Esc closes; SC-005: panes unchanged on close.
+        feed_key(KeyCode::Esc, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(dlg.is_none());
+        assert!(matches!(mode, Mode::Pane));
+        assert_eq!(app.pane(PaneId::Left).cwd, left_before);
+        assert_eq!(app.pane(PaneId::Right).cwd, right_before);
+    }
+
+    #[tokio::test]
+    async fn tasks_panel_cancel_key_cancels_focused_job() {
+        use crossterm::event::KeyCode;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        submit_running_copy(&mut app, &td_l, "a.bin").await;
+        let id = app.transfer_ids()[0];
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ShowTasksPanel, &mut app, &mut mode, &mut dlg, &mut status, &mut quit, &mut ui,
+        )
+        .await
+        .unwrap();
+        feed_key(KeyCode::Char('c'), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(app.transfer(id).unwrap().cancel.is_cancelled());
+        // Panel stays open after an action.
+        assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
+    }
+
+    #[tokio::test]
+    async fn tasks_panel_pause_then_resume_keys() {
+        use crossterm::event::KeyCode;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        submit_running_copy(&mut app, &td_l, "a.bin").await;
+        let id = app.transfer_ids()[0];
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ShowTasksPanel, &mut app, &mut mode, &mut dlg, &mut status, &mut quit, &mut ui,
+        )
+        .await
+        .unwrap();
+        feed_key(KeyCode::Char('p'), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(app.transfer(id).unwrap().cancel.is_cancelled());
+        assert!(matches!(
+            app.job_views()[0].status,
+            cargonaut_core::JobStatus::Paused
+        ));
+        // Resume the paused job; panel stays open and the action is handled.
+        feed_key(KeyCode::Char('r'), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
+        assert!(!app.job_views().is_empty());
+    }
 }

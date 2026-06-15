@@ -782,4 +782,107 @@ mod tests {
             "error should clear on edit"
         );
     }
+
+    // ---------- TasksPanelDialog (Feature 039) ----------
+
+    fn job_row(label: &str, status: &str) -> JobRow {
+        JobRow {
+            label: label.into(),
+            status_label: status.into(),
+            can_cancel: true,
+            can_pause: true,
+            can_resume: false,
+        }
+    }
+
+    fn render_to_string(d: &mut TasksPanelDialog, w: u16, h: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| d.render(f.size(), f.buffer_mut(), &Theme::default()))
+            .unwrap();
+        term.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn tasks_panel_new_selects_first_row() {
+        let d = TasksPanelDialog::new(vec![job_row("a → x", "Running 10%"), job_row("b → y", "Queued")]);
+        assert_eq!(d.focused_index(), Some(0));
+        assert_eq!(d.len(), 2);
+        assert!(!d.is_empty());
+    }
+
+    #[test]
+    fn tasks_panel_navigation_moves_and_clamps() {
+        let mut d = TasksPanelDialog::new(vec![
+            job_row("a", "Running"),
+            job_row("b", "Running"),
+        ]);
+        assert_eq!(d.handle_key(KeyCode::Up), None); // clamp at top
+        assert_eq!(d.focused_index(), Some(0));
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.focused_index(), Some(1));
+        assert_eq!(d.handle_key(KeyCode::Char('j')), None); // clamp at bottom
+        assert_eq!(d.focused_index(), Some(1));
+        assert_eq!(d.handle_key(KeyCode::Char('k')), None);
+        assert_eq!(d.focused_index(), Some(0));
+    }
+
+    #[test]
+    fn tasks_panel_action_keys_return_actions_for_focused_row() {
+        let mut d = TasksPanelDialog::new(vec![job_row("a", "Running"), job_row("b", "Paused")]);
+        d.handle_key(KeyCode::Down); // focus index 1
+        assert_eq!(d.handle_key(KeyCode::Char('c')), Some(TasksAction::Cancel(1)));
+        assert_eq!(d.handle_key(KeyCode::Char('p')), Some(TasksAction::Pause(1)));
+        assert_eq!(d.handle_key(KeyCode::Char('r')), Some(TasksAction::Resume(1)));
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
+    }
+
+    #[test]
+    fn tasks_panel_renders_one_line_per_row_with_status() {
+        let mut d = TasksPanelDialog::new(vec![
+            job_row("alpha → dst", "Running 62%"),
+            job_row("beta → dst", "Paused"),
+        ]);
+        let s = render_to_string(&mut d, 60, 8);
+        assert!(s.contains("alpha"));
+        assert!(s.contains("Running 62%"));
+        assert!(s.contains("Paused"));
+    }
+
+    #[test]
+    fn tasks_panel_renders_empty_state() {
+        let mut d = TasksPanelDialog::new(vec![]);
+        assert!(d.is_empty());
+        assert_eq!(d.focused_index(), None);
+        let s = render_to_string(&mut d, 60, 8);
+        assert!(s.contains("No transfers"), "empty state missing: {s:?}");
+    }
+
+    #[test]
+    fn tasks_panel_set_rows_clamps_selection() {
+        let mut d = TasksPanelDialog::new(vec![
+            job_row("a", "Running"),
+            job_row("b", "Running"),
+            job_row("c", "Running"),
+        ]);
+        d.handle_key(KeyCode::Down);
+        d.handle_key(KeyCode::Down); // focus index 2
+        assert_eq!(d.focused_index(), Some(2));
+        d.set_rows(vec![job_row("a", "Running")]); // shrink to 1
+        assert_eq!(d.focused_index(), Some(0), "selection must clamp in-bounds");
+        d.set_rows(vec![]); // empty
+        assert_eq!(d.focused_index(), None);
+    }
+
+    #[test]
+    fn tasks_panel_keys_inert_when_empty_except_close() {
+        let mut d = TasksPanelDialog::new(vec![]);
+        assert_eq!(d.handle_key(KeyCode::Char('c')), None);
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
+    }
 }
