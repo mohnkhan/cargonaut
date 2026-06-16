@@ -215,6 +215,10 @@ impl MenuBar {
                     ("Copy", Command::CopySelection),
                     ("Rename/Move", Command::MoveOrRenameSelection),
                     ("Delete", Command::DeleteSelection),
+                    ("Chmod", Command::Chmod),
+                    ("Chown", Command::Chown),
+                    ("Symlink", Command::CreateSymlink),
+                    ("Hardlink", Command::CreateHardLink),
                 ],
             },
             Menu {

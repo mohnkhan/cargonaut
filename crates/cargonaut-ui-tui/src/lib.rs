@@ -159,6 +159,14 @@ enum InputKind {
     UnselectPattern,
     /// Feature 042 — bookmark name prompt; text is `group/name` or `name`.
     AddBookmark,
+    /// Feature 043 — chmod mode prompt (octal or symbolic).
+    Chmod,
+    /// Feature 043 — chown owner prompt (`user`/`:group`/`user:group`).
+    Chown,
+    /// Feature 043 — symlink name prompt.
+    Symlink,
+    /// Feature 043 — hard-link name prompt.
+    HardLink,
 }
 
 /// An external program to run (F3/F4), suspending the TUI around it.
@@ -458,36 +466,75 @@ async fn handle_key(
                         if !text.is_empty() {
                             // Feature 042: bookmark add is a direct App method
                             // (not a core command) and reopens the hotlist.
-                            if matches!(kind, InputKind::AddBookmark) {
-                                let (group, name) = parse_bookmark_input(&text);
-                                match app.add_bookmark(&name, group.as_deref()) {
+                            match kind {
+                                InputKind::AddBookmark => {
+                                    let (group, name) = parse_bookmark_input(&text);
+                                    match app.add_bookmark(&name, group.as_deref()) {
+                                        Ok(events) => {
+                                            for ev in events {
+                                                apply_event(
+                                                    ev,
+                                                    app,
+                                                    mode,
+                                                    active_dialog,
+                                                    status,
+                                                    quit,
+                                                );
+                                            }
+                                        }
+                                        Err(e) => *status = e.to_string(),
+                                    }
+                                    // Reopen the hotlist, refreshed.
+                                    *active_dialog = Some(ActiveDialog::Hotlist {
+                                        widget: HotlistDialog::new(build_hotlist_rows(
+                                            app.bookmarks(),
+                                        )),
+                                    });
+                                    *mode = Mode::Dialog;
+                                }
+                                // Feature 043: chmod is a direct App method (not a
+                                // core command); invalid input ⇒ inline status.
+                                InputKind::Chmod => match app.chmod_selection(&text).await {
                                     Ok(events) => {
                                         for ev in events {
-                                            apply_event(ev, app, mode, active_dialog, status, quit);
+                                            apply_event(
+                                                ev,
+                                                app,
+                                                mode,
+                                                active_dialog,
+                                                status,
+                                                quit,
+                                            );
                                         }
                                     }
                                     Err(e) => *status = e.to_string(),
+                                },
+                                // Feature 043: wired in later phases (US2/US3).
+                                InputKind::Symlink
+                                | InputKind::HardLink
+                                | InputKind::Chown => {
+                                    *status = "not yet wired".into();
                                 }
-                                // Reopen the hotlist, refreshed.
-                                *active_dialog = Some(ActiveDialog::Hotlist {
-                                    widget: HotlistDialog::new(build_hotlist_rows(app.bookmarks())),
-                                });
-                                *mode = Mode::Dialog;
-                            } else {
-                                let core = match kind {
-                                    InputKind::Mkdir => AppCommand::Mkdir(text),
-                                    InputKind::SelectPattern => AppCommand::SelectByPattern(text),
-                                    InputKind::UnselectPattern => {
-                                        AppCommand::UnselectByPattern(text)
+                                InputKind::Mkdir
+                                | InputKind::SelectPattern
+                                | InputKind::UnselectPattern => {
+                                    let core = match kind {
+                                        InputKind::Mkdir => AppCommand::Mkdir(text),
+                                        InputKind::SelectPattern => {
+                                            AppCommand::SelectByPattern(text)
+                                        }
+                                        InputKind::UnselectPattern => {
+                                            AppCommand::UnselectByPattern(text)
+                                        }
+                                        _ => unreachable!("handled above"),
+                                    };
+                                    let events = app
+                                        .dispatch(core)
+                                        .await
+                                        .map_err(|e| Error::Other(e.to_string()))?;
+                                    for ev in events {
+                                        apply_event(ev, app, mode, active_dialog, status, quit);
                                     }
-                                    InputKind::AddBookmark => unreachable!("handled above"),
-                                };
-                                let events = app
-                                    .dispatch(core)
-                                    .await
-                                    .map_err(|e| Error::Other(e.to_string()))?;
-                                for ev in events {
-                                    apply_event(ev, app, mode, active_dialog, status, quit);
                                 }
                             }
                         }
@@ -785,6 +832,20 @@ async fn dispatch_ui_command(
         Command::BookmarksMenu => {
             *active_dialog = Some(ActiveDialog::Hotlist {
                 widget: HotlistDialog::new(build_hotlist_rows(app.bookmarks())),
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 043 (FR-001/011): C-x c opens the chmod prompt, prefilled
+        // with the focused entry's current octal mode.
+        Command::Chmod => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Change permissions",
+                    "Mode (octal e.g. 755, or symbolic e.g. u+x):",
+                    focused_octal_mode(app),
+                ),
+                kind: InputKind::Chmod,
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -1155,6 +1216,17 @@ fn build_hotlist_rows(bookmarks: &[cargonaut_core::Bookmark]) -> Vec<HotlistRow>
         }
     }
     rows
+}
+
+/// Feature 043 — the focused entry's current permission bits as an octal
+/// string (for prefilling the chmod prompt); `"644"` when unavailable.
+fn focused_octal_mode(app: &App) -> String {
+    let p = app.active_pane_state();
+    p.focused_entry_index()
+        .and_then(|i| p.listing.entries.get(i))
+        .and_then(|e| e.meta.mode.as_ref())
+        .map(|m| format!("{:o}", m.bits & 0o777))
+        .unwrap_or_else(|| "644".to_string())
 }
 
 /// Feature 042 — parse a bookmark-add prompt into `(group, name)`. Text of the
@@ -2415,6 +2487,45 @@ mod tests {
             other => panic!("expected chmod input dialog, got {other:?}"),
         }
         assert!(matches!(mode, Mode::Dialog));
+    }
+
+    // Feature 043 (FR-012): Esc on the chmod dialog closes it, no change.
+    #[tokio::test]
+    async fn chmod_dialog_esc_cancels_unchanged() {
+        use crossterm::event::KeyCode;
+        use std::os::unix::fs::PermissionsExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let f = td_l.path().join("f");
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::Chmod,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        feed_key(KeyCode::Esc, &mut app, &Keymap::load(DEFAULT_KEYMAP).unwrap(), &mut mode, &mut dlg, &mut ui).await;
+        assert!(dlg.is_none(), "Esc closes the dialog");
+        let m = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m, 0o644, "Esc must not change the file");
     }
 
     #[tokio::test]

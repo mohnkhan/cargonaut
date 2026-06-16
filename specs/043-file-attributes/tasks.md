@@ -93,16 +93,16 @@ updates.
   `ModeSpec` (BadAttr on error), iterate `selection_or_focused(active)`, apply to
   each file's current bits, `local_fs.chmod`, collect per-file failures,
   `refresh_active_pane`, status (mirrors `App::mkdir`). Make T008 pass.
-- [ ] T010 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a
+- [X] T010 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a
   failing test that `C-x c` resolves to `Command::Chmod` (pane mode), no
   collision.
-- [ ] T011 [US1] (green) Add `Command::Chmod` to `keymap.rs`; add the binding to
+- [X] T011 [US1] (green) Add `Command::Chmod` to `keymap.rs`; add the binding to
   `design/contracts/keymap.toml` (`pane`, `C-x c`, `chmod`). Make T010 pass.
-- [ ] T012 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a failing test
+- [X] T012 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a failing test
   that `dispatch_ui_command(Command::Chmod, …)` opens a `TextInputDialog`
   (`InputKind::Chmod`) prefilled with the focused entry's current octal mode and
   sets `Mode::Dialog`.
-- [ ] T013 [US1] (green) Wire `Command::Chmod` in `dispatch_ui_command` to open
+- [X] T013 [US1] (green) Wire `Command::Chmod` in `dispatch_ui_command` to open
   the prefilled input dialog; add `InputKind::Chmod`; on submit call
   `app.chmod_selection(text)` and apply events (invalid ⇒ inline error/status,
   Esc ⇒ close). Add a File-menu "Chmod" entry. Make T012 pass. Include an
