@@ -633,6 +633,97 @@ mod tests {
         );
     }
 
+    // ---------- file attributes (Feature 043) ----------
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_sets_permission_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let td = TempDir::new().unwrap();
+        let p = td.path().join("f");
+        fs::write(&p, b"x").await.unwrap();
+        LocalFs::new().chmod(&vfs_path_for(&p), 0o600).await.unwrap();
+        let got = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(got, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_creates_link_resolving_to_target() {
+        let td = TempDir::new().unwrap();
+        let target = td.path().join("target.txt");
+        fs::write(&target, b"hi").await.unwrap();
+        let link = td.path().join("ln");
+        LocalFs::new()
+            .symlink(target.to_str().unwrap(), &vfs_path_for(&link))
+            .await
+            .unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&link).unwrap(), b"hi");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_dangling_target_is_allowed() {
+        let td = TempDir::new().unwrap();
+        let link = td.path().join("dangling");
+        LocalFs::new()
+            .symlink("/no/such/target", &vfs_path_for(&link))
+            .await
+            .unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[tokio::test]
+    async fn hard_link_shares_content() {
+        let td = TempDir::new().unwrap();
+        let src = td.path().join("src");
+        fs::write(&src, b"shared").await.unwrap();
+        let link = td.path().join("hard");
+        LocalFs::new()
+            .hard_link(&vfs_path_for(&src), &vfs_path_for(&link))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&link).unwrap(), b"shared");
+    }
+
+    #[tokio::test]
+    async fn hard_link_to_directory_errors() {
+        let td = TempDir::new().unwrap();
+        let dir = td.path().join("d");
+        fs::create_dir(&dir).await.unwrap();
+        let link = td.path().join("dlink");
+        let err = LocalFs::new()
+            .hard_link(&vfs_path_for(&dir), &vfs_path_for(&link))
+            .await
+            .unwrap_err();
+        let _ = err; // OS-defined error; the point is it does not panic
+        assert!(!link.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chown_to_current_owner_is_ok() {
+        use std::os::unix::fs::MetadataExt;
+        let td = TempDir::new().unwrap();
+        let p = td.path().join("f");
+        fs::write(&p, b"x").await.unwrap();
+        let md = std::fs::metadata(&p).unwrap();
+        // No-op chown to the file's existing owner — always permitted.
+        LocalFs::new()
+            .chown(&vfs_path_for(&p), Some(md.uid()), Some(md.gid()))
+            .await
+            .unwrap();
+        let md2 = std::fs::metadata(&p).unwrap();
+        assert_eq!((md2.uid(), md2.gid()), (md.uid(), md.gid()));
+    }
+
     // ---------- unlink ----------
 
     #[tokio::test]
