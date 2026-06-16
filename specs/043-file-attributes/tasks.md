@@ -29,7 +29,7 @@ gets a red→green pair; git history MUST show `(red)` before `(green)`. The pur
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
+- [X] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
   baseline builds + tests (`make build && make test`). Add `nix` (already in
   `Cargo.lock` transitively) as a direct dependency of `crates/cargonaut-vfs/Cargo.toml`
   with the `user` feature (for `User::from_name`/`Group::from_name`); confirm the
@@ -45,29 +45,29 @@ gate.
 
 **⚠️ No user-story phase can start until this is complete.**
 
-- [ ] T002 [P] [FOUND] (red) In `crates/cargonaut-vfs/src/mode.rs` add failing
+- [X] T002 [P] [FOUND] (red) In `crates/cargonaut-vfs/src/mode.rs` add failing
   tests for `ModeSpec::parse`/`apply` covering the contract §1 truth table (octal
   absolute, symbolic relative incl. `u+x`/`go-w`/`a=r`/`u+x,g+x`, and the
   `Empty`/`BadOctal`/`BadSymbolic` error cases).
-- [ ] T003 [FOUND] (green) Implement `ModeSpec` (`Octal`/`Symbolic`), `SymClause`,
+- [X] T003 [FOUND] (green) Implement `ModeSpec` (`Octal`/`Symbolic`), `SymClause`,
   `ModeError`, `parse`, and `apply` in `crates/cargonaut-vfs/src/mode.rs`; add
   `pub mod mode;` + re-export in `lib.rs`. Make T002 pass. `#![warn(missing_docs)]`
   clean.
-- [ ] T004 [P] [FOUND] (red) In `crates/cargonaut-vfs/src/local.rs` add failing
+- [X] T004 [P] [FOUND] (red) In `crates/cargonaut-vfs/src/local.rs` add failing
   `#[tokio::test]`s for `LocalFs`: `chmod` sets bits (re-stat); `symlink` creates
   a (possibly dangling) link resolving to target; `hard_link` shares content and
   errors on a directory; `chown` no-op to current uid/gid returns `Ok` and a
   re-stat shows the ids (runnable unprivileged) (contract §2).
-- [ ] T005 [FOUND] (green) Add `chmod`/`chown`/`symlink`/`hard_link` to the
+- [X] T005 [FOUND] (green) Add `chmod`/`chown`/`symlink`/`hard_link` to the
   `VfsBackend` trait in `crates/cargonaut-vfs/src/traits.rs` with default bodies
   returning `VfsError::Unsupported(...)`; implement them in `LocalFs`
   (`fs::set_permissions`+`PermissionsExt`, `std::os::unix::fs::chown`,
   `std::os::unix::fs::symlink`, `std::fs::hard_link`) mapping errors via the
   existing `map_io`. Make T004 pass.
-- [ ] T006 [FOUND] (red) In `crates/cargonaut-vfs/src/local.rs` add a failing
+- [X] T006 [FOUND] (red) In `crates/cargonaut-vfs/src/local.rs` add a failing
   test that the default trait impls return `Unsupported` (use a tiny stub backend
   or assert the doc-contract) — FR-006.
-- [ ] T007 [FOUND] (green) Verify/adjust the default trait bodies so T006 passes.
+- [X] T007 [FOUND] (green) Verify/adjust the default trait bodies so T006 passes.
 
 **Checkpoint**: mode parsing + filesystem ops are solid and gated, independent of UI.
 

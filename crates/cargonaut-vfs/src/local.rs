@@ -206,6 +206,37 @@ impl VfsBackend for LocalFs {
         };
         res.map_err(|e| map_io(e, &p))
     }
+
+    // ---- File attribute operations (Feature 043) ----
+
+    async fn chmod(&self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
+        use std::os::unix::fs::PermissionsExt;
+        let p = Self::to_std_path(path)?;
+        tokio::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode))
+            .await
+            .map_err(|e| map_io(e, &p))
+    }
+
+    async fn chown(
+        &self,
+        path: &VfsPath,
+        uid: Option<u32>,
+        gid: Option<u32>,
+    ) -> Result<(), VfsError> {
+        let p = Self::to_std_path(path)?;
+        std::os::unix::fs::chown(&p, uid, gid).map_err(|e| map_io(e, &p))
+    }
+
+    async fn symlink(&self, target: &str, link: &VfsPath) -> Result<(), VfsError> {
+        let l = Self::to_std_path(link)?;
+        std::os::unix::fs::symlink(target, &l).map_err(|e| map_io(e, &l))
+    }
+
+    async fn hard_link(&self, src: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
+        let s = Self::to_std_path(src)?;
+        let l = Self::to_std_path(link)?;
+        std::fs::hard_link(&s, &l).map_err(|e| map_io(e, &l))
+    }
 }
 
 // -------- helpers --------
@@ -722,6 +753,74 @@ mod tests {
             .unwrap();
         let md2 = std::fs::metadata(&p).unwrap();
         assert_eq!((md2.uid(), md2.gid()), (md.uid(), md.gid()));
+    }
+
+    // A backend that overrides only the required methods — the four attribute
+    // ops fall through to the trait's default `Unsupported` bodies (FR-006).
+    struct StubBackend;
+    #[async_trait]
+    impl VfsBackend for StubBackend {
+        fn scheme(&self) -> &'static str {
+            "stub"
+        }
+        fn caps(&self) -> VfsCaps {
+            VfsCaps::empty()
+        }
+        async fn list(&self, _: &VfsPath, _: Sort) -> Result<crate::types::DirListing, VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn stat(&self, _: &VfsPath) -> Result<crate::types::VfsMetadata, VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn read_stream(
+            &self,
+            _: &VfsPath,
+            _: ByteRange,
+        ) -> Result<std::pin::Pin<Box<dyn futures::AsyncRead + Send>>, VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn write_stream(
+            &self,
+            _: &VfsPath,
+            _: u64,
+            _: WriteMode,
+        ) -> Result<std::pin::Pin<Box<dyn futures::AsyncWrite + Send>>, VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn unlink(&self, _: &VfsPath) -> Result<(), VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn rmdir(&self, _: &VfsPath) -> Result<(), VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn rename(&self, _: &VfsPath, _: &VfsPath) -> Result<(), VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+        async fn mkdir(&self, _: &VfsPath, _: bool) -> Result<(), VfsError> {
+            Err(VfsError::Unsupported("stub"))
+        }
+    }
+
+    #[tokio::test]
+    async fn default_attr_ops_are_unsupported() {
+        let b = StubBackend;
+        let vp = vfs_path_for(Path::new("/tmp/x"));
+        assert!(matches!(
+            b.chmod(&vp, 0o644).await,
+            Err(VfsError::Unsupported(_))
+        ));
+        assert!(matches!(
+            b.chown(&vp, None, None).await,
+            Err(VfsError::Unsupported(_))
+        ));
+        assert!(matches!(
+            b.symlink("t", &vp).await,
+            Err(VfsError::Unsupported(_))
+        ));
+        assert!(matches!(
+            b.hard_link(&vp, &vp).await,
+            Err(VfsError::Unsupported(_))
+        ));
     }
 
     // ---------- unlink ----------
