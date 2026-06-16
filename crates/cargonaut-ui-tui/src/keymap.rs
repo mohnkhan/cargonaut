@@ -611,6 +611,32 @@ action = "this-action-does-not-exist"
         );
     }
 
+    // Feature 043: the orthodox attribute chords C-x c/o/s/l.
+    #[test]
+    fn attribute_chords_resolve() {
+        let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
+        let c_x = KeyChord {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::CONTROL,
+        };
+        let plain = |c| KeyChord {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::empty(),
+        };
+        for (ch, cmd) in [
+            ('c', Command::Chmod),
+            ('o', Command::Chown),
+            ('s', Command::CreateSymlink),
+            ('l', Command::CreateHardLink),
+        ] {
+            assert_eq!(
+                km.lookup_sequence(Mode::Pane, &[c_x, plain(ch)]),
+                SeqLookup::Command(cmd),
+                "C-x {ch} must resolve to {cmd:?}"
+            );
+        }
+    }
+
     #[test]
     fn lookup_sequence_no_match_for_unbound_prefix() {
         let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
