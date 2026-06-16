@@ -497,6 +497,11 @@ pub enum AppError {
     /// A bookmark could not be created (e.g. blank name) — Feature 042.
     #[error("bad bookmark: {0}")]
     BadBookmark(String),
+
+    /// A file-attribute request was invalid (bad mode/owner/link input) —
+    /// Feature 043.
+    #[error("bad attribute: {0}")]
+    BadAttr(String),
 }
 
 // =====================================================================
@@ -1395,6 +1400,44 @@ impl App {
         self.navigate_to(id, target).await
     }
 
+    // ===== Feature 043: file attribute operations =====
+
+    /// Change the permissions of the current selection (tagged files, else the
+    /// focused entry, never the `..` row). `spec` is an octal or symbolic mode
+    /// ([`cargonaut_vfs::ModeSpec`]); invalid input ⇒ [`AppError::BadAttr`] with
+    /// no change. Symbolic specs are applied to each file's current bits.
+    /// Per-file failures are reported in the status without rolling back the
+    /// successes (FR-010); the active pane is refreshed (FR-008).
+    pub async fn chmod_selection(&mut self, spec: &str) -> Result<Vec<Event>, AppError> {
+        let mode_spec = cargonaut_vfs::ModeSpec::parse(spec)
+            .map_err(|e| AppError::BadAttr(format!("invalid mode {spec:?} ({e:?})")))?;
+        let id = self.active;
+        let names = self.selection_or_focused(id);
+        if names.is_empty() {
+            return Ok(vec![Event::Status("No files selected".into())]);
+        }
+        let cwd = self.pane(id).cwd.clone();
+        let mut ok = 0usize;
+        let mut failures = Vec::new();
+        for name in &names {
+            let target = cwd.join(name);
+            let current = match self.local_fs.stat(&target).await {
+                Ok(m) => m.mode.map(|fm| fm.bits).unwrap_or(0),
+                Err(e) => {
+                    failures.push(format!("{name}: {e}"));
+                    continue;
+                }
+            };
+            match self.local_fs.chmod(&target, mode_spec.apply(current)).await {
+                Ok(()) => ok += 1,
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(attr_status("chmod", ok, &failures)));
+        Ok(evs)
+    }
+
     // ===== Feature 042: directory hotlist / bookmarks =====
 
     /// Read-only view of the saved bookmarks (UI snapshot source).
@@ -1637,6 +1680,20 @@ fn pane_idx(id: PaneId) -> usize {
     match id {
         PaneId::Left => 0,
         PaneId::Right => 1,
+    }
+}
+
+/// Feature 043 — status line for a batch attribute op: how many succeeded and,
+/// if any failed, which (partial failures are surfaced, not rolled back).
+fn attr_status(op: &str, ok: usize, failures: &[String]) -> String {
+    if failures.is_empty() {
+        format!("{op}: {ok} item(s)")
+    } else {
+        format!(
+            "{op}: {ok} ok, {} failed ({})",
+            failures.len(),
+            failures.join("; ")
+        )
     }
 }
 
