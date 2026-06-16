@@ -85,7 +85,9 @@ updates.
   focused file (re-stat); a multi-file tagged selection all change in one call
   (SC-003); `chmod_selection("xyz")` ⇒ `Err(AppError::BadAttr)` with no change
   (SC-004); a batch with one unwritable target reports the failure and still
-  changes the others (SC-005/FR-010).
+  changes the others (SC-005/FR-010); with the cursor on the synthetic `..` row
+  and nothing tagged, `chmod_selection` targets nothing and makes no change
+  (FR-005).
 - [ ] T009 [US1] (green) Add `AppError::BadAttr(String)` and
   `App::chmod_selection(spec)` in `crates/cargonaut-core/src/lib.rs`: parse via
   `ModeSpec` (BadAttr on error), iterate `selection_or_focused(active)`, apply to
@@ -103,7 +105,9 @@ updates.
 - [ ] T013 [US1] (green) Wire `Command::Chmod` in `dispatch_ui_command` to open
   the prefilled input dialog; add `InputKind::Chmod`; on submit call
   `app.chmod_selection(text)` and apply events (invalid ⇒ inline error/status,
-  Esc ⇒ close). Add a File-menu "Chmod" entry. Make T012 pass.
+  Esc ⇒ close). Add a File-menu "Chmod" entry. Make T012 pass. Include an
+  explicit test that Esc on the dialog closes it with panes + files unchanged
+  (FR-012).
 
 **Checkpoint**: US1 works end-to-end — chmod via key/menu, octal + symbolic. **MVP.**
 
