@@ -1986,6 +1986,60 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn chown_selection_noop_to_current_owner_ok() {
+        use std::os::unix::fs::MetadataExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let md = std::fs::metadata(td_l.path().join("f")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Numeric uid:gid equal to the current owner — always permitted.
+        app.chown_selection(&format!("{}:{}", md.uid(), md.gid()))
+            .await
+            .unwrap();
+        let md2 = std::fs::metadata(td_l.path().join("f")).unwrap();
+        assert_eq!((md2.uid(), md2.gid()), (md.uid(), md.gid()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chown_selection_group_only_numeric_ok() {
+        use std::os::unix::fs::MetadataExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let md = std::fs::metadata(td_l.path().join("f")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.chown_selection(&format!(":{}", md.gid())).await.unwrap();
+        assert_eq!(std::fs::metadata(td_l.path().join("f")).unwrap().gid(), md.gid());
+    }
+
+    #[tokio::test]
+    async fn chown_selection_unknown_user_is_bad_attr() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.chown_selection("no_such_user_xyzzy_42").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn chown_selection_empty_is_bad_attr() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.chown_selection("   ").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn create_symlink_points_at_focused_entry() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
