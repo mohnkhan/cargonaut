@@ -56,6 +56,9 @@ crc32fast = "1"
 # Bit flags
 bitflags = "2"
 
+# Unix syscalls (file attributes — user/group name resolution; Feature 043)
+nix = { version = "0.25", default-features = false, features = ["user"] }
+
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 

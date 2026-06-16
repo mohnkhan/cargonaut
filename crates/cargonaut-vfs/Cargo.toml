@@ -16,6 +16,7 @@ smallvec = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
 bitflags = { workspace = true }
+nix = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
