@@ -497,14 +497,7 @@ async fn handle_key(
                                 InputKind::Chmod => match app.chmod_selection(&text).await {
                                     Ok(events) => {
                                         for ev in events {
-                                            apply_event(
-                                                ev,
-                                                app,
-                                                mode,
-                                                active_dialog,
-                                                status,
-                                                quit,
-                                            );
+                                            apply_event(ev, app, mode, active_dialog, status, quit);
                                         }
                                     }
                                     Err(e) => *status = e.to_string(),
@@ -2669,9 +2662,25 @@ mod tests {
         ));
         // Type "0:0" and submit → should chain a confirmation dialog.
         for c in ['0', ':', '0'] {
-            feed_key(KeyCode::Char(c), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+            feed_key(
+                KeyCode::Char(c),
+                &mut app,
+                &keymap,
+                &mut mode,
+                &mut dlg,
+                &mut ui,
+            )
+            .await;
         }
-        feed_key(KeyCode::Enter, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Enter,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(
             matches!(dlg, Some(ActiveDialog::Confirm { .. })),
             "chown submit must chain a confirmation (FR-007), got {dlg:?}"
@@ -2711,7 +2720,15 @@ mod tests {
         )
         .await
         .unwrap();
-        feed_key(KeyCode::Esc, &mut app, &Keymap::load(DEFAULT_KEYMAP).unwrap(), &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Esc,
+            &mut app,
+            &Keymap::load(DEFAULT_KEYMAP).unwrap(),
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(dlg.is_none(), "Esc closes the dialog");
         let m = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
         assert_eq!(m, 0o644, "Esc must not change the file");

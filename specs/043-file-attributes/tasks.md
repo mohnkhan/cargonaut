@@ -179,20 +179,20 @@ unprivileged foreign chown reports permission denied.
 - [X] T025 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document the
   attribute keys (`C-x c` chmod, `C-x o` chown, `C-x s` symlink, `C-x l`
   hardlink). Make T024 pass.
-- [ ] T026 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
+- [X] T026 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate); then `cargo run -p cargonaut-bin -- ~ /tmp` and walk
   quickstart.md steps 1–9. Fix any clippy/fmt issues.
-- [ ] T027 [P] [POLISH] **Deferral paper trail (CLAUDE.md MANDATORY)**: open a
+- [X] T027 [P] [POLISH] **Deferral paper trail (CLAUDE.md MANDATORY)**: open a
   GitHub issue for **recursive chmod/chown** (problem, why deferred, suggested
   approach: a recurse flag + tree walk + per-entry error reporting, effort,
   Tier + `follow-up` label) and add a `ROADMAP.md` row referencing it (Feature
   043 §clarify deferral).
-- [ ] T028 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
+- [X] T028 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
   `README.md` ("At a Glance" test count + binary size; Feature History one-liner
   for Feature 043) and append a Feature 043 section to `Learnings.md` (≥3 bullets:
   default-Unsupported trait methods, pure ModeSpec testable seam, nix-already-in-tree
   for safe name resolution). Update `CHANGELOG.md`.
-- [ ] T029 [POLISH] Close issue #46: confirm chmod + links + chown delivered;
+- [X] T029 [POLISH] Close issue #46: confirm chmod + links + chown delivered;
   reference the merged PR; remove the #46 row from `ROADMAP.md` (resolved).
 
 ---

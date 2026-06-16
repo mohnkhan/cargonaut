@@ -1499,7 +1499,9 @@ impl App {
         let link = cwd.join(link_name);
         self.local_fs.hard_link(&src, &link).await?;
         let mut evs = self.refresh_active_pane().await?;
-        evs.push(Event::Status(format!("Hard-linked {link_name} → {target_name}")));
+        evs.push(Event::Status(format!(
+            "Hard-linked {link_name} → {target_name}"
+        )));
         Ok(evs)
     }
 
@@ -2013,7 +2015,11 @@ mod tests {
         // Put the cursor on the synthetic `..` row (index 0); no tags.
         app.active_pane_mut().cursor = 0;
         app.chmod_selection("700").await.unwrap();
-        assert_eq!(mode_of(&td_l.path().join("f")), 0o644, "..-row chmod must no-op");
+        assert_eq!(
+            mode_of(&td_l.path().join("f")),
+            0o644,
+            "..-row chmod must no-op"
+        );
     }
 
     #[cfg(unix)]
@@ -2042,8 +2048,13 @@ mod tests {
         fs::write(td_l.path().join("f"), b"x").await.unwrap();
         let md = std::fs::metadata(td_l.path().join("f")).unwrap();
         let mut app = make_app(&td_l, &td_r).await;
-        app.chown_selection(&format!(":{}", md.gid())).await.unwrap();
-        assert_eq!(std::fs::metadata(td_l.path().join("f")).unwrap().gid(), md.gid());
+        app.chown_selection(&format!(":{}", md.gid()))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(td_l.path().join("f")).unwrap().gid(),
+            md.gid()
+        );
     }
 
     #[tokio::test]
@@ -2121,7 +2132,10 @@ mod tests {
         fs::create_dir(td_l.path().join("d")).await.unwrap();
         let mut app = make_app(&td_l, &td_r).await; // focused = "d"
         let res = app.create_hard_link("h").await;
-        assert!(res.is_err(), "hard-linking a directory must error, not panic");
+        assert!(
+            res.is_err(),
+            "hard-linking a directory must error, not panic"
+        );
     }
 
     #[tokio::test]

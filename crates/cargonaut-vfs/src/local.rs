@@ -673,7 +673,10 @@ mod tests {
         let td = TempDir::new().unwrap();
         let p = td.path().join("f");
         fs::write(&p, b"x").await.unwrap();
-        LocalFs::new().chmod(&vfs_path_for(&p), 0o600).await.unwrap();
+        LocalFs::new()
+            .chmod(&vfs_path_for(&p), 0o600)
+            .await
+            .unwrap();
         let got = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(got, 0o600);
     }
