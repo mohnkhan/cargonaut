@@ -1663,6 +1663,7 @@ Cargonaut — quick help\n\
   Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
   M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
   C-b: directory hotlist (bookmarks) — [a]dd · [d]el · Enter jumps\n\
+  C-x c chmod · C-x o chown · C-x s symlink · C-x l hardlink\n\
 \n\
   Press any key to close.";
 
@@ -1800,6 +1801,16 @@ mod tests {
         assert!(
             s.contains("1000"),
             "teardown must emit the mouse-disable sequence; got: {s:?}"
+        );
+    }
+
+    // Feature 043: help documents the file-attribute keys.
+    #[test]
+    fn help_documents_attribute_keys() {
+        assert!(HELP_BODY.contains("C-x c"), "help must mention chmod key");
+        assert!(
+            HELP_BODY.to_lowercase().contains("chmod"),
+            "help must mention chmod"
         );
     }
 

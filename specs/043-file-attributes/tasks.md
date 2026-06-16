@@ -174,9 +174,9 @@ unprivileged foreign chown reports permission denied.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T024 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a
+- [X] T024 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a
   failing test that the F1 help text contains `C-x c` and "chmod".
-- [ ] T025 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document the
+- [X] T025 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document the
   attribute keys (`C-x c` chmod, `C-x o` chown, `C-x s` symlink, `C-x l`
   hardlink). Make T024 pass.
 - [ ] T026 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
