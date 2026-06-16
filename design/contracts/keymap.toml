@@ -301,6 +301,27 @@ mode = "pane"
 key = "C-x r"
 action = "bulk-rename-via-editor"  # FR-208
 
+# File attribute operations (Feature 043, issue #46) — orthodox-FM chords
+[[binding]]
+mode = "pane"
+key = "C-x c"
+action = "chmod"
+
+[[binding]]
+mode = "pane"
+key = "C-x o"
+action = "chown"
+
+[[binding]]
+mode = "pane"
+key = "C-x s"
+action = "create-symlink"
+
+[[binding]]
+mode = "pane"
+key = "C-x l"
+action = "create-hard-link"
+
 [[binding]]
 mode = "pane"
 key = "<"

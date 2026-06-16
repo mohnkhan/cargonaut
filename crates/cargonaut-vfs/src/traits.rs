@@ -296,4 +296,42 @@ pub trait VfsBackend: Send + Sync + 'static {
     /// - [`VfsError::PermissionDenied`] on OS-level reject.
     /// - [`VfsError::Io`] if `path` exists but isn't a directory (recursive).
     async fn mkdir(&self, path: &VfsPath, recursive: bool) -> Result<(), VfsError>;
+
+    // ---- File attribute operations (Feature 043) ----
+    //
+    // Default to `Unsupported` so backends that do not model Unix attributes
+    // (e.g. future remote/archive backends) compile and report cleanly (FR-006);
+    // `LocalFs` overrides each.
+
+    /// Set the permission bits (low 12 bits of the Unix mode) of `path`.
+    async fn chmod(&self, _path: &VfsPath, _mode: u32) -> Result<(), VfsError> {
+        Err(VfsError::Unsupported("chmod not supported by this backend"))
+    }
+
+    /// Change the owning user and/or group of `path`. `None` leaves that field
+    /// unchanged.
+    async fn chown(
+        &self,
+        _path: &VfsPath,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+    ) -> Result<(), VfsError> {
+        Err(VfsError::Unsupported("chown not supported by this backend"))
+    }
+
+    /// Create a symbolic link at `link` whose contents are `target` (a path
+    /// string; may dangle).
+    async fn symlink(&self, _target: &str, _link: &VfsPath) -> Result<(), VfsError> {
+        Err(VfsError::Unsupported(
+            "symlink not supported by this backend",
+        ))
+    }
+
+    /// Create a hard link at `link` referring to the same content as `src`
+    /// (same filesystem, non-directory only).
+    async fn hard_link(&self, _src: &VfsPath, _link: &VfsPath) -> Result<(), VfsError> {
+        Err(VfsError::Unsupported(
+            "hard_link not supported by this backend",
+        ))
+    }
 }

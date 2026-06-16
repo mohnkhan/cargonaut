@@ -307,6 +307,9 @@ pub enum Command {
     SelectByPattern(String),
     /// FR-025 — untag visible entries whose name matches the glob.
     UnselectByPattern(String),
+    /// Feature 043 (#46) — change ownership of the selection to `user[:group]`
+    /// (routed through a confirmation dialog; see `chown_selection`).
+    Chown(String),
     /// F10 — quit cargonaut.
     Quit,
 }
@@ -497,6 +500,11 @@ pub enum AppError {
     /// A bookmark could not be created (e.g. blank name) — Feature 042.
     #[error("bad bookmark: {0}")]
     BadBookmark(String),
+
+    /// A file-attribute request was invalid (bad mode/owner/link input) —
+    /// Feature 043.
+    #[error("bad attribute: {0}")]
+    BadAttr(String),
 }
 
 // =====================================================================
@@ -951,6 +959,7 @@ impl App {
             Mkdir(name) => self.mkdir(&name).await,
             SelectByPattern(pat) => Ok(self.select_by_pattern(&pat, true)),
             UnselectByPattern(pat) => Ok(self.select_by_pattern(&pat, false)),
+            Chown(owner) => self.chown_selection(&owner).await,
             Quit => Ok(vec![Event::QuitRequested]),
         }
     }
@@ -1395,6 +1404,119 @@ impl App {
         self.navigate_to(id, target).await
     }
 
+    // ===== Feature 043: file attribute operations =====
+
+    /// Change the permissions of the current selection (tagged files, else the
+    /// focused entry, never the `..` row). `spec` is an octal or symbolic mode
+    /// ([`cargonaut_vfs::ModeSpec`]); invalid input ⇒ [`AppError::BadAttr`] with
+    /// no change. Symbolic specs are applied to each file's current bits.
+    /// Per-file failures are reported in the status without rolling back the
+    /// successes (FR-010); the active pane is refreshed (FR-008).
+    pub async fn chmod_selection(&mut self, spec: &str) -> Result<Vec<Event>, AppError> {
+        let mode_spec = cargonaut_vfs::ModeSpec::parse(spec)
+            .map_err(|e| AppError::BadAttr(format!("invalid mode {spec:?} ({e:?})")))?;
+        let id = self.active;
+        let names = self.selection_or_focused(id);
+        if names.is_empty() {
+            return Ok(vec![Event::Status("No files selected".into())]);
+        }
+        let cwd = self.pane(id).cwd.clone();
+        let mut ok = 0usize;
+        let mut failures = Vec::new();
+        for name in &names {
+            let target = cwd.join(name);
+            let current = match self.local_fs.stat(&target).await {
+                Ok(m) => m.mode.map(|fm| fm.bits).unwrap_or(0),
+                Err(e) => {
+                    failures.push(format!("{name}: {e}"));
+                    continue;
+                }
+            };
+            match self.local_fs.chmod(&target, mode_spec.apply(current)).await {
+                Ok(()) => ok += 1,
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(attr_status("chmod", ok, &failures)));
+        Ok(evs)
+    }
+
+    /// Change ownership of the current selection. `owner` is `user`, `:group`,
+    /// or `user:group` (each side a name or numeric id; omitted side unchanged).
+    /// Invalid/unknown owner ⇒ [`AppError::BadAttr`] with no change. Per-file
+    /// failures (e.g. permission denied) are reported without rollback (FR-010);
+    /// the pane is refreshed (FR-008).
+    pub async fn chown_selection(&mut self, owner: &str) -> Result<Vec<Event>, AppError> {
+        let (uid, gid) = cargonaut_vfs::parse_owner(owner)
+            .map_err(|e| AppError::BadAttr(format!("invalid owner {owner:?} ({e:?})")))?;
+        let id = self.active;
+        let names = self.selection_or_focused(id);
+        if names.is_empty() {
+            return Ok(vec![Event::Status("No files selected".into())]);
+        }
+        let cwd = self.pane(id).cwd.clone();
+        let mut ok = 0usize;
+        let mut failures = Vec::new();
+        for name in &names {
+            let target = cwd.join(name);
+            match self.local_fs.chown(&target, uid, gid).await {
+                Ok(()) => ok += 1,
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(attr_status("chown", ok, &failures)));
+        Ok(evs)
+    }
+
+    /// Create a symbolic link named `link_name` in the active pane's directory,
+    /// pointing at the focused entry (a relative link to the sibling). Blank
+    /// name ⇒ [`AppError::BadAttr`]; an existing name or OS error is reported.
+    pub async fn create_symlink(&mut self, link_name: &str) -> Result<Vec<Event>, AppError> {
+        let (target_name, cwd) = self.link_source()?;
+        let link_name = link_name.trim();
+        if link_name.is_empty() {
+            return Err(AppError::BadAttr("link name must not be blank".into()));
+        }
+        let link = cwd.join(link_name);
+        self.local_fs.symlink(&target_name, &link).await?;
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(format!("Linked {link_name} → {target_name}")));
+        Ok(evs)
+    }
+
+    /// Create a hard link named `link_name` in the active pane's directory,
+    /// referring to the focused entry. Blank name ⇒ [`AppError::BadAttr`];
+    /// OS rejection (directory / cross-filesystem) is reported.
+    pub async fn create_hard_link(&mut self, link_name: &str) -> Result<Vec<Event>, AppError> {
+        let (target_name, cwd) = self.link_source()?;
+        let link_name = link_name.trim();
+        if link_name.is_empty() {
+            return Err(AppError::BadAttr("link name must not be blank".into()));
+        }
+        let src = cwd.join(&target_name);
+        let link = cwd.join(link_name);
+        self.local_fs.hard_link(&src, &link).await?;
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(format!(
+            "Hard-linked {link_name} → {target_name}"
+        )));
+        Ok(evs)
+    }
+
+    /// The focused real entry's name + the active pane cwd, for link creation.
+    /// Errors if nothing is focused (e.g. cursor on the `..` row).
+    fn link_source(&self) -> Result<(String, VfsPath), AppError> {
+        let p = self.active_pane_state();
+        let name = p
+            .focused_entry_index()
+            .and_then(|i| p.listing.entries.get(i))
+            .map(|e| e.name.to_string())
+            .ok_or_else(|| AppError::BadAttr("no file focused to link".into()))?;
+        Ok((name, p.cwd.clone()))
+    }
+
     // ===== Feature 042: directory hotlist / bookmarks =====
 
     /// Read-only view of the saved bookmarks (UI snapshot source).
@@ -1640,6 +1762,20 @@ fn pane_idx(id: PaneId) -> usize {
     }
 }
 
+/// Feature 043 — status line for a batch attribute op: how many succeeded and,
+/// if any failed, which (partial failures are surfaced, not rolled back).
+fn attr_status(op: &str, ok: usize, failures: &[String]) -> String {
+    if failures.is_empty() {
+        format!("{op}: {ok} item(s)")
+    } else {
+        format!(
+            "{op}: {ok} ok, {} failed ({})",
+            failures.len(),
+            failures.join("; ")
+        )
+    }
+}
+
 /// Cycle the sort *key* (FR-021): name → ext → size → mtime → name.
 /// Reverse direction is a separate toggle.
 fn next_sort_key(s: Sort) -> Sort {
@@ -1774,6 +1910,244 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    // ===== Feature 043: file attribute operations =====
+
+    #[cfg(unix)]
+    fn mode_of(p: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    fn entry_index(app: &App, name: &str) -> usize {
+        app.pane(PaneId::Left)
+            .listing
+            .entries
+            .iter()
+            .position(|e| e.name.as_str() == name)
+            .expect("entry present")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_sets_focused_file() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("only.txt"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Default cursor sits on the first real entry (Feature 040).
+        app.chmod_selection("755").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("only.txt")), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_symbolic_and_multi_file() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b"] {
+            fs::write(td_l.path().join(n), b"x").await.unwrap();
+            std::fs::set_permissions(
+                td_l.path().join(n),
+                std::os::unix::fs::PermissionsExt::from_mode(0o644),
+            )
+            .unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        let (ia, ib) = (entry_index(&app, "a"), entry_index(&app, "b"));
+        app.active_pane_mut().selected.insert(ia);
+        app.active_pane_mut().selected.insert(ib);
+        app.chmod_selection("u+x").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("a")), 0o744);
+        assert_eq!(mode_of(&td_l.path().join("b")), 0o744);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_invalid_changes_nothing() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        std::fs::set_permissions(
+            td_l.path().join("f"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o644),
+        )
+        .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let res = app.chmod_selection("xyz").await;
+        assert!(matches!(res, Err(AppError::BadAttr(_))));
+        assert_eq!(mode_of(&td_l.path().join("f")), 0o644);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_partial_failure_reports_and_continues() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b"] {
+            fs::write(td_l.path().join(n), b"x").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        let (ia, ib) = (entry_index(&app, "a"), entry_index(&app, "b"));
+        app.active_pane_mut().selected.insert(ia);
+        app.active_pane_mut().selected.insert(ib);
+        // Remove "b" from disk so its chmod fails while "a" succeeds.
+        std::fs::remove_file(td_l.path().join("b")).unwrap();
+        let evs = app.chmod_selection("700").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("a")), 0o700);
+        let status = format!("{evs:?}");
+        assert!(status.contains('b') || status.to_lowercase().contains("fail"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_on_parent_row_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        std::fs::set_permissions(
+            td_l.path().join("f"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o644),
+        )
+        .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Put the cursor on the synthetic `..` row (index 0); no tags.
+        app.active_pane_mut().cursor = 0;
+        app.chmod_selection("700").await.unwrap();
+        assert_eq!(
+            mode_of(&td_l.path().join("f")),
+            0o644,
+            "..-row chmod must no-op"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chown_selection_noop_to_current_owner_ok() {
+        use std::os::unix::fs::MetadataExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let md = std::fs::metadata(td_l.path().join("f")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Numeric uid:gid equal to the current owner — always permitted.
+        app.chown_selection(&format!("{}:{}", md.uid(), md.gid()))
+            .await
+            .unwrap();
+        let md2 = std::fs::metadata(td_l.path().join("f")).unwrap();
+        assert_eq!((md2.uid(), md2.gid()), (md.uid(), md.gid()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chown_selection_group_only_numeric_ok() {
+        use std::os::unix::fs::MetadataExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let md = std::fs::metadata(td_l.path().join("f")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.chown_selection(&format!(":{}", md.gid()))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(td_l.path().join("f")).unwrap().gid(),
+            md.gid()
+        );
+    }
+
+    #[tokio::test]
+    async fn chown_selection_unknown_user_is_bad_attr() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.chown_selection("no_such_user_xyzzy_42").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn chown_selection_empty_is_bad_attr() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.chown_selection("   ").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_symlink_points_at_focused_entry() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"hello").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "src"
+        app.create_symlink("ln").await.unwrap();
+        let link = td_l.path().join("ln");
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&link).unwrap(), b"hello");
+        assert!(app
+            .pane(PaneId::Left)
+            .listing
+            .entries
+            .iter()
+            .any(|e| e.name.as_str() == "ln"));
+    }
+
+    #[tokio::test]
+    async fn create_symlink_existing_name_is_refused() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"x").await.unwrap();
+        fs::write(td_l.path().join("taken"), b"y").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "src" (sorts first)
+        let res = app.create_symlink("taken").await;
+        assert!(res.is_err(), "must refuse an existing name");
+        assert_eq!(std::fs::read(td_l.path().join("taken")).unwrap(), b"y");
+    }
+
+    #[tokio::test]
+    async fn create_hard_link_shares_content() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"shared").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.create_hard_link("h").await.unwrap();
+        assert_eq!(std::fs::read(td_l.path().join("h")).unwrap(), b"shared");
+    }
+
+    #[tokio::test]
+    async fn create_hard_link_to_directory_errors() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("d")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "d"
+        let res = app.create_hard_link("h").await;
+        assert!(
+            res.is_err(),
+            "hard-linking a directory must error, not panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_symlink_blank_name_is_bad_attr() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.create_symlink("  ").await,
+            Err(AppError::BadAttr(_))
+        ));
     }
 
     // ===== Feature 042: directory hotlist / bookmarks =====

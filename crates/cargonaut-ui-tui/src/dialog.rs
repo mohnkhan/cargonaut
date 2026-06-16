@@ -139,6 +139,20 @@ impl TextInputDialog {
         }
     }
 
+    /// New dialog pre-filled with `initial` text (e.g. the current mode/owner)
+    /// — Feature 043. The cursor starts at end-of-buffer; editing works as usual.
+    pub fn with_initial(
+        title: impl Into<String>,
+        prompt: impl Into<String>,
+        initial: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            prompt: prompt.into(),
+            buffer: initial.into(),
+        }
+    }
+
     /// Current entered text (mostly for tests).
     pub fn value(&self) -> &str {
         &self.buffer

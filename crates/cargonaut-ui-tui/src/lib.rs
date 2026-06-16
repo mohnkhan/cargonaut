@@ -159,6 +159,14 @@ enum InputKind {
     UnselectPattern,
     /// Feature 042 — bookmark name prompt; text is `group/name` or `name`.
     AddBookmark,
+    /// Feature 043 — chmod mode prompt (octal or symbolic).
+    Chmod,
+    /// Feature 043 — chown owner prompt (`user`/`:group`/`user:group`).
+    Chown,
+    /// Feature 043 — symlink name prompt.
+    Symlink,
+    /// Feature 043 — hard-link name prompt.
+    HardLink,
 }
 
 /// An external program to run (F3/F4), suspending the TUI around it.
@@ -458,36 +466,94 @@ async fn handle_key(
                         if !text.is_empty() {
                             // Feature 042: bookmark add is a direct App method
                             // (not a core command) and reopens the hotlist.
-                            if matches!(kind, InputKind::AddBookmark) {
-                                let (group, name) = parse_bookmark_input(&text);
-                                match app.add_bookmark(&name, group.as_deref()) {
+                            match kind {
+                                InputKind::AddBookmark => {
+                                    let (group, name) = parse_bookmark_input(&text);
+                                    match app.add_bookmark(&name, group.as_deref()) {
+                                        Ok(events) => {
+                                            for ev in events {
+                                                apply_event(
+                                                    ev,
+                                                    app,
+                                                    mode,
+                                                    active_dialog,
+                                                    status,
+                                                    quit,
+                                                );
+                                            }
+                                        }
+                                        Err(e) => *status = e.to_string(),
+                                    }
+                                    // Reopen the hotlist, refreshed.
+                                    *active_dialog = Some(ActiveDialog::Hotlist {
+                                        widget: HotlistDialog::new(build_hotlist_rows(
+                                            app.bookmarks(),
+                                        )),
+                                    });
+                                    *mode = Mode::Dialog;
+                                }
+                                // Feature 043: chmod is a direct App method (not a
+                                // core command); invalid input ⇒ inline status.
+                                InputKind::Chmod => match app.chmod_selection(&text).await {
                                     Ok(events) => {
                                         for ev in events {
                                             apply_event(ev, app, mode, active_dialog, status, quit);
                                         }
                                     }
                                     Err(e) => *status = e.to_string(),
-                                }
-                                // Reopen the hotlist, refreshed.
-                                *active_dialog = Some(ActiveDialog::Hotlist {
-                                    widget: HotlistDialog::new(build_hotlist_rows(app.bookmarks())),
-                                });
-                                *mode = Mode::Dialog;
-                            } else {
-                                let core = match kind {
-                                    InputKind::Mkdir => AppCommand::Mkdir(text),
-                                    InputKind::SelectPattern => AppCommand::SelectByPattern(text),
-                                    InputKind::UnselectPattern => {
-                                        AppCommand::UnselectByPattern(text)
+                                },
+                                // Feature 043: symlink / hardlink are direct App
+                                // methods; errors (existing name, bad target) ⇒
+                                // inline status.
+                                InputKind::Symlink => match app.create_symlink(&text).await {
+                                    Ok(events) => {
+                                        for ev in events {
+                                            apply_event(ev, app, mode, active_dialog, status, quit);
+                                        }
                                     }
-                                    InputKind::AddBookmark => unreachable!("handled above"),
-                                };
-                                let events = app
-                                    .dispatch(core)
-                                    .await
-                                    .map_err(|e| Error::Other(e.to_string()))?;
-                                for ev in events {
-                                    apply_event(ev, app, mode, active_dialog, status, quit);
+                                    Err(e) => *status = e.to_string(),
+                                },
+                                InputKind::HardLink => match app.create_hard_link(&text).await {
+                                    Ok(events) => {
+                                        for ev in events {
+                                            apply_event(ev, app, mode, active_dialog, status, quit);
+                                        }
+                                    }
+                                    Err(e) => *status = e.to_string(),
+                                },
+                                // Feature 043 (FR-007): chown requires explicit
+                                // confirmation — chain a ConfirmDialog whose
+                                // on-confirm dispatches the core chown command.
+                                InputKind::Chown => {
+                                    *active_dialog = Some(ActiveDialog::Confirm {
+                                        widget: ConfirmDialog::new(
+                                            "Change owner",
+                                            format!("Change owner to {text}?"),
+                                        ),
+                                        on_confirm: AppCommand::Chown(text),
+                                    });
+                                    *mode = Mode::Dialog;
+                                }
+                                InputKind::Mkdir
+                                | InputKind::SelectPattern
+                                | InputKind::UnselectPattern => {
+                                    let core = match kind {
+                                        InputKind::Mkdir => AppCommand::Mkdir(text),
+                                        InputKind::SelectPattern => {
+                                            AppCommand::SelectByPattern(text)
+                                        }
+                                        InputKind::UnselectPattern => {
+                                            AppCommand::UnselectByPattern(text)
+                                        }
+                                        _ => unreachable!("handled above"),
+                                    };
+                                    let events = app
+                                        .dispatch(core)
+                                        .await
+                                        .map_err(|e| Error::Other(e.to_string()))?;
+                                    for ev in events {
+                                        apply_event(ev, app, mode, active_dialog, status, quit);
+                                    }
                                 }
                             }
                         }
@@ -785,6 +851,61 @@ async fn dispatch_ui_command(
         Command::BookmarksMenu => {
             *active_dialog = Some(ActiveDialog::Hotlist {
                 widget: HotlistDialog::new(build_hotlist_rows(app.bookmarks())),
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 043 (FR-001/011): C-x c opens the chmod prompt, prefilled
+        // with the focused entry's current octal mode.
+        Command::Chmod => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Change permissions",
+                    "Mode (octal e.g. 755, or symbolic e.g. u+x):",
+                    focused_octal_mode(app),
+                ),
+                kind: InputKind::Chmod,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 043 (FR-004): C-x o opens the chown prompt, prefilled with the
+        // focused entry's current numeric owner. Submit chains a confirmation
+        // (FR-007) before applying.
+        Command::Chown => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Change owner",
+                    "Owner (user, :group, or user:group):",
+                    focused_owner(app),
+                ),
+                kind: InputKind::Chown,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 043: C-x s / C-x l open a link-name prompt prefilled with the
+        // focused entry's name.
+        Command::CreateSymlink => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Create symbolic link",
+                    "Link name:",
+                    focused_entry_name(app),
+                ),
+                kind: InputKind::Symlink,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        Command::CreateHardLink => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Create hard link",
+                    "Link name:",
+                    focused_entry_name(app),
+                ),
+                kind: InputKind::HardLink,
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -1157,6 +1278,39 @@ fn build_hotlist_rows(bookmarks: &[cargonaut_core::Bookmark]) -> Vec<HotlistRow>
     rows
 }
 
+/// Feature 043 — the focused entry's current permission bits as an octal
+/// string (for prefilling the chmod prompt); `"644"` when unavailable.
+fn focused_octal_mode(app: &App) -> String {
+    let p = app.active_pane_state();
+    p.focused_entry_index()
+        .and_then(|i| p.listing.entries.get(i))
+        .and_then(|e| e.meta.mode.as_ref())
+        .map(|m| format!("{:o}", m.bits & 0o777))
+        .unwrap_or_else(|| "644".to_string())
+}
+
+/// Feature 043 — the focused entry's current owner as `uid:gid` (for prefilling
+/// the chown prompt); empty when unavailable.
+fn focused_owner(app: &App) -> String {
+    let p = app.active_pane_state();
+    p.focused_entry_index()
+        .and_then(|i| p.listing.entries.get(i))
+        .and_then(|e| e.meta.mode.as_ref())
+        .and_then(|m| Some((m.uid?, m.gid?)))
+        .map(|(u, g)| format!("{u}:{g}"))
+        .unwrap_or_default()
+}
+
+/// Feature 043 — the focused entry's name (for prefilling a link prompt);
+/// empty when nothing is focused.
+fn focused_entry_name(app: &App) -> String {
+    let p = app.active_pane_state();
+    p.focused_entry_index()
+        .and_then(|i| p.listing.entries.get(i))
+        .map(|e| e.name.to_string())
+        .unwrap_or_default()
+}
+
 /// Feature 042 — parse a bookmark-add prompt into `(group, name)`. Text of the
 /// form `group/name` splits on the first `/` (both sides trimmed); text with no
 /// `/` is the name with no group.
@@ -1502,6 +1656,7 @@ Cargonaut — quick help\n\
   Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
   M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
   C-b: directory hotlist (bookmarks) — [a]dd · [d]el · Enter jumps\n\
+  C-x c chmod · C-x o chown · C-x s symlink · C-x l hardlink\n\
 \n\
   Press any key to close.";
 
@@ -1639,6 +1794,16 @@ mod tests {
         assert!(
             s.contains("1000"),
             "teardown must emit the mouse-disable sequence; got: {s:?}"
+        );
+    }
+
+    // Feature 043: help documents the file-attribute keys.
+    #[test]
+    fn help_documents_attribute_keys() {
+        assert!(HELP_BODY.contains("C-x c"), "help must mention chmod key");
+        assert!(
+            HELP_BODY.to_lowercase().contains("chmod"),
+            "help must mention chmod"
         );
     }
 
@@ -2376,6 +2541,199 @@ mod tests {
     }
 
     // Feature 042: Ctrl-b (BookmarksMenu) opens the hotlist popup.
+    #[tokio::test]
+    async fn chmod_command_opens_prefilled_input() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let f = td_l.path().join("f");
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::Chmod,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        match dlg {
+            Some(ActiveDialog::Input { widget, kind }) => {
+                assert!(matches!(kind, InputKind::Chmod));
+                assert_eq!(widget.value(), "644", "prefilled with current octal mode");
+            }
+            other => panic!("expected chmod input dialog, got {other:?}"),
+        }
+        assert!(matches!(mode, Mode::Dialog));
+    }
+
+    // Feature 043: C-x s opens a symlink-name prompt prefilled with the target.
+    #[tokio::test]
+    async fn symlink_command_opens_prefilled_input() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("src"), b"x").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::CreateSymlink,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        match dlg {
+            Some(ActiveDialog::Input { widget, kind }) => {
+                assert!(matches!(kind, InputKind::Symlink));
+                assert_eq!(widget.value(), "src");
+            }
+            other => panic!("expected symlink input, got {other:?}"),
+        }
+    }
+
+    // Feature 043 (FR-007): chown opens an owner prompt, and submitting it
+    // chains a confirmation dialog before applying.
+    #[tokio::test]
+    async fn chown_command_chains_confirmation() {
+        use crossterm::event::KeyCode;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("f"), b"x").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        // Open the owner prompt.
+        dispatch_ui_command(
+            Command::Chown,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::Input {
+                kind: InputKind::Chown,
+                ..
+            })
+        ));
+        // Type "0:0" and submit → should chain a confirmation dialog.
+        for c in ['0', ':', '0'] {
+            feed_key(
+                KeyCode::Char(c),
+                &mut app,
+                &keymap,
+                &mut mode,
+                &mut dlg,
+                &mut ui,
+            )
+            .await;
+        }
+        feed_key(
+            KeyCode::Enter,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(
+            matches!(dlg, Some(ActiveDialog::Confirm { .. })),
+            "chown submit must chain a confirmation (FR-007), got {dlg:?}"
+        );
+    }
+
+    // Feature 043 (FR-012): Esc on the chmod dialog closes it, no change.
+    #[tokio::test]
+    async fn chmod_dialog_esc_cancels_unchanged() {
+        use crossterm::event::KeyCode;
+        use std::os::unix::fs::PermissionsExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let f = td_l.path().join("f");
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::Chmod,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        feed_key(
+            KeyCode::Esc,
+            &mut app,
+            &Keymap::load(DEFAULT_KEYMAP).unwrap(),
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(dlg.is_none(), "Esc closes the dialog");
+        let m = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m, 0o644, "Esc must not change the file");
+    }
+
     #[tokio::test]
     async fn bookmarks_menu_opens_hotlist_dialog() {
         let td_l = TempDir::new().unwrap();

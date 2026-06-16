@@ -193,6 +193,15 @@ pub enum Command {
     // Feature 041 (FR-013 follow-up, #38)
     /// Toggle runtime mouse capture on/off (Alt-m).
     ToggleMouseCapture,
+    // Feature 043 (file attributes, #46)
+    /// Change permissions of the selection (C-x c).
+    Chmod,
+    /// Change ownership of the selection (C-x o).
+    Chown,
+    /// Create a symbolic link to the focused entry (C-x s).
+    CreateSymlink,
+    /// Create a hard link to the focused entry (C-x l).
+    CreateHardLink,
 }
 
 // ============================================================
@@ -609,6 +618,32 @@ action = "this-action-does-not-exist"
             SeqLookup::Command(Command::ExternalPanelize),
             "C-x ! must resolve to external-panelize"
         );
+    }
+
+    // Feature 043: the orthodox attribute chords C-x c/o/s/l.
+    #[test]
+    fn attribute_chords_resolve() {
+        let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
+        let c_x = KeyChord {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::CONTROL,
+        };
+        let plain = |c| KeyChord {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::empty(),
+        };
+        for (ch, cmd) in [
+            ('c', Command::Chmod),
+            ('o', Command::Chown),
+            ('s', Command::CreateSymlink),
+            ('l', Command::CreateHardLink),
+        ] {
+            assert_eq!(
+                km.lookup_sequence(Mode::Pane, &[c_x, plain(ch)]),
+                SeqLookup::Command(cmd),
+                "C-x {ch} must resolve to {cmd:?}"
+            );
+        }
     }
 
     #[test]

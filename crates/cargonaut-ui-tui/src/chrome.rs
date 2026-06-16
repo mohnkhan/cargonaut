@@ -215,6 +215,10 @@ impl MenuBar {
                     ("Copy", Command::CopySelection),
                     ("Rename/Move", Command::MoveOrRenameSelection),
                     ("Delete", Command::DeleteSelection),
+                    ("Chmod", Command::Chmod),
+                    ("Chown", Command::Chown),
+                    ("Symlink", Command::CreateSymlink),
+                    ("Hardlink", Command::CreateHardLink),
                 ],
             },
             Menu {
@@ -371,13 +375,21 @@ impl MenuBar {
             let menu = &self.menus[i];
             let title_x = rects.get(i).map(|r| r.x).unwrap_or(area.x);
             let width = menu.items.iter().map(|(l, _)| l.len()).max().unwrap_or(4) as u16 + 4;
-            let height = menu.items.len() as u16 + 2;
+            let y = area.y + 1;
+            // Clamp the dropdown to the buffer so a long menu (or short terminal)
+            // can never render outside bounds (would panic in `Clear`).
+            let buf_h = buf.area().height;
+            let max_h = buf_h.saturating_sub(y);
+            let height = (menu.items.len() as u16 + 2).min(max_h);
             let drop = Rect {
                 x: title_x,
-                y: area.y + 1,
-                width: width.min(area.width),
+                y,
+                width: width.min(buf.area().width.saturating_sub(title_x)),
                 height,
             };
+            if drop.height == 0 || drop.width == 0 {
+                return;
+            }
             Clear.render(drop, buf);
             let items: Vec<ListItem<'_>> =
                 menu.items.iter().map(|(l, _)| ListItem::new(*l)).collect();
