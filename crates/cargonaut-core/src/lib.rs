@@ -1939,6 +1939,72 @@ mod tests {
         assert_eq!(mode_of(&td_l.path().join("f")), 0o644, "..-row chmod must no-op");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_symlink_points_at_focused_entry() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"hello").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "src"
+        app.create_symlink("ln").await.unwrap();
+        let link = td_l.path().join("ln");
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&link).unwrap(), b"hello");
+        assert!(app
+            .pane(PaneId::Left)
+            .listing
+            .entries
+            .iter()
+            .any(|e| e.name.as_str() == "ln"));
+    }
+
+    #[tokio::test]
+    async fn create_symlink_existing_name_is_refused() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"x").await.unwrap();
+        fs::write(td_l.path().join("taken"), b"y").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "src" (sorts first)
+        let res = app.create_symlink("taken").await;
+        assert!(res.is_err(), "must refuse an existing name");
+        assert_eq!(std::fs::read(td_l.path().join("taken")).unwrap(), b"y");
+    }
+
+    #[tokio::test]
+    async fn create_hard_link_shares_content() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"shared").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.create_hard_link("h").await.unwrap();
+        assert_eq!(std::fs::read(td_l.path().join("h")).unwrap(), b"shared");
+    }
+
+    #[tokio::test]
+    async fn create_hard_link_to_directory_errors() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::create_dir(td_l.path().join("d")).await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "d"
+        let res = app.create_hard_link("h").await;
+        assert!(res.is_err(), "hard-linking a directory must error, not panic");
+    }
+
+    #[tokio::test]
+    async fn create_symlink_blank_name_is_bad_attr() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("src"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.create_symlink("  ").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
     // ===== Feature 042: directory hotlist / bookmarks =====
 
     #[tokio::test]
