@@ -1776,6 +1776,112 @@ mod tests {
         .unwrap()
     }
 
+    // ===== Feature 043: file attribute operations =====
+
+    #[cfg(unix)]
+    fn mode_of(p: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    fn entry_index(app: &App, name: &str) -> usize {
+        app.pane(PaneId::Left)
+            .listing
+            .entries
+            .iter()
+            .position(|e| e.name.as_str() == name)
+            .expect("entry present")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_sets_focused_file() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("only.txt"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Default cursor sits on the first real entry (Feature 040).
+        app.chmod_selection("755").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("only.txt")), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_symbolic_and_multi_file() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b"] {
+            fs::write(td_l.path().join(n), b"x").await.unwrap();
+            std::fs::set_permissions(
+                td_l.path().join(n),
+                std::os::unix::fs::PermissionsExt::from_mode(0o644),
+            )
+            .unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        let (ia, ib) = (entry_index(&app, "a"), entry_index(&app, "b"));
+        app.active_pane_mut().selected.insert(ia);
+        app.active_pane_mut().selected.insert(ib);
+        app.chmod_selection("u+x").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("a")), 0o744);
+        assert_eq!(mode_of(&td_l.path().join("b")), 0o744);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_invalid_changes_nothing() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        std::fs::set_permissions(
+            td_l.path().join("f"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o644),
+        )
+        .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let res = app.chmod_selection("xyz").await;
+        assert!(matches!(res, Err(AppError::BadAttr(_))));
+        assert_eq!(mode_of(&td_l.path().join("f")), 0o644);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_partial_failure_reports_and_continues() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b"] {
+            fs::write(td_l.path().join(n), b"x").await.unwrap();
+        }
+        let mut app = make_app(&td_l, &td_r).await;
+        let (ia, ib) = (entry_index(&app, "a"), entry_index(&app, "b"));
+        app.active_pane_mut().selected.insert(ia);
+        app.active_pane_mut().selected.insert(ib);
+        // Remove "b" from disk so its chmod fails while "a" succeeds.
+        std::fs::remove_file(td_l.path().join("b")).unwrap();
+        let evs = app.chmod_selection("700").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("a")), 0o700);
+        let status = format!("{evs:?}");
+        assert!(status.contains('b') || status.to_lowercase().contains("fail"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_selection_on_parent_row_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        std::fs::set_permissions(
+            td_l.path().join("f"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o644),
+        )
+        .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Put the cursor on the synthetic `..` row (index 0); no tags.
+        app.active_pane_mut().cursor = 0;
+        app.chmod_selection("700").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("f")), 0o644, "..-row chmod must no-op");
+    }
+
     // ===== Feature 042: directory hotlist / bookmarks =====
 
     #[tokio::test]
