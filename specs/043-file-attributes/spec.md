@@ -8,6 +8,16 @@
 
 **Input**: User description: "File attribute operations: change permissions/ownership and create links. Add the reference orthodox-FM file-attribute operations to the focused/tagged files: change Unix permissions (chmod, via both symbolic like u+x and octal like 0644), change ownership (chown user/group), and create symbolic links and hard links. Provide new VFS backend operations (chmod/chown/symlink/link) implemented for the LocalFs backend, surfaced through dialogs that reuse the existing shared dialog widgets, and reachable from the File menu (and a keybinding). Operations apply to the current selection (tagged files, or the focused entry if none tagged), require confirmation for destructive/ownership changes, refresh the affected pane, and report errors (e.g. permission denied) without crashing. This implements the deferred file-attributes capability from Feature 031 (§Out of Scope, FR-029), tracked as issue #46."
 
+## Clarifications
+
+### Session 2026-06-17
+
+(The user did not select among the presented options; the recommended defaults below were adopted and are recorded here.)
+
+- Q: Should chmod/chown apply recursively into directory subtrees, or operate only on the selected entries? → A: **Files-only — recursion deferred.** Operations apply to exactly the selected entries (a selected directory has its own mode/owner changed, not its contents). Recursive apply becomes a tracked follow-up (keeps effort at M).
+- Q: Is chown (change user/group) in scope, given it usually requires root? → A: **Include chown now.** Ship chmod + links + chown together; chown fails gracefully with "permission denied" when unprivileged.
+- Q: Which keybindings for the attribute operations? → A: **Orthodox `C-x` chords** — `C-x c` chmod, `C-x o` chown, `C-x s` symlink, `C-x l` hardlink (consistent with the existing `C-x` family), plus File-menu entries.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Change permissions of selected files (Priority: P1)
@@ -63,11 +73,11 @@ A user (typically with the necessary privileges) wants to change a file's owning
 ### Edge Cases
 
 - **The `..` parent row** must be excluded from all attribute operations (consistent with copy/move/delete) — it is never a target.
-- **Confirmation**: ownership changes and recursive changes require explicit confirmation before applying; a plain chmod of a single file MAY proceed without a second confirmation (defined in Requirements/Assumptions).
+- **Confirmation**: ownership changes require explicit confirmation before applying; a plain chmod of a single file MAY proceed without a second confirmation (defined in Requirements/Assumptions).
 - **Partial failure across a multi-file selection**: if some files succeed and others fail (e.g. mixed ownership), the user is told which failed; successes are not rolled back.
 - **chmod/chown on a symlink**: behavior on the link vs. its target must be predictable (defined in Assumptions).
 - **Symlink to a non-existent target** (dangling link) is allowed; **hard link to a directory or across filesystems** is rejected by the OS and surfaced as an error.
-- **Recursive application** to a directory tree (if offered) must handle large trees without hanging the UI and report per-entry failures.
+- **Recursive application** to a directory tree is **out of scope** for this feature (deferred to a follow-up); a selected directory has only its own attributes changed, not its contents.
 - **Non-local backends**: on a backend that does not support an attribute operation, the action reports "not supported" rather than failing opaquely.
 - **Invalid input**: malformed octal, malformed symbolic spec, blank link name — all rejected with no state change.
 
@@ -81,11 +91,11 @@ A user (typically with the necessary privileges) wants to change a file's owning
 - **FR-004**: The system MUST let users change **ownership** (user and/or group) of the current selection.
 - **FR-005**: Attribute operations MUST apply to the **current selection** — all tagged files, or the focused entry if none are tagged — excluding the synthetic `..` row.
 - **FR-006**: The system MUST provide the underlying file-attribute operations (change-permissions, change-ownership, create-symlink, create-hard-link) for the local filesystem; on a backend that does not support a given operation it MUST report it as unsupported rather than crashing.
-- **FR-007**: Ownership changes (and any recursive attribute change) MUST require explicit user confirmation before being applied.
+- **FR-007**: Ownership changes MUST require explicit user confirmation before being applied. (Recursive subtree application is out of scope for this feature — see Clarifications.)
 - **FR-008**: After a successful operation the affected pane MUST refresh so the new permissions / ownership / link are visible.
 - **FR-009**: Invalid input (malformed octal/symbolic mode, unknown user/group, blank or duplicate link name) MUST be rejected with a clear inline message and MUST NOT change any file.
 - **FR-010**: Operational failures (e.g. permission denied, cross-filesystem hard link, link target exists) MUST be reported to the user without crashing; for a multi-file selection, partial failures MUST be surfaced (which items failed) without rolling back the successes.
-- **FR-011**: The operations MUST be reachable from the **File menu** and from a **keybinding**, and their dialogs MUST reuse the shared dialog widgets (consistent navigation: edit, confirm, cancel).
+- **FR-011**: The operations MUST be reachable from the **File menu** and from keybindings — `C-x c` (chmod), `C-x o` (chown), `C-x s` (symlink), `C-x l` (hardlink) — and their dialogs MUST reuse the shared dialog widgets (consistent navigation: edit, confirm, cancel).
 - **FR-012**: Cancelling any attribute dialog MUST close it with no change to the files or panes.
 
 ### Key Entities *(include if feature involves data)*
@@ -114,7 +124,7 @@ A user (typically with the necessary privileges) wants to change a file's owning
 - **Symlink vs. hardlink semantics**: symbolic links may point at a non-existent target (dangling allowed); hard links are restricted to the same filesystem and to non-directory targets (OS-enforced; surfaced as errors).
 - **Default chmod/chown on a symlink** operates per the platform's default (typically following the link for chmod); operating on the link itself vs. the target is not separately configurable in this feature.
 - **Link location**: by default a new link is created in the active pane's current directory with a user-supplied name (prefilled with a sensible default such as the target's name); the user may type a different name/path.
-- **Confirmation scope**: a single-file chmod proceeds from its dialog without a second confirmation; ownership changes and any recursive (whole-subtree) application require an explicit confirm (the exact recursion offering is finalized in planning).
+- **Confirmation scope**: a single-file chmod proceeds from its dialog without a second confirmation; ownership changes require an explicit confirm. Recursive subtree application is **deferred** (out of scope, tracked as a follow-up).
 - **Scope is the interactive TUI on the local filesystem**: this feature targets the local backend; remote/archive backends are out of scope (they advertise the operation as unsupported until their own features land).
 - **No new persisted state**: attribute operations mutate the filesystem directly; nothing is written to config/state files.
-- **Keybinding & menu placement** follow the project's single-source-of-truth keymap and the existing File menu; the exact key is finalized in planning.
+- **Keybindings & menu placement**: the orthodox `C-x c/o/s/l` chords (chmod/chown/symlink/hardlink) land in the single-source-of-truth keymap, plus entries in the existing File menu.
