@@ -2377,6 +2377,47 @@ mod tests {
 
     // Feature 042: Ctrl-b (BookmarksMenu) opens the hotlist popup.
     #[tokio::test]
+    async fn chmod_command_opens_prefilled_input() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let f = td_l.path().join("f");
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::Chmod,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        match dlg {
+            Some(ActiveDialog::Input { widget, kind }) => {
+                assert!(matches!(kind, InputKind::Chmod));
+                assert_eq!(widget.value(), "644", "prefilled with current octal mode");
+            }
+            other => panic!("expected chmod input dialog, got {other:?}"),
+        }
+        assert!(matches!(mode, Mode::Dialog));
+    }
+
+    #[tokio::test]
     async fn bookmarks_menu_opens_hotlist_dialog() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();

@@ -193,6 +193,15 @@ pub enum Command {
     // Feature 041 (FR-013 follow-up, #38)
     /// Toggle runtime mouse capture on/off (Alt-m).
     ToggleMouseCapture,
+    // Feature 043 (file attributes, #46)
+    /// Change permissions of the selection (C-x c).
+    Chmod,
+    /// Change ownership of the selection (C-x o).
+    Chown,
+    /// Create a symbolic link to the focused entry (C-x s).
+    CreateSymlink,
+    /// Create a hard link to the focused entry (C-x l).
+    CreateHardLink,
 }
 
 // ============================================================
