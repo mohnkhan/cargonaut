@@ -119,20 +119,20 @@ updates.
 
 **Independent Test**: highlight `file.txt`, create a symlink, see it resolve.
 
-- [ ] T014 [P] [US2] (red) In `crates/cargonaut-core/src/lib.rs` add failing
+- [X] T014 [P] [US2] (red) In `crates/cargonaut-core/src/lib.rs` add failing
   `#[tokio::test]`s: `create_symlink("ln")` makes `ln` in the active cwd pointing
   at the focused entry (appears on refresh); existing name ⇒ `Err`, nothing
   overwritten; `create_hard_link("h")` shares content; hard-linking a directory
   ⇒ reported error, no crash (SC-002).
-- [ ] T015 [US2] (green) Implement `App::create_symlink(name)` and
+- [X] T015 [US2] (green) Implement `App::create_symlink(name)` and
   `App::create_hard_link(name)` (focused entry as source; `cwd.join(name)` as the
   new link; blank/duplicate ⇒ `BadAttr`; refresh; status). Make T014 pass.
-- [ ] T016 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add failing
+- [X] T016 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add failing
   tests that `C-x s` ⇒ `Command::CreateSymlink` and `C-x l` ⇒
   `Command::CreateHardLink` (pane mode).
-- [ ] T017 [US2] (green) Add the two `Command` variants + bindings in
+- [X] T017 [US2] (green) Add the two `Command` variants + bindings in
   `keymap.toml` (`C-x s` symlink, `C-x l` hardlink). Make T016 pass.
-- [ ] T018 [US2] (green) Wire both commands in `dispatch_ui_command` to open a
+- [X] T018 [US2] (green) Wire both commands in `dispatch_ui_command` to open a
   `TextInputDialog` (`InputKind::Symlink`/`HardLink`) prefilled with the target's
   name; on submit call the matching App method. Add File-menu "Symlink" +
   "Hardlink" entries. (Covered by a dispatch test added here, red-then-green

@@ -1438,6 +1438,51 @@ impl App {
         Ok(evs)
     }
 
+    /// Create a symbolic link named `link_name` in the active pane's directory,
+    /// pointing at the focused entry (a relative link to the sibling). Blank
+    /// name ⇒ [`AppError::BadAttr`]; an existing name or OS error is reported.
+    pub async fn create_symlink(&mut self, link_name: &str) -> Result<Vec<Event>, AppError> {
+        let (target_name, cwd) = self.link_source()?;
+        let link_name = link_name.trim();
+        if link_name.is_empty() {
+            return Err(AppError::BadAttr("link name must not be blank".into()));
+        }
+        let link = cwd.join(link_name);
+        self.local_fs.symlink(&target_name, &link).await?;
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(format!("Linked {link_name} → {target_name}")));
+        Ok(evs)
+    }
+
+    /// Create a hard link named `link_name` in the active pane's directory,
+    /// referring to the focused entry. Blank name ⇒ [`AppError::BadAttr`];
+    /// OS rejection (directory / cross-filesystem) is reported.
+    pub async fn create_hard_link(&mut self, link_name: &str) -> Result<Vec<Event>, AppError> {
+        let (target_name, cwd) = self.link_source()?;
+        let link_name = link_name.trim();
+        if link_name.is_empty() {
+            return Err(AppError::BadAttr("link name must not be blank".into()));
+        }
+        let src = cwd.join(&target_name);
+        let link = cwd.join(link_name);
+        self.local_fs.hard_link(&src, &link).await?;
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(format!("Hard-linked {link_name} → {target_name}")));
+        Ok(evs)
+    }
+
+    /// The focused real entry's name + the active pane cwd, for link creation.
+    /// Errors if nothing is focused (e.g. cursor on the `..` row).
+    fn link_source(&self) -> Result<(String, VfsPath), AppError> {
+        let p = self.active_pane_state();
+        let name = p
+            .focused_entry_index()
+            .and_then(|i| p.listing.entries.get(i))
+            .map(|e| e.name.to_string())
+            .ok_or_else(|| AppError::BadAttr("no file focused to link".into()))?;
+        Ok((name, p.cwd.clone()))
+    }
+
     // ===== Feature 042: directory hotlist / bookmarks =====
 
     /// Read-only view of the saved bookmarks (UI snapshot source).

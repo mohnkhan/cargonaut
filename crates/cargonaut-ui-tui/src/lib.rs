@@ -509,10 +509,27 @@ async fn handle_key(
                                     }
                                     Err(e) => *status = e.to_string(),
                                 },
-                                // Feature 043: wired in later phases (US2/US3).
-                                InputKind::Symlink
-                                | InputKind::HardLink
-                                | InputKind::Chown => {
+                                // Feature 043: symlink / hardlink are direct App
+                                // methods; errors (existing name, bad target) ⇒
+                                // inline status.
+                                InputKind::Symlink => match app.create_symlink(&text).await {
+                                    Ok(events) => {
+                                        for ev in events {
+                                            apply_event(ev, app, mode, active_dialog, status, quit);
+                                        }
+                                    }
+                                    Err(e) => *status = e.to_string(),
+                                },
+                                InputKind::HardLink => match app.create_hard_link(&text).await {
+                                    Ok(events) => {
+                                        for ev in events {
+                                            apply_event(ev, app, mode, active_dialog, status, quit);
+                                        }
+                                    }
+                                    Err(e) => *status = e.to_string(),
+                                },
+                                // Feature 043: chown wired in US3 (confirm chain).
+                                InputKind::Chown => {
                                     *status = "not yet wired".into();
                                 }
                                 InputKind::Mkdir
@@ -846,6 +863,32 @@ async fn dispatch_ui_command(
                     focused_octal_mode(app),
                 ),
                 kind: InputKind::Chmod,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 043: C-x s / C-x l open a link-name prompt prefilled with the
+        // focused entry's name.
+        Command::CreateSymlink => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Create symbolic link",
+                    "Link name:",
+                    focused_entry_name(app),
+                ),
+                kind: InputKind::Symlink,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        Command::CreateHardLink => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Create hard link",
+                    "Link name:",
+                    focused_entry_name(app),
+                ),
+                kind: InputKind::HardLink,
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -1227,6 +1270,16 @@ fn focused_octal_mode(app: &App) -> String {
         .and_then(|e| e.meta.mode.as_ref())
         .map(|m| format!("{:o}", m.bits & 0o777))
         .unwrap_or_else(|| "644".to_string())
+}
+
+/// Feature 043 — the focused entry's name (for prefilling a link prompt);
+/// empty when nothing is focused.
+fn focused_entry_name(app: &App) -> String {
+    let p = app.active_pane_state();
+    p.focused_entry_index()
+        .and_then(|i| p.listing.entries.get(i))
+        .map(|e| e.name.to_string())
+        .unwrap_or_default()
 }
 
 /// Feature 042 — parse a bookmark-add prompt into `(group, name)`. Text of the
@@ -2487,6 +2540,44 @@ mod tests {
             other => panic!("expected chmod input dialog, got {other:?}"),
         }
         assert!(matches!(mode, Mode::Dialog));
+    }
+
+    // Feature 043: C-x s opens a symlink-name prompt prefilled with the target.
+    #[tokio::test]
+    async fn symlink_command_opens_prefilled_input() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("src"), b"x").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::CreateSymlink,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        match dlg {
+            Some(ActiveDialog::Input { widget, kind }) => {
+                assert!(matches!(kind, InputKind::Symlink));
+                assert_eq!(widget.value(), "src");
+            }
+            other => panic!("expected symlink input, got {other:?}"),
+        }
     }
 
     // Feature 043 (FR-012): Esc on the chmod dialog closes it, no change.
