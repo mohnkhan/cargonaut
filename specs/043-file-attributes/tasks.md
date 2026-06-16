@@ -149,20 +149,20 @@ updates.
 **Independent Test**: chgrp to an owned group succeeds; unknown name errors;
 unprivileged foreign chown reports permission denied.
 
-- [ ] T019 [P] [US3] (red) In `crates/cargonaut-core/src/lib.rs` add failing
+- [X] T019 [P] [US3] (red) In `crates/cargonaut-core/src/lib.rs` add failing
   `#[tokio::test]`s: `chown_selection("<self-user>:<self-group>")` (or numeric
   current ids) ⇒ `Ok`, re-stat shows ids (SC-006); `chown_selection("baduser")`
   ⇒ `Err(BadAttr)` no change (FR-009); owner-string parsing (`user`, `:group`,
   `user:group`, numeric).
-- [ ] T020 [US3] (green) Implement `App::chown_selection(owner)`: parse
+- [X] T020 [US3] (green) Implement `App::chown_selection(owner)`: parse
   `user[:group]` resolving names via `nix::unistd::User::from_name`/`Group::from_name`
   (or numeric), BadAttr on unknown; `local_fs.chown` each target; collect
   failures; refresh; status. Make T019 pass.
-- [ ] T021 [US3] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a failing
+- [X] T021 [US3] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a failing
   test that `C-x o` ⇒ `Command::Chown`.
-- [ ] T022 [US3] (green) Add `Command::Chown` + `keymap.toml` binding (`C-x o`).
+- [X] T022 [US3] (green) Add `Command::Chown` + `keymap.toml` binding (`C-x o`).
   Make T021 pass.
-- [ ] T023 [US3] (green) Wire `Command::Chown` in `dispatch_ui_command`: open a
+- [X] T023 [US3] (green) Wire `Command::Chown` in `dispatch_ui_command`: open a
   prefilled owner `TextInputDialog` (`InputKind::Chown`); on submit chain a
   `ConfirmDialog` ("Change owner of N item(s) to `<owner>`?"); on confirm call
   `app.chown_selection` (FR-007). Add a File-menu "Chown" entry. (Dispatch +

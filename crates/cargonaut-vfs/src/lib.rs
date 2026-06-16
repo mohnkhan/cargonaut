@@ -15,11 +15,13 @@
 pub mod error;
 pub mod local;
 pub mod mode;
+pub mod owner;
 pub mod traits;
 pub mod types;
 
 pub use error::VfsError;
 pub use local::LocalFs;
 pub use mode::{ModeError, ModeSpec};
+pub use owner::{parse_owner, OwnerError};
 pub use traits::{ByteRange, VfsBackend, VfsCaps, WriteMode};
 pub use types::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsPath};

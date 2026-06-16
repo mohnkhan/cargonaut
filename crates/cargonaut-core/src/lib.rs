@@ -307,6 +307,9 @@ pub enum Command {
     SelectByPattern(String),
     /// FR-025 — untag visible entries whose name matches the glob.
     UnselectByPattern(String),
+    /// Feature 043 (#46) — change ownership of the selection to `user[:group]`
+    /// (routed through a confirmation dialog; see `chown_selection`).
+    Chown(String),
     /// F10 — quit cargonaut.
     Quit,
 }
@@ -956,6 +959,7 @@ impl App {
             Mkdir(name) => self.mkdir(&name).await,
             SelectByPattern(pat) => Ok(self.select_by_pattern(&pat, true)),
             UnselectByPattern(pat) => Ok(self.select_by_pattern(&pat, false)),
+            Chown(owner) => self.chown_selection(&owner).await,
             Quit => Ok(vec![Event::QuitRequested]),
         }
     }
@@ -1435,6 +1439,34 @@ impl App {
         }
         let mut evs = self.refresh_active_pane().await?;
         evs.push(Event::Status(attr_status("chmod", ok, &failures)));
+        Ok(evs)
+    }
+
+    /// Change ownership of the current selection. `owner` is `user`, `:group`,
+    /// or `user:group` (each side a name or numeric id; omitted side unchanged).
+    /// Invalid/unknown owner ⇒ [`AppError::BadAttr`] with no change. Per-file
+    /// failures (e.g. permission denied) are reported without rollback (FR-010);
+    /// the pane is refreshed (FR-008).
+    pub async fn chown_selection(&mut self, owner: &str) -> Result<Vec<Event>, AppError> {
+        let (uid, gid) = cargonaut_vfs::parse_owner(owner)
+            .map_err(|e| AppError::BadAttr(format!("invalid owner {owner:?} ({e:?})")))?;
+        let id = self.active;
+        let names = self.selection_or_focused(id);
+        if names.is_empty() {
+            return Ok(vec![Event::Status("No files selected".into())]);
+        }
+        let cwd = self.pane(id).cwd.clone();
+        let mut ok = 0usize;
+        let mut failures = Vec::new();
+        for name in &names {
+            let target = cwd.join(name);
+            match self.local_fs.chown(&target, uid, gid).await {
+                Ok(()) => ok += 1,
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
+        }
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(attr_status("chown", ok, &failures)));
         Ok(evs)
     }
 

@@ -528,9 +528,18 @@ async fn handle_key(
                                     }
                                     Err(e) => *status = e.to_string(),
                                 },
-                                // Feature 043: chown wired in US3 (confirm chain).
+                                // Feature 043 (FR-007): chown requires explicit
+                                // confirmation — chain a ConfirmDialog whose
+                                // on-confirm dispatches the core chown command.
                                 InputKind::Chown => {
-                                    *status = "not yet wired".into();
+                                    *active_dialog = Some(ActiveDialog::Confirm {
+                                        widget: ConfirmDialog::new(
+                                            "Change owner",
+                                            format!("Change owner to {text}?"),
+                                        ),
+                                        on_confirm: AppCommand::Chown(text),
+                                    });
+                                    *mode = Mode::Dialog;
                                 }
                                 InputKind::Mkdir
                                 | InputKind::SelectPattern
@@ -863,6 +872,21 @@ async fn dispatch_ui_command(
                     focused_octal_mode(app),
                 ),
                 kind: InputKind::Chmod,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 043 (FR-004): C-x o opens the chown prompt, prefilled with the
+        // focused entry's current numeric owner. Submit chains a confirmation
+        // (FR-007) before applying.
+        Command::Chown => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Change owner",
+                    "Owner (user, :group, or user:group):",
+                    focused_owner(app),
+                ),
+                kind: InputKind::Chown,
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -1270,6 +1294,18 @@ fn focused_octal_mode(app: &App) -> String {
         .and_then(|e| e.meta.mode.as_ref())
         .map(|m| format!("{:o}", m.bits & 0o777))
         .unwrap_or_else(|| "644".to_string())
+}
+
+/// Feature 043 — the focused entry's current owner as `uid:gid` (for prefilling
+/// the chown prompt); empty when unavailable.
+fn focused_owner(app: &App) -> String {
+    let p = app.active_pane_state();
+    p.focused_entry_index()
+        .and_then(|i| p.listing.entries.get(i))
+        .and_then(|e| e.meta.mode.as_ref())
+        .and_then(|m| Some((m.uid?, m.gid?)))
+        .map(|(u, g)| format!("{u}:{g}"))
+        .unwrap_or_default()
 }
 
 /// Feature 043 — the focused entry's name (for prefilling a link prompt);
@@ -2578,6 +2614,57 @@ mod tests {
             }
             other => panic!("expected symlink input, got {other:?}"),
         }
+    }
+
+    // Feature 043 (FR-007): chown opens an owner prompt, and submitting it
+    // chains a confirmation dialog before applying.
+    #[tokio::test]
+    async fn chown_command_chains_confirmation() {
+        use crossterm::event::KeyCode;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("f"), b"x").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        // Open the owner prompt.
+        dispatch_ui_command(
+            Command::Chown,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::Input {
+                kind: InputKind::Chown,
+                ..
+            })
+        ));
+        // Type "0:0" and submit → should chain a confirmation dialog.
+        for c in ['0', ':', '0'] {
+            feed_key(KeyCode::Char(c), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        }
+        feed_key(KeyCode::Enter, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(
+            matches!(dlg, Some(ActiveDialog::Confirm { .. })),
+            "chown submit must chain a confirmation (FR-007), got {dlg:?}"
+        );
     }
 
     // Feature 043 (FR-012): Esc on the chmod dialog closes it, no change.
