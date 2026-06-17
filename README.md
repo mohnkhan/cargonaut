@@ -6,8 +6,8 @@
 [![CI](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml/badge.svg)](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
-[![Binary](https://img.shields.io/badge/binary-2.68%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-366%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
+[![Binary](https://img.shields.io/badge/binary-2.8%20MiB-success.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-388%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,9 +31,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 12 features since (031–046) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 366 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
-| **Binary** | 2.68 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Alpha · Phase 1 shipped, plus 13 features since (031–047) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 388 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Binary** | 2.8 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **Platform** | Linux terminal (local filesystem) |
@@ -141,8 +141,15 @@ for the local filesystem:
   index, or RGB hex values; partial skins inherit from `commander-dark`; load errors (bad file,
   unknown field, invalid color) fall back to `commander-dark` with a one-line status message —
   no crash (Feature 046, closes #49).
+- **F2 user-defined action menu + scrollable F1 help overlay** — `F2` opens a modal list of
+  scriptable actions from `~/.config/cargonaut/menu.toml`; each action runs a shell command
+  with the focused entry's path shell-quoted via `{path}`, with optional `only_if` guard
+  conditions (200 ms timeout, safe no-raw-interpolation dispatch). `F1` opens a full
+  scrollable help overlay (13 sections, every keybinding) that replaces the old one-page static
+  banner; Page Down / Up / Home / Esc navigate it. See `examples/menu.toml` for a starter
+  config (Feature 047, closes #50).
 
-The full per-feature history (Features 001 → 046) lives in
+The full per-feature history (Features 001 → 047) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
@@ -156,7 +163,7 @@ nothing):
 - Internal full-screen editor (`F4` today shells out to `$EDITOR`) (#40)
 - Find-file by name/content + external panelize (#41)
 - Tabs (#45), undo + bulk-rename-via-editor (#47), persistent subshell (#44)
-- Directory compare + diff (#43), the F2 user menu (#50)
+- Directory compare + diff (#43)
 
 The `list-plugins`, `audit`, and `resume` subcommands are placeholders today.
 See [`ROADMAP.md`](./ROADMAP.md) — the authoritative, issue-backed plan.

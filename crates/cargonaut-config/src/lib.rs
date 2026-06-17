@@ -564,6 +564,93 @@ pub enum ConfigError {
 }
 
 // =====================================================================
+// User menu config (Feature 047, issue #50)
+// =====================================================================
+
+/// One entry in the user-defined F2 action menu.
+///
+/// Loaded from `~/.config/cargonaut/menu.toml` (see [`menu_config_path`]).
+/// The `{path}` placeholder in `command` and `only_if` is substituted with
+/// the shell-quoted absolute path of the highlighted entry at action time.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MenuItem {
+    /// Display label shown in the F2 menu.
+    pub label: String,
+    /// Shell command to execute. May contain `{path}`.
+    pub command: String,
+    /// Optional shell expression evaluated at menu-open time; action is
+    /// hidden when this exits non-zero or times out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only_if: Option<String>,
+    /// Optional single-character keyboard shortcut (0x21–0x7E).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<char>,
+}
+
+/// Top-level structure of `menu.toml`.
+///
+/// ```toml
+/// [[actions]]
+/// label   = "Edit"
+/// command = "$EDITOR {path}"
+/// key     = "e"
+/// ```
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserMenuConfig {
+    /// Ordered list of user-defined menu actions.
+    #[serde(default)]
+    pub actions: Vec<MenuItem>,
+}
+
+/// Resolve the path to the user's `menu.toml`. Honors `$XDG_CONFIG_HOME`,
+/// falls back to `$HOME/.config/cargonaut/menu.toml`; if neither env var is
+/// set, returns a relative fallback (no panic, mirrors [`default_config_path`]).
+pub fn menu_config_path() -> std::path::PathBuf {
+    menu_config_path_from(
+        std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+fn menu_config_path_from(xdg_config: Option<&str>, home: Option<&str>) -> std::path::PathBuf {
+    if let Some(xdg) = xdg_config {
+        std::path::PathBuf::from(xdg).join("cargonaut/menu.toml")
+    } else if let Some(home) = home {
+        std::path::PathBuf::from(home).join(".config/cargonaut/menu.toml")
+    } else {
+        std::path::PathBuf::from(".config/cargonaut/menu.toml")
+    }
+}
+
+/// Errors from loading `menu.toml`.
+#[derive(Debug, thiserror::Error)]
+pub enum MenuLoadError {
+    /// IO error (other than file-not-found, which is treated as empty).
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    /// TOML parse failure. The string includes the file name and line number.
+    #[error("{0}")]
+    Parse(String),
+}
+
+/// Load `menu.toml` from `path`.
+///
+/// - File not found → `Ok(UserMenuConfig { actions: vec![] })` (no error).
+/// - Other IO error → `Err(MenuLoadError::Io(...))`.
+/// - Parse failure → `Err(MenuLoadError::Parse("path: line N ..."))`.
+pub fn load_user_menu(path: &std::path::Path) -> Result<UserMenuConfig, MenuLoadError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(UserMenuConfig::default());
+        }
+        Err(e) => return Err(MenuLoadError::Io(e)),
+    };
+    toml::from_str::<UserMenuConfig>(&text)
+        .map_err(|e| MenuLoadError::Parse(format!("{}: {e}", path.display())))
+}
+
+// =====================================================================
 // Directory hotlist / bookmarks (Feature 042, issue #42)
 // =====================================================================
 
@@ -976,5 +1063,116 @@ wibble = 42
             ZoxideMode::Off
         );
         assert!(serde_json::from_str::<ZoxideMode>(r#""bogus""#).is_err());
+    }
+
+    // ===== Feature 047: user menu config types =====
+
+    #[test]
+    fn menu_item_full_deserialization() {
+        let toml_text = r#"
+[[actions]]
+label   = "Edit"
+command = "$EDITOR {path}"
+only_if = "test -f {path}"
+key     = "e"
+"#;
+        let cfg: UserMenuConfig = toml::from_str(toml_text).unwrap();
+        assert_eq!(cfg.actions.len(), 1);
+        let item = &cfg.actions[0];
+        assert_eq!(item.label, "Edit");
+        assert_eq!(item.command, "$EDITOR {path}");
+        assert_eq!(item.only_if, Some("test -f {path}".into()));
+        assert_eq!(item.key, Some('e'));
+    }
+
+    #[test]
+    fn menu_item_only_required_fields() {
+        let toml_text = r#"
+[[actions]]
+label   = "Do something"
+command = "echo hello"
+"#;
+        let cfg: UserMenuConfig = toml::from_str(toml_text).unwrap();
+        assert_eq!(cfg.actions.len(), 1);
+        assert!(cfg.actions[0].only_if.is_none());
+        assert!(cfg.actions[0].key.is_none());
+    }
+
+    #[test]
+    fn menu_config_empty_actions_array() {
+        let toml_text = "actions = []\n";
+        let cfg: UserMenuConfig = toml::from_str(toml_text).unwrap();
+        assert!(cfg.actions.is_empty());
+    }
+
+    #[test]
+    fn menu_config_empty_toml_gives_empty_actions() {
+        let cfg: UserMenuConfig = toml::from_str("").unwrap();
+        assert!(cfg.actions.is_empty());
+    }
+
+    #[test]
+    fn menu_config_path_with_xdg_config_home() {
+        assert_eq!(
+            menu_config_path_from(Some("/tmp/xdg"), Some("/home/user")),
+            std::path::PathBuf::from("/tmp/xdg/cargonaut/menu.toml")
+        );
+    }
+
+    #[test]
+    fn menu_config_path_without_xdg_uses_home() {
+        assert_eq!(
+            menu_config_path_from(None, Some("/tmp/h")),
+            std::path::PathBuf::from("/tmp/h/.config/cargonaut/menu.toml")
+        );
+    }
+
+    #[test]
+    fn menu_config_path_no_env_returns_relative() {
+        let p = menu_config_path_from(None, None);
+        assert!(p.to_str().unwrap().ends_with(".config/cargonaut/menu.toml"));
+    }
+
+    #[test]
+    fn load_user_menu_missing_file_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("menu.toml");
+        let result = load_user_menu(&path).unwrap();
+        assert!(result.actions.is_empty());
+    }
+
+    #[test]
+    fn load_user_menu_valid_toml_returns_actions() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(
+            br#"
+[[actions]]
+label   = "Edit"
+command = "$EDITOR {path}"
+key     = "e"
+
+[[actions]]
+label   = "List"
+command = "ls {path}"
+only_if = "test -d {path}"
+"#,
+        )
+        .unwrap();
+        let result = load_user_menu(f.path()).unwrap();
+        assert_eq!(result.actions.len(), 2);
+        assert_eq!(result.actions[0].label, "Edit");
+        assert_eq!(result.actions[0].key, Some('e'));
+        assert_eq!(result.actions[1].only_if, Some("test -d {path}".into()));
+    }
+
+    #[test]
+    fn load_user_menu_parse_error_includes_filename() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"[[actions]\nlabel = broken").unwrap();
+        let err = load_user_menu(f.path()).unwrap_err();
+        let msg = err.to_string();
+        // Error message should contain the file path
+        let path_str = f.path().to_str().unwrap();
+        assert!(msg.contains(path_str), "expected path in error: {msg}");
     }
 }

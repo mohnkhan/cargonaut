@@ -106,7 +106,7 @@ struct UiState {
     fkeybar: FunctionKeyBar,
     layout: FrameLayout,
     last_click: Option<(u16, u16, Instant)>,
-    help_open: bool,
+    help_overlay: Option<dialog::HelpOverlay>,
     mouse_enabled: bool,
     /// Set by F3/F4; run_loop suspends the TUI, runs it, and restores.
     pending_external: Option<PendingExternal>,
@@ -148,6 +148,14 @@ enum ActiveDialog {
     Hotlist {
         /// The hotlist list widget.
         widget: HotlistDialog,
+    },
+    /// Feature 047 — F2 user-defined action menu. Items loaded from
+    /// `~/.config/cargonaut/menu.toml`; filtered by `only_if` condition.
+    UserMenu {
+        /// The user menu widget.
+        widget: dialog::UserMenuDialog,
+        /// The path of the focused entry at the time the menu was opened.
+        entry_path: std::path::PathBuf,
     },
 }
 
@@ -196,7 +204,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         fkeybar: FunctionKeyBar::new(),
         layout: FrameLayout::default(),
         last_click: None,
-        help_open: false,
+        help_overlay: None,
         mouse_enabled,
         pending_external: None,
     };
@@ -272,7 +280,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let mouse_captured = ui.mouse_enabled;
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
-        let help_open = ui.help_open;
+        let help_overlay = ui.help_overlay.as_ref().cloned();
         term.draw(|f| {
             layout = draw_frame(
                 f,
@@ -287,7 +295,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 fkeybar,
                 &ms_left,
                 &ms_right,
-                help_open,
+                help_overlay.as_ref(),
                 view_mode,
                 &qv_preview,
                 progress.as_deref(),
@@ -368,9 +376,12 @@ async fn handle_key(
 ) -> Result<bool, Error> {
     use crossterm::event::KeyCode;
 
-    // Help overlay swallows the next key (any key dismisses it).
-    if ui.help_open {
-        ui.help_open = false;
+    // Help overlay — swallows all keys; Esc/F1 close it.
+    if let Some(overlay) = ui.help_overlay.as_mut() {
+        let action = overlay.handle_key(key.code);
+        if action == dialog::HelpAction::Close {
+            ui.help_overlay = None;
+        }
         return Ok(true);
     }
 
@@ -742,6 +753,53 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 047 US2 (FR-006/007/008): F2 user-defined action menu.
+            ActiveDialog::UserMenu {
+                widget,
+                entry_path: _,
+            } => {
+                match widget.handle_key(key.code) {
+                    Some(dialog::UserMenuAction::Close) => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    Some(dialog::UserMenuAction::Execute(idx)) => {
+                        // Extract command before mutably borrowing `active_dialog`.
+                        let (cmd_str, exec_path) =
+                            if let Some(ActiveDialog::UserMenu { widget, entry_path }) =
+                                active_dialog.as_ref()
+                            {
+                                let cmd_str = widget
+                                    .items
+                                    .get(idx)
+                                    .map(|i| i.command.clone())
+                                    .unwrap_or_default();
+                                (cmd_str, entry_path.clone())
+                            } else {
+                                (String::new(), std::path::PathBuf::new())
+                            };
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        if !cmd_str.is_empty() {
+                            let (prog, args) = build_action_command(&cmd_str, &exec_path);
+                            // Spawn detached — fire-and-forget (FR-007).
+                            let _ = std::process::Command::new(&prog)
+                                .args(&args)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .spawn();
+                        }
+                    }
+                    None => {
+                        // F1 while menu is open closes the menu (FR-010).
+                        if key.code == dialog::KeyCode::F(1) {
+                            *active_dialog = None;
+                            *mode = Mode::Pane;
+                        }
+                    }
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -785,7 +843,8 @@ async fn dispatch_ui_command(
             return Ok(());
         }
         Command::ShowHelp => {
-            ui.help_open = true;
+            let visible_h = ui.layout.left.height.saturating_sub(2).max(1);
+            ui.help_overlay = Some(dialog::HelpOverlay::new(visible_h));
             return Ok(());
         }
         // Feature 041 (FR-001/002/003/006): M-m toggles mouse capture at
@@ -966,6 +1025,57 @@ async fn dispatch_ui_command(
         }
         Command::Edit => {
             queue_external(app, ui, status, ExternalTool::Editor);
+            return Ok(());
+        }
+        // Feature 047 US2 (FR-006): F2 opens the user action menu.
+        // Guard: if another dialog is already open, ignore.
+        Command::ShowUserMenu => {
+            if active_dialog.is_some() {
+                return Ok(());
+            }
+            // Build local entry path from active pane cwd + focused entry name.
+            let entry_path: std::path::PathBuf = {
+                let p = app.active_pane_state();
+                let name = focused_entry_name(app);
+                let cwd_vfs = if name.is_empty() || name == ".." {
+                    p.cwd.clone()
+                } else {
+                    p.cwd.join(&name)
+                };
+                let disp = cwd_vfs.display();
+                let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+                std::path::PathBuf::from(local)
+            };
+            let menu_path = cargonaut_config::menu_config_path();
+            let cfg = cargonaut_config::load_user_menu(&menu_path).unwrap_or_default();
+            // Filter items whose `only_if` condition fails. Evaluate sequentially
+            // (rare — menus are small) to keep the borrow on `entry_path` simple.
+            let mut filtered = Vec::new();
+            for item in &cfg.actions {
+                let keep = if let Some(cond) = &item.only_if {
+                    evaluate_only_if(cond, &entry_path).await
+                } else {
+                    true
+                };
+                if keep {
+                    filtered.push(item.clone());
+                }
+            }
+            if filtered.is_empty() {
+                // Surface a user-visible "menu is empty" dialog rather than silently doing nothing.
+                *active_dialog = Some(ActiveDialog::UserMenu {
+                    widget: dialog::UserMenuDialog::new_error(
+                        "No menu actions available. Create ~/.config/cargonaut/menu.toml.",
+                    ),
+                    entry_path,
+                });
+            } else {
+                *active_dialog = Some(ActiveDialog::UserMenu {
+                    widget: dialog::UserMenuDialog::new(filtered),
+                    entry_path,
+                });
+            }
+            *mode = Mode::Dialog;
             return Ok(());
         }
         _ => {}
@@ -1516,7 +1626,7 @@ fn draw_frame(
     fkeybar: &FunctionKeyBar,
     ms_left: &str,
     ms_right: &str,
-    help_open: bool,
+    help_overlay: Option<&dialog::HelpOverlay>,
     view_mode: cargonaut_core::ViewMode,
     qv_preview: &str,
     progress: Option<&str>,
@@ -1600,8 +1710,8 @@ fn draw_frame(
         draw_progress(f, theme, area, p);
     }
 
-    if help_open {
-        draw_help(f, theme, area);
+    if let Some(overlay) = help_overlay {
+        overlay.render(f, area, theme);
     }
 
     if let Some(d) = dialog {
@@ -1614,6 +1724,8 @@ fn draw_frame(
             ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::TasksPanel { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Hotlist { widget } => widget.render(darea, f.buffer_mut(), theme),
+            // Feature 047 US2: UserMenuDialog::render manages its own centering.
+            ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
         }
     }
 
@@ -1692,39 +1804,6 @@ fn draw_progress(f: &mut ratatui::Frame, theme: &Theme, area: Rect, body: &str) 
         .render(r, f.buffer_mut());
 }
 
-/// Minimal help overlay (F1). The full hypertext help viewer is deferred.
-/// Body text of the F1 quick-help overlay. A `const` (not an inline literal) so
-/// its content — e.g. the Feature 041 mouse-toggle line — is unit-testable.
-const HELP_BODY: &str = "\
-Cargonaut — quick help\n\
-\n\
-  Arrows / j k     move cursor      Tab        switch pane\n\
-  Enter            enter directory  Insert     tag file\n\
-  F5 Copy  F6 Move  F8 Delete  F7 Mkdir*  F9 Menu  F10 Quit\n\
-  F3 View*  F4 Edit*   (* not yet available)\n\
-  Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
-  M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
-  C-b: directory hotlist (bookmarks) — [a]dd · [d]el · Enter jumps\n\
-  C-x c chmod · C-x o chown · C-x s symlink · C-x l hardlink\n\
-  C-x C / C-x O: recursive chmod / chown (whole subtree, -R)\n\
-\n\
-  Press any key to close.";
-
-fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
-    use ratatui::widgets::{Clear, Widget};
-    let r = centered_rect(60, 50, area);
-    Clear.render(r, f.buffer_mut());
-    let body = HELP_BODY;
-    let block = Block::default()
-        .title("Help")
-        .borders(Borders::ALL)
-        .style(theme.dialog_style());
-    Paragraph::new(body)
-        .block(block)
-        .style(theme.dialog_style())
-        .render(r, f.buffer_mut());
-}
-
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let vchunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1742,6 +1821,66 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(vchunks[1])[1]
+}
+
+// Feature 047 US2 — T023: safe shell-command builder (SC-003 macro-safety).
+//
+// Rules:
+//  • Substitute `{path}` with the shell-quoted path.
+//  • If the command string contains shell metacharacters (|, ;, &, $, `, >, <)
+//    after substitution, route through `sh -c` so the shell processes them.
+//  • Otherwise split with shell_words::split and exec directly (no shell).
+fn build_action_command(command: &str, path: &std::path::Path) -> (String, Vec<String>) {
+    let path_str = path.to_string_lossy();
+    let quoted = shell_words::quote(&path_str).into_owned();
+    let substituted = command.replace("{path}", &quoted);
+    // Detect shell metacharacters that require a shell intermediary.
+    let needs_shell = substituted.contains('|')
+        || substituted.contains(';')
+        || substituted.contains('&')
+        || substituted.contains('$')
+        || substituted.contains('`')
+        || substituted.contains('>')
+        || substituted.contains('<');
+    if needs_shell {
+        ("sh".into(), vec!["-c".into(), substituted])
+    } else {
+        let tokens = shell_words::split(&substituted).unwrap_or_else(|_| vec![substituted.clone()]);
+        if tokens.is_empty() {
+            ("sh".into(), vec!["-c".into(), substituted])
+        } else {
+            (tokens[0].clone(), tokens[1..].to_vec())
+        }
+    }
+}
+
+// Feature 047 US2 — T024: evaluate `only_if` shell condition (SC-004 timeout).
+//
+// Spawns the condition string as `sh -c <cond>` with a 200 ms wall-clock
+// timeout. Returns `true` when the process exits with status 0 within the
+// deadline; `false` on non-zero exit, spawn failure, or timeout.
+async fn evaluate_only_if(condition: &str, path: &std::path::Path) -> bool {
+    let path_str = path.to_string_lossy();
+    let quoted = shell_words::quote(&path_str).into_owned();
+    let script = condition.replace("{path}", &quoted);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        tokio::task::spawn_blocking(move || {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&script)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }),
+    )
+    .await;
+    match result {
+        Ok(Ok(ok)) => ok,
+        _ => false,
+    }
 }
 
 /// TUI errors.
@@ -1786,7 +1925,7 @@ mod tests {
                 },
             },
             last_click: None,
-            help_open: false,
+            help_overlay: None,
             mouse_enabled: mouse,
             pending_external: None,
         }
@@ -1847,15 +1986,24 @@ mod tests {
         );
     }
 
+    fn help_sections_text() -> String {
+        dialog::HELP_SECTIONS
+            .iter()
+            .flat_map(|s| s.rows.iter().map(|r| format!("{} {}", r.key, r.desc)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     // Feature 044: help documents the recursive attribute keys.
     #[test]
     fn help_documents_recursive_keys() {
+        let text = help_sections_text();
         assert!(
-            HELP_BODY.contains("C-x C"),
+            text.contains("C-x C"),
             "help must mention recursive chmod key"
         );
         assert!(
-            HELP_BODY.to_lowercase().contains("recursive") || HELP_BODY.contains("-R"),
+            text.to_lowercase().contains("recursive"),
             "help must mention recursion"
         );
     }
@@ -1863,9 +2011,10 @@ mod tests {
     // Feature 043: help documents the file-attribute keys.
     #[test]
     fn help_documents_attribute_keys() {
-        assert!(HELP_BODY.contains("C-x c"), "help must mention chmod key");
+        let text = help_sections_text();
+        assert!(text.contains("C-x c"), "help must mention chmod key");
         assert!(
-            HELP_BODY.to_lowercase().contains("chmod"),
+            text.to_lowercase().contains("chmod"),
             "help must mention chmod"
         );
     }
@@ -1873,12 +2022,10 @@ mod tests {
     // Feature 042: help documents the Ctrl-b hotlist + in-popup add/remove.
     #[test]
     fn help_documents_hotlist() {
+        let text = help_sections_text();
+        assert!(text.contains("C-b"), "help must mention the hotlist key");
         assert!(
-            HELP_BODY.contains("C-b"),
-            "help must mention the hotlist key"
-        );
-        assert!(
-            HELP_BODY.to_lowercase().contains("bookmark"),
+            text.to_lowercase().contains("bookmark"),
             "help must mention bookmarks"
         );
     }
@@ -1887,12 +2034,10 @@ mod tests {
     // terminal Shift-drag bypass for one-off native text selection.
     #[test]
     fn help_documents_mouse_toggle_and_shift_bypass() {
+        let text = help_sections_text();
+        assert!(text.contains("M-m"), "help must mention the M-m toggle");
         assert!(
-            HELP_BODY.contains("M-m"),
-            "help must mention the M-m toggle"
-        );
-        assert!(
-            HELP_BODY.contains("Shift"),
+            text.to_lowercase().contains("shift"),
             "help must mention the Shift-drag bypass"
         );
     }
@@ -2469,7 +2614,8 @@ mod tests {
     }
 
     // T-MOUSE-5 (FR-017): clicking a function-key button invokes its
-    // command. Button 2 (Menu/user-menu) is deferred → status message.
+    // command. Button 2 (Menu/user-menu — F2) now opens the user menu
+    // dialog (Feature 047); no menu.toml in tests → error-state dialog.
     #[tokio::test]
     async fn click_fkey_button_dispatches_command() {
         let td_l = TempDir::new().unwrap();
@@ -2497,11 +2643,13 @@ mod tests {
             height: 1,
         };
         let (l, r) = synced_views(&app);
-        // Button 2 (Menu = user menu) ≈ 2nd of 10 slots (x 10..20) → deferred.
+        // Button 2 (F2 = ShowUserMenu) ≈ 2nd of 10 slots (x 10..20).
+        // ShowUserMenu is now wired (Feature 047): it opens the user menu
+        // dialog without writing to the status line.
         let status = mouse(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
         assert!(
-            status.contains("not yet available"),
-            "expected deferred-action notice, got {status:?}"
+            !status.contains("not yet available"),
+            "F2 must not show deferred-action notice after Feature 047: {status:?}"
         );
     }
 
@@ -3068,5 +3216,72 @@ mod tests {
         .await;
         assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
         assert!(!app.job_views().is_empty());
+    }
+
+    // Feature 047 — T019(red): build_action_command shell-safety tests
+    #[test]
+    fn build_action_command_no_shell_ops_splits_directly() {
+        let (prog, args) = build_action_command("echo {path}", std::path::Path::new("/tmp/a"));
+        assert_eq!(prog, "echo");
+        assert_eq!(args, vec!["/tmp/a"]);
+    }
+
+    #[test]
+    fn build_action_command_shell_op_uses_sh_c() {
+        let (prog, args) = build_action_command("cat {path} | wc", std::path::Path::new("/tmp/a"));
+        assert_eq!(prog, "sh");
+        assert_eq!(args[0], "-c");
+        assert!(args[1].contains("/tmp/a"), "substituted path missing");
+    }
+
+    #[test]
+    fn build_action_command_path_with_spaces_is_quoted() {
+        let (_prog, args) =
+            build_action_command("cat {path} | wc", std::path::Path::new("/tmp/my file"));
+        // Path should be quoted so shell sees it as a single arg.
+        assert!(
+            args[1].contains("'") || args[1].contains(r"\"),
+            "path not shell-quoted: {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn build_action_command_no_path_placeholder_runs_as_is() {
+        let (prog, args) = build_action_command("git status", std::path::Path::new("/tmp/a"));
+        assert_eq!(prog, "git");
+        assert_eq!(args, vec!["status"]);
+    }
+
+    // Feature 047 SC-002: every action in keymap.toml must appear in HELP_SECTIONS.
+    #[test]
+    fn help_covers_all_keymap_bindings() {
+        #[derive(serde::Deserialize)]
+        struct Binding {
+            action: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct KeymapFile {
+            binding: Vec<Binding>,
+        }
+        let keymap_src = include_str!("../../../design/contracts/keymap.toml");
+        let kf: KeymapFile = toml::from_str(keymap_src).expect("keymap.toml must parse");
+        let all_text: String = crate::dialog::HELP_SECTIONS
+            .iter()
+            .flat_map(|s| s.rows.iter().map(|r| format!("{} {}", r.key, r.desc)))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        let mut missing = Vec::new();
+        for b in &kf.binding {
+            let action = b.action.to_lowercase();
+            if !all_text.contains(&action) {
+                missing.push(b.action.as_str());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "keymap actions missing from HELP_SECTIONS: {missing:?}"
+        );
     }
 }

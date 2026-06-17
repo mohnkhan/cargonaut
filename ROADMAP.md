@@ -44,6 +44,7 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 |---|---|---|---|
 | [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
 | [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
+| [#70](https://github.com/mohnkhan/cargonaut/issues/70) | Feature 047 follow-up: F2 user-menu mouse-click support | XS | Feature 047 US2 — keyboard F2 fully wired; fkey-bar mouse click not integration-tested |
 
 ---
 

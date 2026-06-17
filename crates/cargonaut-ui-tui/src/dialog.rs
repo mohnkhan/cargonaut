@@ -806,6 +806,683 @@ impl HotlistDialog {
     }
 }
 
+// =====================================================================
+// Help overlay (Feature 047 — US1, T011-T014)
+// =====================================================================
+
+/// One (shortcut, description) row in the help content.
+#[derive(Debug, Clone, Copy)]
+pub struct HelpRow {
+    /// Keyboard shortcut(s) shown in the left column.
+    pub key: &'static str,
+    /// Plain-language description shown in the right column.
+    pub desc: &'static str,
+}
+
+/// One named section of the help overlay.
+#[derive(Debug, Clone, Copy)]
+pub struct HelpSection {
+    /// Section title (e.g. "Navigation").
+    pub title: &'static str,
+    /// Rows belonging to this section.
+    pub rows: &'static [HelpRow],
+}
+
+/// All compiled-in help sections. Order defines the display order.
+/// The "User Menu (F2)" section is added in T031 after US2 ships.
+pub static HELP_SECTIONS: &[HelpSection] = &[
+    HelpSection {
+        title: "Navigation",
+        rows: &[
+            HelpRow {
+                key: "F1",
+                desc: "Show this help overlay (show-help)",
+            },
+            HelpRow {
+                key: "F10",
+                desc: "Quit the application (quit)",
+            },
+            HelpRow {
+                key: "Tab",
+                desc: "Switch active pane (focus-swap-pane)",
+            },
+            HelpRow {
+                key: "M-1",
+                desc: "Focus left pane (focus-left-pane)",
+            },
+            HelpRow {
+                key: "M-2",
+                desc: "Focus right pane (focus-right-pane)",
+            },
+            HelpRow {
+                key: "j / Down",
+                desc: "Move cursor down (cursor-down)",
+            },
+            HelpRow {
+                key: "k / Up",
+                desc: "Move cursor up (cursor-up)",
+            },
+            HelpRow {
+                key: "Enter",
+                desc: "Open directory or file (descend-or-open)",
+            },
+            HelpRow {
+                key: "Backspace / h",
+                desc: "Go up to parent directory (ascend-parent)",
+            },
+            HelpRow {
+                key: "~",
+                desc: "Go to home directory (cd-home)",
+            },
+            HelpRow {
+                key: "/",
+                desc: "Go to root directory (cd-root)",
+            },
+            HelpRow {
+                key: ":",
+                desc: "Open command line (open-cmdline)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Selection",
+        rows: &[
+            HelpRow {
+                key: "Insert",
+                desc: "Toggle selection on current entry (selection-toggle)",
+            },
+            HelpRow {
+                key: "*",
+                desc: "Invert selection (selection-invert)",
+            },
+            HelpRow {
+                key: "+",
+                desc: "Add to selection by pattern (selection-add-by-pattern)",
+            },
+            HelpRow {
+                key: "-",
+                desc: "Remove from selection by pattern (selection-remove-by-pattern)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "File Operations",
+        rows: &[
+            HelpRow {
+                key: "F3",
+                desc: "Preview file or directory (preview)",
+            },
+            HelpRow {
+                key: "F4",
+                desc: "Edit file in $EDITOR (edit)",
+            },
+            HelpRow {
+                key: "F5",
+                desc: "Copy selection to other pane (copy-selection)",
+            },
+            HelpRow {
+                key: "F6",
+                desc: "Move or rename selection (move-or-rename-selection)",
+            },
+            HelpRow {
+                key: "F7",
+                desc: "Create a new directory (mkdir)",
+            },
+            HelpRow {
+                key: "F8",
+                desc: "Delete selection (delete-selection)",
+            },
+            HelpRow {
+                key: "C-c",
+                desc: "Cancel current operation (cancel-current-operation)",
+            },
+            HelpRow {
+                key: "C-s",
+                desc: "Cycle sort key (cycle-sort-key)",
+            },
+            HelpRow {
+                key: "C-z",
+                desc: "Undo last file operation (undo-last-op)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Panels & Modes",
+        rows: &[
+            HelpRow {
+                key: "F9",
+                desc: "Open menu bar (open-menu-bar)",
+            },
+            HelpRow {
+                key: "F12",
+                desc: "Show active transfers panel (show-tasks-panel)",
+            },
+            HelpRow {
+                key: "M-c",
+                desc: "Quick CD popup (quick-cd-popup)",
+            },
+            HelpRow {
+                key: "M-!",
+                desc: "Toggle panel filter prompt (toggle-panel-filter)",
+            },
+            HelpRow {
+                key: "<",
+                desc: "Open fuzzy entry filter (open-fuzzy-filter)",
+            },
+            HelpRow {
+                key: "C-f",
+                desc: "Filter entries in current directory (filter-current-dir)",
+            },
+            HelpRow {
+                key: "M-i",
+                desc: "Sync other panel to this path (sync-other-panel-path)",
+            },
+            HelpRow {
+                key: "M-o",
+                desc: "Show focused entry in other panel (show-focused-in-other-panel)",
+            },
+            HelpRow {
+                key: "M-.",
+                desc: "Toggle hidden files (toggle-hidden)",
+            },
+            HelpRow {
+                key: "M-,",
+                desc: "Toggle split orientation (toggle-split-orientation)",
+            },
+            HelpRow {
+                key: "C-Space",
+                desc: "Calculate recursive directory size (recursive-dir-size)",
+            },
+            HelpRow {
+                key: "M-t",
+                desc: "Cycle listing mode (cycle-listing-mode)",
+            },
+            HelpRow {
+                key: "C-t",
+                desc: "Open new tab (new-tab)",
+            },
+            HelpRow {
+                key: "C-w",
+                desc: "Close current tab (close-tab)",
+            },
+            HelpRow {
+                key: "C-o",
+                desc: "Open subshell in current directory (open-subshell)",
+            },
+            HelpRow {
+                key: "C-r",
+                desc: "Reload config and themes (reload-config-and-themes)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "History",
+        rows: &[
+            HelpRow {
+                key: "M-S-h",
+                desc: "Show directory history popup (show-directory-history)",
+            },
+            HelpRow {
+                key: "M-h",
+                desc: "Show command history popup (show-command-history)",
+            },
+            HelpRow {
+                key: "M-y",
+                desc: "Navigate to previous directory in history (history-prev-dir)",
+            },
+            HelpRow {
+                key: "M-u",
+                desc: "Navigate to next directory in history (history-next-dir)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Bookmarks",
+        rows: &[HelpRow {
+            key: "C-b",
+            desc: "Open bookmarks menu; add / remove entries (bookmarks-menu)",
+        }],
+    },
+    HelpSection {
+        title: "File Attributes",
+        rows: &[
+            HelpRow {
+                key: "C-x c",
+                desc: "Change file permissions (chmod)",
+            },
+            HelpRow {
+                key: "C-x o",
+                desc: "Change file ownership (chown)",
+            },
+            HelpRow {
+                key: "C-x s",
+                desc: "Create symbolic link (create-symlink)",
+            },
+            HelpRow {
+                key: "C-x l",
+                desc: "Create hard link (create-hard-link)",
+            },
+            HelpRow {
+                key: "C-x C",
+                desc: "Recursive chmod into subtree (chmod-recursive)",
+            },
+            HelpRow {
+                key: "C-x O",
+                desc: "Recursive chown into subtree (chown-recursive)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Power Features",
+        rows: &[
+            HelpRow {
+                key: "F2",
+                desc: "Open user action menu from menu.toml (show-user-menu)",
+            },
+            HelpRow {
+                key: "C-x !",
+                desc: "External panelize — run command, list output (external-panelize)",
+            },
+            HelpRow {
+                key: "C-x r",
+                desc: "Bulk rename selection via editor (bulk-rename-via-editor)",
+            },
+            HelpRow {
+                key: "C-x d",
+                desc: "Compare two directories (compare-directories)",
+            },
+            HelpRow {
+                key: "C-x C-d",
+                desc: "Diff two tagged files (diff-two-tagged-files)",
+            },
+            HelpRow {
+                key: "M-m",
+                desc: "Toggle mouse capture; Shift+drag bypasses (toggle-mouse-capture)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Preview",
+        rows: &[
+            HelpRow {
+                key: "C-x X",
+                desc: "Toggle hex view in previewer (toggle-hex-view)",
+            },
+            HelpRow {
+                key: "/",
+                desc: "Search forward in preview (preview-search-forward)",
+            },
+            HelpRow {
+                key: "?",
+                desc: "Search backward in preview (preview-search-backward)",
+            },
+            HelpRow {
+                key: "n",
+                desc: "Jump to next search match in preview (preview-search-next)",
+            },
+            HelpRow {
+                key: "N",
+                desc: "Jump to previous search match in preview (preview-search-prev)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Search Mode",
+        rows: &[
+            HelpRow {
+                key: "Esc",
+                desc: "Close search overlay (close-search)",
+            },
+            HelpRow {
+                key: "Enter",
+                desc: "Navigate to highlighted search result (search-go-to-result)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Dialogs",
+        rows: &[
+            HelpRow {
+                key: "Esc",
+                desc: "Cancel / close current dialog (dialog-cancel)",
+            },
+            HelpRow {
+                key: "Enter",
+                desc: "Confirm current dialog action (dialog-confirm)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "Orthodox-FM Compat (mc_keys=true)",
+        rows: &[
+            HelpRow {
+                key: "M-5",
+                desc: "Copy selection — alt binding (copy-selection)",
+            },
+            HelpRow {
+                key: "M-6",
+                desc: "Move or rename — alt binding (move-or-rename-selection)",
+            },
+        ],
+    },
+    HelpSection {
+        title: "About",
+        rows: &[HelpRow {
+            key: "cargonaut",
+            desc: "A dual-pane TUI file manager. Press Esc or F1 to close help.",
+        }],
+    },
+];
+
+/// Outcome returned by [`HelpOverlay::handle_key`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpAction {
+    /// Close the help overlay and return to pane mode.
+    Close,
+    /// Key was consumed; overlay stays open.
+    Swallow,
+}
+
+/// State for the scrollable F1 help overlay.
+#[derive(Debug, Clone)]
+pub struct HelpOverlay {
+    /// Current scroll offset in lines.
+    pub scroll_offset: u16,
+    /// Total rendered lines (computed once at construction).
+    pub total_lines: u16,
+    /// Visible lines in the overlay (set from the frame height at open time).
+    pub visible_height: u16,
+}
+
+impl HelpOverlay {
+    /// Construct a new overlay. `visible_height` is the inner area height of
+    /// the overlay as rendered; computes `total_lines` from `HELP_SECTIONS`.
+    pub fn new(visible_height: u16) -> Self {
+        // Each section contributes: 1 title line + N row lines.
+        let total_lines = HELP_SECTIONS
+            .iter()
+            .map(|s| 1 + s.rows.len())
+            .sum::<usize>() as u16;
+        Self {
+            scroll_offset: 0,
+            total_lines,
+            visible_height,
+        }
+    }
+
+    /// Handle a key event. Returns [`HelpAction`] indicating whether to close
+    /// or swallow. The overlay swallows every key that is not a navigation or
+    /// dismiss key — it MUST NOT fall through to pane commands while open.
+    pub fn handle_key(&mut self, code: KeyCode) -> HelpAction {
+        let max_offset = self.total_lines.saturating_sub(self.visible_height);
+        match code {
+            KeyCode::Up => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                HelpAction::Swallow
+            }
+            KeyCode::Down => {
+                self.scroll_offset = self.scroll_offset.saturating_add(1).min(max_offset);
+                HelpAction::Swallow
+            }
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(self.visible_height);
+                HelpAction::Swallow
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self
+                    .scroll_offset
+                    .saturating_add(self.visible_height)
+                    .min(max_offset);
+                HelpAction::Swallow
+            }
+            KeyCode::Home => {
+                self.scroll_offset = 0;
+                HelpAction::Swallow
+            }
+            KeyCode::End => {
+                self.scroll_offset = max_offset;
+                HelpAction::Swallow
+            }
+            KeyCode::Esc | KeyCode::F(1) => HelpAction::Close,
+            _ => HelpAction::Swallow,
+        }
+    }
+
+    /// Render the overlay into `area`, clearing it first.
+    pub fn render(
+        &self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        theme: &crate::theme::Theme,
+    ) {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span, Text};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+        f.render_widget(Clear, area);
+
+        // Build content lines from HELP_SECTIONS.
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for sec in HELP_SECTIONS {
+            // Section title — bold.
+            lines.push(Line::from(vec![Span::styled(
+                sec.title,
+                Style::default().add_modifier(Modifier::BOLD),
+            )]));
+            for row in sec.rows {
+                let key_span = Span::styled(row.key, Style::default().add_modifier(Modifier::BOLD));
+                let sep = Span::raw("  ");
+                let desc_span = Span::raw(row.desc);
+                lines.push(Line::from(vec![Span::raw("  "), key_span, sep, desc_span]));
+            }
+        }
+
+        let total = lines.len() as u16;
+        let indicator = format!("[{}/{}]", self.scroll_offset + 1, total.max(1));
+        let title = format!(" Help — Cargonaut  {indicator} ");
+
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+
+        let paragraph = Paragraph::new(Text::from(lines))
+            .block(block)
+            .scroll((self.scroll_offset, 0));
+
+        f.render_widget(paragraph, area);
+    }
+}
+
+// =====================================================================
+// Helpers
+// =====================================================================
+
+/// Centre a `percent_x × percent_y` rect inside `r`.
+pub(crate) fn centered_rect_pct(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    let vchunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vchunks[1])[1]
+}
+
+// =====================================================================
+// User menu dialog (Feature 047 — US2, T020-T022)
+// =====================================================================
+
+/// Outcome returned by [`UserMenuDialog::handle_key`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserMenuAction {
+    /// Close the menu without executing anything.
+    Close,
+    /// Execute the action at the given index.
+    Execute(usize),
+}
+
+/// The F2 user action menu. Items are loaded fresh from `menu.toml` on each
+/// F2 press; an `error` variant displays the parse error instead of items.
+#[derive(Debug)]
+pub struct UserMenuDialog {
+    /// Menu items (empty when `menu.toml` is absent or empty).
+    pub items: Vec<cargonaut_config::MenuItem>,
+    /// List selection state.
+    state: ListState,
+    /// If set, display this error message instead of the item list.
+    pub error: Option<String>,
+}
+
+impl UserMenuDialog {
+    /// Construct a new menu from the given items. Selects the first row.
+    pub fn new(items: Vec<cargonaut_config::MenuItem>) -> Self {
+        let mut state = ListState::default();
+        if !items.is_empty() {
+            state.select(Some(0));
+        }
+        Self {
+            items,
+            state,
+            error: None,
+        }
+    }
+
+    /// Construct an error-state menu (shows the parse error instead of items).
+    pub fn new_error(msg: impl Into<String>) -> Self {
+        Self {
+            items: vec![],
+            state: ListState::default(),
+            error: Some(msg.into()),
+        }
+    }
+
+    /// Index of the currently focused item, or `None` if no items.
+    pub fn focused_index(&self) -> Option<usize> {
+        self.state.selected()
+    }
+
+    /// Handle a key event. Returns `Some(action)` when the dialog should act or
+    /// close, `None` when the key is consumed without acting (navigation).
+    pub fn handle_key(&mut self, code: KeyCode) -> Option<UserMenuAction> {
+        match code {
+            KeyCode::Esc | KeyCode::F(1) => Some(UserMenuAction::Close),
+            KeyCode::Up => {
+                if let Some(i) = self.state.selected() {
+                    if i > 0 {
+                        self.state.select(Some(i - 1));
+                    }
+                }
+                None
+            }
+            KeyCode::Down => {
+                if let Some(i) = self.state.selected() {
+                    if i + 1 < self.items.len() {
+                        self.state.select(Some(i + 1));
+                    }
+                }
+                None
+            }
+            KeyCode::Enter => self.state.selected().map(UserMenuAction::Execute),
+            KeyCode::Char(c) => {
+                // Shortcut key — find first item whose `key == Some(c)` (first wins).
+                self.items
+                    .iter()
+                    .position(|item| item.key == Some(c))
+                    .map(UserMenuAction::Execute)
+            }
+            _ => None,
+        }
+    }
+
+    /// Render the dialog into `area`, clearing it first.
+    pub fn render(
+        &mut self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        theme: &crate::theme::Theme,
+    ) {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, StatefulWidget};
+
+        let darea = centered_rect_pct(50, 60, area);
+        f.render_widget(Clear, darea);
+
+        let block = Block::default()
+            .title(" User Menu (F2) ")
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+
+        if let Some(err) = &self.error {
+            let body = format!("Error loading menu.toml:\n{err}\n\nPress Esc to close.");
+            let para = Paragraph::new(body)
+                .block(block)
+                .style(theme.dialog_style());
+            f.render_widget(para, darea);
+            return;
+        }
+
+        if self.items.is_empty() {
+            let body = "No actions defined — see ~/.config/cargonaut/menu.toml";
+            let para = Paragraph::new(body)
+                .block(block)
+                .style(theme.dialog_style());
+            f.render_widget(para, darea);
+            return;
+        }
+
+        let max_label = darea.width.saturating_sub(8) as usize;
+        let items: Vec<ListItem<'_>> = self
+            .items
+            .iter()
+            .map(|item| {
+                let label = if item.label.chars().count() > max_label {
+                    item.label
+                        .chars()
+                        .take(max_label.saturating_sub(1))
+                        .collect::<String>()
+                        + "…"
+                } else {
+                    item.label.clone()
+                };
+                let key_hint = item.key.map(|c| format!(" [{c}]")).unwrap_or_default();
+                let line = Line::from(vec![
+                    Span::raw(label),
+                    Span::styled(key_hint, Style::default().add_modifier(Modifier::DIM)),
+                ]);
+                ListItem::new(line)
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(block)
+            .style(theme.dialog_style())
+            .highlight_style(
+                Style::default()
+                    .fg(theme.dialog_sel_fg)
+                    .bg(theme.dialog_sel_bg),
+            )
+            .highlight_symbol("▶ ");
+
+        StatefulWidget::render(list, darea, f.buffer_mut(), &mut self.state);
+    }
+}
+
 // Re-export of crossterm's KeyCode so callers don't need a second use.
 pub use crossterm::event::KeyCode;
 
@@ -1293,5 +1970,186 @@ mod tests {
         assert_eq!(d.handle_key(KeyCode::Char('c')), None);
         assert_eq!(d.handle_key(KeyCode::Down), None);
         assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
+    }
+
+    // ---------- HelpOverlay (Feature 047 — T008/T009) ----------
+
+    #[test]
+    fn help_sections_is_non_empty() {
+        assert!(!HELP_SECTIONS.is_empty());
+    }
+
+    #[test]
+    fn help_sections_each_section_has_non_empty_title() {
+        for sec in HELP_SECTIONS {
+            assert!(!sec.title.is_empty(), "section title must not be empty");
+        }
+    }
+
+    #[test]
+    fn help_sections_each_section_has_at_least_one_row() {
+        for sec in HELP_SECTIONS {
+            assert!(!sec.rows.is_empty(), "section '{}' has no rows", sec.title);
+        }
+    }
+
+    #[test]
+    fn help_sections_every_row_has_non_empty_key_and_desc() {
+        for sec in HELP_SECTIONS {
+            for row in sec.rows {
+                assert!(
+                    !row.key.is_empty(),
+                    "row key empty in section '{}'",
+                    sec.title
+                );
+                assert!(
+                    !row.desc.is_empty(),
+                    "row desc empty in section '{}'",
+                    sec.title
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn help_overlay_scroll_down_increments_offset() {
+        let total = HELP_SECTIONS
+            .iter()
+            .map(|s| s.rows.len() + 1)
+            .sum::<usize>() as u16;
+        let visible = 10u16;
+        let mut ov = HelpOverlay::new(visible);
+        assert_eq!(ov.scroll_offset, 0);
+        ov.handle_key(KeyCode::Down);
+        if total > visible {
+            assert_eq!(ov.scroll_offset, 1);
+        }
+    }
+
+    #[test]
+    fn help_overlay_scroll_up_clamps_at_zero() {
+        let mut ov = HelpOverlay::new(10);
+        let action = ov.handle_key(KeyCode::Up);
+        assert_eq!(ov.scroll_offset, 0);
+        assert_eq!(action, HelpAction::Swallow);
+    }
+
+    #[test]
+    fn help_overlay_home_resets_to_zero() {
+        let mut ov = HelpOverlay::new(5);
+        ov.handle_key(KeyCode::Down);
+        ov.handle_key(KeyCode::Down);
+        ov.handle_key(KeyCode::Home);
+        assert_eq!(ov.scroll_offset, 0);
+    }
+
+    #[test]
+    fn help_overlay_f1_returns_close() {
+        let mut ov = HelpOverlay::new(10);
+        assert_eq!(ov.handle_key(KeyCode::F(1)), HelpAction::Close);
+    }
+
+    #[test]
+    fn help_overlay_esc_returns_close() {
+        let mut ov = HelpOverlay::new(10);
+        assert_eq!(ov.handle_key(KeyCode::Esc), HelpAction::Close);
+    }
+
+    #[test]
+    fn help_overlay_unrecognized_key_swallows() {
+        let mut ov = HelpOverlay::new(10);
+        assert_eq!(ov.handle_key(KeyCode::Char('j')), HelpAction::Swallow);
+        assert_eq!(ov.handle_key(KeyCode::Enter), HelpAction::Swallow);
+        assert_eq!(ov.handle_key(KeyCode::Char('q')), HelpAction::Swallow);
+    }
+
+    #[test]
+    fn help_overlay_page_down_increments_by_visible_height() {
+        let mut ov = HelpOverlay::new(10);
+        let before = ov.scroll_offset;
+        ov.handle_key(KeyCode::PageDown);
+        // If content is taller than visible, offset should move by visible_height
+        if ov.total_lines > ov.visible_height {
+            assert!(ov.scroll_offset > before);
+        }
+    }
+
+    // ---------- UserMenuDialog (Feature 047 — T018) ----------
+
+    fn menu_item(label: &str, command: &str, key: Option<char>) -> cargonaut_config::MenuItem {
+        cargonaut_config::MenuItem {
+            label: label.into(),
+            command: command.into(),
+            only_if: None,
+            key,
+        }
+    }
+
+    #[test]
+    fn user_menu_new_with_items_selects_first() {
+        let items = vec![
+            menu_item("Edit", "vi {path}", Some('e')),
+            menu_item("List", "ls {path}", None),
+        ];
+        let d = UserMenuDialog::new(items);
+        assert_eq!(d.focused_index(), Some(0));
+    }
+
+    #[test]
+    fn user_menu_new_empty_has_no_selection() {
+        let d = UserMenuDialog::new(vec![]);
+        assert_eq!(d.focused_index(), None);
+    }
+
+    #[test]
+    fn user_menu_down_moves_selection() {
+        let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.focused_index(), Some(1));
+    }
+
+    #[test]
+    fn user_menu_up_clamps_at_zero() {
+        let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(d.handle_key(KeyCode::Up), None);
+        assert_eq!(d.focused_index(), Some(0));
+    }
+
+    #[test]
+    fn user_menu_esc_returns_close() {
+        let mut d = UserMenuDialog::new(vec![menu_item("A", "a", None)]);
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(UserMenuAction::Close));
+    }
+
+    #[test]
+    fn user_menu_enter_returns_execute_index() {
+        let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(
+            d.handle_key(KeyCode::Enter),
+            Some(UserMenuAction::Execute(0))
+        );
+    }
+
+    #[test]
+    fn user_menu_shortcut_char_executes_matching_item() {
+        let items = vec![
+            menu_item("Edit", "vi {path}", Some('e')),
+            menu_item("List", "ls {path}", Some('l')),
+        ];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(
+            d.handle_key(KeyCode::Char('l')),
+            Some(UserMenuAction::Execute(1))
+        );
+    }
+
+    #[test]
+    fn user_menu_new_error_sets_error_field() {
+        let d = UserMenuDialog::new_error("parse error: line 5");
+        assert!(d.error.is_some());
+        assert!(d.error.as_deref().unwrap().contains("parse error"));
     }
 }
