@@ -117,5 +117,5 @@ When editing this file or adding project-wide conventions, follow the discipline
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-`specs/043-file-attributes/plan.md`.
+`specs/044-recursive-attrs/plan.md`.
 <!-- SPECKIT END -->
