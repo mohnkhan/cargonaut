@@ -14,7 +14,7 @@
 
 - Q: Should the three user stories be one combined test function or three separate functions? → A: **Three separate test functions** — `nav_cursor_arrow_keys`, `nav_descend_enter`, `nav_ascend_backspace` — for independent failure attribution in CI.
 - Q: How should the test detect that the TUI is ready before sending the first key? → A: **Poll PTY output for a recognizable startup string** (deadline-bounded), consistent with FR-006; do not use a fixed sleep.
-- Q: How should cursor-position assertions work for arrow-key navigation? → A: **Predictably-named temp entries** (lexicographically sorted unique names such as `aaa`, `bbb`, `ccc`) + raw PTY substring scan using `output_contains`; no ANSI parsing required.
+- Q: How should cursor-position assertions work for arrow-key navigation? → A: **Predictably-named temp entries** (lexicographically sorted unique names such as `aaa`, `bbb`, `ccc`) + delta-buffer substring scan using `delta_contains` (checks only bytes written since the last action snapshot, to avoid false positives from the cumulative output buffer); no ANSI parsing required.
 
 ## User Scenarios & Testing *(mandatory)*
 
