@@ -47,6 +47,7 @@ _No project-level setup required — no new Cargo dependencies, no new crates, n
 - [ ] T005 [US1] Write failing unit test `skin_full_palette_loads`: call `Theme::resolve("dracula")` with temp `XDG_CONFIG_HOME` containing a full `dracula.toml` (all 25 fields), assert `(theme, None)` returned and `theme.panel_bg == Color::Rgb(40,42,54)` in `crates/cargonaut-ui-tui/src/theme.rs`
 - [ ] T006 [US1] Write failing unit test `skin_missing_file_falls_back`: call `Theme::resolve("no-such-skin")` with temp `XDG_CONFIG_HOME` (no matching file), assert returned theme name is `"commander-dark"` and error string contains `"no-such-skin"` in `crates/cargonaut-ui-tui/src/theme.rs`
 - [ ] T007 [US4] Write failing unit tests for `parse_color_spec` (three format variants): `parse_color_spec(Named("Blue")) == Color::Blue`, `parse_color_spec(Indexed(196)) == Color::Indexed(196)`, `parse_color_spec(Named("#ff8800")) == Color::Rgb(255,136,0)` in `crates/cargonaut-ui-tui/src/theme.rs`
+- [ ] T029 [US1] Write failing unit test `skin_resolve_via_theme_name`: call `Theme::resolve` with a skin-file name (not a builtin) using temp `XDG_CONFIG_HOME`, verify the returned `(theme, None)` tuple; this tests the same code path that `lib.rs` exercises when `--theme <name>` is passed (FR-008) in `crates/cargonaut-ui-tui/src/theme.rs`
 
 ### TDD: Green commits (implement to make tests pass)
 
@@ -94,6 +95,7 @@ _(T009 `Theme::from_skin` already fills `None` fields from `commander_dark()`. I
 - [ ] T018 [US3] [P] Write failing unit test `skin_unknown_field_falls_back`: skin with `frobnicate = "Blue"` (unknown TOML key); assert `(commander-dark, Some(msg))` and `msg` contains `"frobnicate"` in `crates/cargonaut-ui-tui/src/theme.rs`
 - [ ] T019 [US3] [P] Write failing unit test `skin_bad_toml_falls_back`: skin file content is `panel_bg = "Blue` (unterminated string literal); assert `(commander-dark, Some(msg))` and `msg` is non-empty in `crates/cargonaut-ui-tui/src/theme.rs`
 - [ ] T020 [US3] Write failing unit test `default_theme_dir_xdg_override`: set `XDG_CONFIG_HOME=/tmp/xdg_test`; assert `default_theme_dir()` returns `PathBuf::from("/tmp/xdg_test/cargonaut/themes")` in `crates/cargonaut-ui-tui/src/theme.rs`
+- [ ] T030 [US3] Write failing unit tests for `io::Error` edge cases: (a) skin path is a directory (not a file) → `(commander-dark, Some(msg))`; (b) skin file exists but is unreadable (`chmod 000` in tempdir on Linux) → `(commander-dark, Some(msg))`; both assert `msg` is non-empty in `crates/cargonaut-ui-tui/src/theme.rs`
 
 ### TDD: Green commits
 
@@ -111,6 +113,7 @@ _(The error propagation through `load_skin` and `Theme::resolve` was established
 
 - [ ] T022 Run `cargo clippy --workspace --all-targets -- -D warnings` and fix any new warnings introduced by Feature 046 code in `crates/cargonaut-ui-tui/src/theme.rs`
 - [ ] T023 Add `///` doc-comments to all new public items in `theme.rs` (`ColorSpec`, `SkinFile`, `parse_color_spec`, `load_skin`, `default_theme_dir`, `Theme::from_skin`) to satisfy `#![warn(missing_docs)]` in `crates/cargonaut-ui-tui/src/theme.rs`
+- [ ] T028 Write a `harness = false` bench `skin_resolve_latency` (following the `keypress_latency.rs` pattern) that calls `Theme::resolve` 1 000 times with an existing skin file in a temp dir, asserts mean iteration time <5 ms, and exits non-zero on failure (SC-005 CI gate) in `crates/cargonaut-ui-tui/benches/theme_resolve.rs`; add `[[bench]] name = "theme_resolve" harness = false test = false` entry to `crates/cargonaut-ui-tui/Cargo.toml`
 - [ ] T024 Run `make ci-local` and confirm all tests pass (expected: 341+ unit + 12 integration, all green)
 - [ ] T025 [P] Update `README.md`: increment test count in badge + "At a Glance" table; add Feature 046 one-line entry in the Feature History section
 - [ ] T026 [P] Append Feature 046 section to `Learnings.md` (≥3 bullets: what was hard, root causes, non-obvious decisions)
