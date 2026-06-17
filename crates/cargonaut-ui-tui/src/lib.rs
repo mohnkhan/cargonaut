@@ -167,6 +167,10 @@ enum InputKind {
     Symlink,
     /// Feature 043 — hard-link name prompt.
     HardLink,
+    /// Feature 044 — recursive chmod mode prompt (chains a confirm).
+    ChmodRecursive,
+    /// Feature 044 — recursive chown owner prompt (chains a confirm).
+    ChownRecursive,
 }
 
 /// An external program to run (F3/F4), suspending the TUI around it.
@@ -531,6 +535,29 @@ async fn handle_key(
                                             format!("Change owner to {text}?"),
                                         ),
                                         on_confirm: AppCommand::Chown(text),
+                                    });
+                                    *mode = Mode::Dialog;
+                                }
+                                // Feature 044: recursive chmod/chown always
+                                // confirm before applying to the whole subtree
+                                // (FR-002); Cancel aborts.
+                                InputKind::ChmodRecursive => {
+                                    *active_dialog = Some(ActiveDialog::Confirm {
+                                        widget: ConfirmDialog::new(
+                                            "Recursive chmod",
+                                            format!("Recursively chmod the subtree to {text}?"),
+                                        ),
+                                        on_confirm: AppCommand::ChmodRecursive(text),
+                                    });
+                                    *mode = Mode::Dialog;
+                                }
+                                InputKind::ChownRecursive => {
+                                    *active_dialog = Some(ActiveDialog::Confirm {
+                                        widget: ConfirmDialog::new(
+                                            "Recursive chown",
+                                            format!("Recursively chown the subtree to {text}?"),
+                                        ),
+                                        on_confirm: AppCommand::ChownRecursive(text),
                                     });
                                     *mode = Mode::Dialog;
                                 }
@@ -906,6 +933,32 @@ async fn dispatch_ui_command(
                     focused_entry_name(app),
                 ),
                 kind: InputKind::HardLink,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        // Feature 044 (#65): C-x C / C-x O open the recursive chmod/chown prompt
+        // (prefilled like the shallow ops); submit chains a confirmation.
+        Command::ChmodRecursive => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Recursive chmod",
+                    "Mode for whole subtree (octal e.g. 755, or symbolic):",
+                    focused_octal_mode(app),
+                ),
+                kind: InputKind::ChmodRecursive,
+            });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
+        Command::ChownRecursive => {
+            *active_dialog = Some(ActiveDialog::Input {
+                widget: TextInputDialog::with_initial(
+                    "Recursive chown",
+                    "Owner for whole subtree (user, :group, or user:group):",
+                    focused_owner(app),
+                ),
+                kind: InputKind::ChownRecursive,
             });
             *mode = Mode::Dialog;
             return Ok(());
@@ -2538,6 +2591,41 @@ mod tests {
         // Entry rows carry bookmark indices.
         assert!(rows.iter().any(|r| r.index == Some(0)));
         assert!(rows.iter().any(|r| r.index == Some(1)));
+    }
+
+    // Feature 044: C-x C opens a prefilled mode prompt; submit chains a confirm;
+    // Cancel aborts with no change.
+    #[tokio::test]
+    async fn recursive_chmod_opens_input_then_confirm_and_cancel_aborts() {
+        use crossterm::event::KeyCode;
+        use std::os::unix::fs::PermissionsExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        let f = td_l.path().join("a/f");
+        std::fs::write(&f, b"x").unwrap();
+        std::fs::set_permissions(&f, PermissionsExt::from_mode(0o644)).unwrap();
+        let mut app = app_with(&td_l, &td_r).await; // focused = "a"
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, true);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(Command::ChmodRecursive, &mut app, &mut mode, &mut dlg, &mut status, &mut quit, &mut ui).await.unwrap();
+        assert!(matches!(dlg, Some(ActiveDialog::Input { kind: InputKind::ChmodRecursive, .. })));
+        // Type "700", Enter → should chain a ConfirmDialog (not apply yet).
+        for c in ['7', '0', '0'] {
+            feed_key(KeyCode::Char(c), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        }
+        feed_key(KeyCode::Enter, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(matches!(dlg, Some(ActiveDialog::Confirm { .. })), "submit must chain a confirm");
+        // Cancel the confirmation → nothing changes (SC-003).
+        feed_key(KeyCode::Esc, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        assert!(dlg.is_none());
+        let m = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m, 0o644, "Cancel must leave the tree unchanged");
     }
 
     // Feature 042: Ctrl-b (BookmarksMenu) opens the hotlist popup.

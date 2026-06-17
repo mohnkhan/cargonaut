@@ -217,6 +217,8 @@ impl MenuBar {
                     ("Delete", Command::DeleteSelection),
                     ("Chmod", Command::Chmod),
                     ("Chown", Command::Chown),
+                    ("Chmod -R", Command::ChmodRecursive),
+                    ("Chown -R", Command::ChownRecursive),
                     ("Symlink", Command::CreateSymlink),
                     ("Hardlink", Command::CreateHardLink),
                 ],

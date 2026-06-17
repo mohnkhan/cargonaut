@@ -202,6 +202,11 @@ pub enum Command {
     CreateSymlink,
     /// Create a hard link to the focused entry (C-x l).
     CreateHardLink,
+    // Feature 044 (recursive attributes, #65)
+    /// Recursively change permissions of a directory subtree (C-x C).
+    ChmodRecursive,
+    /// Recursively change ownership of a directory subtree (C-x O).
+    ChownRecursive,
 }
 
 // ============================================================

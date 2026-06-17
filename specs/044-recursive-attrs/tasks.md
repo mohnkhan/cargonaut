@@ -78,17 +78,17 @@ after confirmation.
   (reverse), `apply` per entry's current bits; aggregate via `attr_status("chmod
   -R", …)` + truncation note; refresh. Add `Command::ChmodRecursive(String)` to
   the core `Command` enum + dispatch arm. Make T004 pass.
-- [ ] T006 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a
+- [X] T006 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a
   failing test that `C-x C` resolves to `Command::ChmodRecursive` (pane), no
   collision with `C-x c`.
-- [ ] T007 [US1] (green) Add `Command::ChmodRecursive` to `keymap.rs` + the
+- [X] T007 [US1] (green) Add `Command::ChmodRecursive` to `keymap.rs` + the
   binding to `design/contracts/keymap.toml` (`pane`, `C-x C`, `chmod-recursive`).
   Make T006 pass.
-- [ ] T008 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a failing test
+- [X] T008 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a failing test
   that `dispatch_ui_command(Command::ChmodRecursive, …)` opens a prefilled
   `TextInputDialog` (`InputKind::ChmodRecursive`, current octal), `Mode::Dialog`;
   and that submitting it chains a `ConfirmDialog` (FR-002).
-- [ ] T009 [US1] (green) Add `InputKind::ChmodRecursive`; wire the `C-x C`
+- [X] T009 [US1] (green) Add `InputKind::ChmodRecursive`; wire the `C-x C`
   dispatch arm (open prefilled input) and the Input-submit arm (open
   `ConfirmDialog` with `on_confirm = AppCommand::ChmodRecursive(text)`); add a
   File-menu "Chmod -R" entry. Make T008 pass. Include an explicit test that
@@ -105,19 +105,19 @@ after confirmation.
 
 **Independent Test**: recursive chown a tree; a nested entry reflects the owner.
 
-- [ ] T010 [P] [US2] (red) In `crates/cargonaut-core/src/lib.rs` add failing
+- [X] T010 [P] [US2] (red) In `crates/cargonaut-core/src/lib.rs` add failing
   `#[tokio::test]`s for `App::chown_recursive`: no-op chown to current `uid:gid`
   applied at depth (SC-002); deepest-first; unknown owner ⇒ `Err(BadAttr)` no
   walk; partial failure aggregated (SC-006).
-- [ ] T011 [US2] (green) Implement `App::chown_recursive(owner)` in
+- [X] T011 [US2] (green) Implement `App::chown_recursive(owner)` in
   `crates/cargonaut-core/src/lib.rs` (mirror `chmod_recursive`, using
   `parse_owner` + `local_fs.chown`, `attr_status("chown -R", …)`); add
   `Command::ChownRecursive(String)` + dispatch arm. Make T010 pass.
-- [ ] T012 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a
+- [X] T012 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/keymap.rs` add a
   failing test that `C-x O` resolves to `Command::ChownRecursive`.
-- [ ] T013 [US2] (green) Add `Command::ChownRecursive` + binding (`C-x O`,
+- [X] T013 [US2] (green) Add `Command::ChownRecursive` + binding (`C-x O`,
   `chown-recursive`). Make T012 pass.
-- [ ] T014 [US2] (green) Add `InputKind::ChownRecursive`; wire `C-x O` dispatch
+- [X] T014 [US2] (green) Add `InputKind::ChownRecursive`; wire `C-x O` dispatch
   (prefilled owner input) + Input-submit → `ConfirmDialog` with `on_confirm =
   AppCommand::ChownRecursive(text)`; add File-menu "Chown -R". (Dispatch +
   confirm-chain test added here, red-then-green within this task.)

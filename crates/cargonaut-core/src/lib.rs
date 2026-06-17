@@ -2159,6 +2159,44 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn chown_recursive_noop_to_current_owner_at_depth() {
+        use std::os::unix::fs::MetadataExt;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir_all(td_l.path().join("a/b")).unwrap();
+        fs::write(td_l.path().join("a/b/deep"), b"x").await.unwrap();
+        let md = std::fs::metadata(td_l.path().join("a/b/deep")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.chown_recursive(&format!("{}:{}", md.uid(), md.gid())).await.unwrap();
+        let md2 = std::fs::metadata(td_l.path().join("a/b/deep")).unwrap();
+        assert_eq!((md2.uid(), md2.gid()), (md.uid(), md.gid()));
+    }
+
+    #[tokio::test]
+    async fn chown_recursive_unknown_owner_does_not_walk() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.chown_recursive("no_such_user_xyzzy_42").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn chown_recursive_empty_selection_is_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.active_pane_mut().cursor = 0; // on the `..` row, nothing tagged
+        let evs = app.chown_recursive("0:0").await.unwrap();
+        assert!(format!("{evs:?}").contains("No files selected"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn chmod_recursive_applies_at_depth() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
