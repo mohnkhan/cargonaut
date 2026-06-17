@@ -8,6 +8,14 @@
 
 **Input**: User description: "PTY end-to-end navigation smoke test — implement the currently-ignored bin-level PTY navigation test (T1.07, issue #30). The test should launch the real cargonaut binary in a PTY, send keyboard navigation sequences (arrow keys, Enter to descend into a directory, Backspace/Left to ascend), and assert that the TUI output reflects the expected cursor and directory state. It should be gated behind the CARGONAUT_PTY_TESTS=1 env var (same pattern as the existing PTY resume test from Feature 037) and run in CI when that env var is set. The test lives in the integration test suite (tests/ directory or the existing pty_tests module). Feature 028 deferred this; the PTY harness was laid down in Feature 037."
 
+## Clarifications
+
+### Session 2026-06-17
+
+- Q: Should the three user stories be one combined test function or three separate functions? → A: **Three separate test functions** — `nav_cursor_arrow_keys`, `nav_descend_enter`, `nav_ascend_backspace` — for independent failure attribution in CI.
+- Q: How should the test detect that the TUI is ready before sending the first key? → A: **Poll PTY output for a recognizable startup string** (deadline-bounded), consistent with FR-006; do not use a fixed sleep.
+- Q: How should cursor-position assertions work for arrow-key navigation? → A: **Predictably-named temp entries** (lexicographically sorted unique names such as `aaa`, `bbb`, `ccc`) + raw PTY substring scan using `output_contains`; no ANSI parsing required.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Cursor moves up and down via arrow keys (Priority: P1)
@@ -74,9 +82,9 @@ After descending into a subdirectory, pressing Backspace (or the Left arrow, if 
 - **FR-003**: The test MUST verify that sending a down-arrow key sequence advances the cursor position in the TUI output, and that sending an up-arrow key sequence retreats it.
 - **FR-004**: The test MUST verify that pressing Enter when the cursor is on a subdirectory causes the active pane to display the subdirectory's contents.
 - **FR-005**: The test MUST verify that pressing Backspace when inside a subdirectory causes the active pane to return to the parent directory's contents.
-- **FR-006**: All TUI-state assertions MUST use a polling loop with a configurable deadline (not `thread::sleep` with a fixed delay), so the test is reliable on slow CI runners.
+- **FR-006**: All TUI-state assertions MUST use a polling loop with a configurable deadline (not `thread::sleep` with a fixed delay), so the test is reliable on slow CI runners. This includes startup detection: the test MUST poll for a recognizable startup string in the PTY output before injecting any key sequences.
 - **FR-007**: The test MUST cleanly exit the binary (via F10 or equivalent quit key) at the end of the scenario; if the binary does not exit within a deadline, the test MUST kill it and report a failure.
-- **FR-008**: The existing `#[ignore]`d `local_navigation_smoke` stub in `cargonaut-bin/tests/local_navigation.rs` MUST be replaced by the real implementation (not left alongside it).
+- **FR-008**: The existing `#[ignore]`d `local_navigation_smoke` stub in `cargonaut-bin/tests/local_navigation.rs` MUST be replaced by three separate test functions — `nav_cursor_arrow_keys`, `nav_descend_enter`, and `nav_ascend_backspace` — one per user story. No combined single-function form is acceptable.
 - **FR-009**: The test MUST be Unix-only (`#[cfg(unix)]`), consistent with the existing PTY resume gate.
 - **FR-010**: CI MUST execute the test when `CARGONAUT_PTY_TESTS=1` is set; the existing CI workflow already sets this flag, so no CI config change is needed — the test just needs to exist and be un-ignored.
 
@@ -95,5 +103,6 @@ After descending into a subdirectory, pressing Backspace (or the Left arrow, if 
 - The CI workflow already sets `CARGONAUT_PTY_TESTS=1` during the test step, so no CI configuration changes are needed.
 - The binary is available as `env!("CARGO_BIN_EXE_cargonaut")` in integration tests, consistent with how Feature 037's PTY test resolves the binary path.
 - The keymap is stable: down-arrow = `\x1b[B`, up-arrow = `\x1b[A`, Enter = `\r`, Backspace = `\x7f`; these match the crossterm sequences already exercised by Feature 037.
-- Observable TUI state can be detected by scanning raw PTY output for distinguishing strings (directory names, path segments, or entry labels) rather than by parsing ANSI sequences into a structured screen buffer.
+- Observable TUI state can be detected by scanning raw PTY output for distinguishing strings (directory names, path segments, or entry labels) rather than by parsing ANSI sequences into a structured screen buffer. Temp entries are created with predictably sorted unique names (e.g. `aaa`, `bbb`, `ccc`) so each arrow-key step is verifiable by asserting the next name appears in the output.
 - Two panes are displayed side-by-side; the test focuses on the left (active) pane for all assertions.
+- Startup readiness is detected by polling the PTY output for a recognizable initial TUI string rather than a fixed sleep, consistent with the polling requirement that applies to all assertions (FR-006).
