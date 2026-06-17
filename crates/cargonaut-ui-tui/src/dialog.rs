@@ -806,6 +806,296 @@ impl HotlistDialog {
     }
 }
 
+// =====================================================================
+// Help overlay (Feature 047 — US1, T011-T014)
+// =====================================================================
+
+/// One (shortcut, description) row in the help content.
+#[derive(Debug, Clone, Copy)]
+pub struct HelpRow {
+    /// Keyboard shortcut(s) shown in the left column.
+    pub key: &'static str,
+    /// Plain-language description shown in the right column.
+    pub desc: &'static str,
+}
+
+/// One named section of the help overlay.
+#[derive(Debug, Clone, Copy)]
+pub struct HelpSection {
+    /// Section title (e.g. "Navigation").
+    pub title: &'static str,
+    /// Rows belonging to this section.
+    pub rows: &'static [HelpRow],
+}
+
+/// All compiled-in help sections. Order defines the display order.
+/// The "User Menu (F2)" section is added in T031 after US2 ships.
+pub static HELP_SECTIONS: &[HelpSection] = &[
+    HelpSection {
+        title: "Navigation",
+        rows: &[
+            HelpRow { key: "F1", desc: "Show this help overlay (show-help)" },
+            HelpRow { key: "F10", desc: "Quit the application (quit)" },
+            HelpRow { key: "Tab", desc: "Switch active pane (focus-swap-pane)" },
+            HelpRow { key: "M-1", desc: "Focus left pane (focus-left-pane)" },
+            HelpRow { key: "M-2", desc: "Focus right pane (focus-right-pane)" },
+            HelpRow { key: "j / Down", desc: "Move cursor down (cursor-down)" },
+            HelpRow { key: "k / Up", desc: "Move cursor up (cursor-up)" },
+            HelpRow { key: "Enter", desc: "Open directory or file (descend-or-open)" },
+            HelpRow { key: "Backspace / h", desc: "Go up to parent directory (ascend-parent)" },
+            HelpRow { key: "~", desc: "Go to home directory (cd-home)" },
+            HelpRow { key: "/", desc: "Go to root directory (cd-root)" },
+            HelpRow { key: ":", desc: "Open command line (open-cmdline)" },
+        ],
+    },
+    HelpSection {
+        title: "Selection",
+        rows: &[
+            HelpRow { key: "Insert", desc: "Toggle selection on current entry (selection-toggle)" },
+            HelpRow { key: "*", desc: "Invert selection (selection-invert)" },
+            HelpRow { key: "+", desc: "Add to selection by pattern (selection-add-by-pattern)" },
+            HelpRow { key: "-", desc: "Remove from selection by pattern (selection-remove-by-pattern)" },
+        ],
+    },
+    HelpSection {
+        title: "File Operations",
+        rows: &[
+            HelpRow { key: "F3", desc: "Preview file or directory (preview)" },
+            HelpRow { key: "F4", desc: "Edit file in $EDITOR (edit)" },
+            HelpRow { key: "F5", desc: "Copy selection to other pane (copy-selection)" },
+            HelpRow { key: "F6", desc: "Move or rename selection (move-or-rename-selection)" },
+            HelpRow { key: "F7", desc: "Create a new directory (mkdir)" },
+            HelpRow { key: "F8", desc: "Delete selection (delete-selection)" },
+            HelpRow { key: "C-c", desc: "Cancel current operation (cancel-current-operation)" },
+            HelpRow { key: "C-s", desc: "Cycle sort key (cycle-sort-key)" },
+            HelpRow { key: "C-z", desc: "Undo last file operation (undo-last-op)" },
+        ],
+    },
+    HelpSection {
+        title: "Panels & Modes",
+        rows: &[
+            HelpRow { key: "F9", desc: "Open menu bar (open-menu-bar)" },
+            HelpRow { key: "F12", desc: "Show active transfers panel (show-tasks-panel)" },
+            HelpRow { key: "M-c", desc: "Quick CD popup (quick-cd-popup)" },
+            HelpRow { key: "M-!", desc: "Toggle panel filter prompt (toggle-panel-filter)" },
+            HelpRow { key: "<", desc: "Open fuzzy entry filter (open-fuzzy-filter)" },
+            HelpRow { key: "C-f", desc: "Filter entries in current directory (filter-current-dir)" },
+            HelpRow { key: "M-i", desc: "Sync other panel to this path (sync-other-panel-path)" },
+            HelpRow { key: "M-o", desc: "Show focused entry in other panel (show-focused-in-other-panel)" },
+            HelpRow { key: "M-.", desc: "Toggle hidden files (toggle-hidden)" },
+            HelpRow { key: "M-,", desc: "Toggle split orientation (toggle-split-orientation)" },
+            HelpRow { key: "C-Space", desc: "Calculate recursive directory size (recursive-dir-size)" },
+            HelpRow { key: "M-t", desc: "Cycle listing mode (cycle-listing-mode)" },
+            HelpRow { key: "C-t", desc: "Open new tab (new-tab)" },
+            HelpRow { key: "C-w", desc: "Close current tab (close-tab)" },
+            HelpRow { key: "C-o", desc: "Open subshell in current directory (open-subshell)" },
+            HelpRow { key: "C-r", desc: "Reload config and themes (reload-config-and-themes)" },
+        ],
+    },
+    HelpSection {
+        title: "History",
+        rows: &[
+            HelpRow { key: "M-S-h", desc: "Show directory history popup (show-directory-history)" },
+            HelpRow { key: "M-h", desc: "Show command history popup (show-command-history)" },
+            HelpRow { key: "M-y", desc: "Navigate to previous directory in history (history-prev-dir)" },
+            HelpRow { key: "M-u", desc: "Navigate to next directory in history (history-next-dir)" },
+        ],
+    },
+    HelpSection {
+        title: "Bookmarks",
+        rows: &[
+            HelpRow { key: "C-b", desc: "Open bookmarks menu; add / remove entries (bookmarks-menu)" },
+        ],
+    },
+    HelpSection {
+        title: "File Attributes",
+        rows: &[
+            HelpRow { key: "C-x c", desc: "Change file permissions (chmod)" },
+            HelpRow { key: "C-x o", desc: "Change file ownership (chown)" },
+            HelpRow { key: "C-x s", desc: "Create symbolic link (create-symlink)" },
+            HelpRow { key: "C-x l", desc: "Create hard link (create-hard-link)" },
+            HelpRow { key: "C-x C", desc: "Recursive chmod into subtree (chmod-recursive)" },
+            HelpRow { key: "C-x O", desc: "Recursive chown into subtree (chown-recursive)" },
+        ],
+    },
+    HelpSection {
+        title: "Power Features",
+        rows: &[
+            HelpRow { key: "F2", desc: "Open user action menu from menu.toml (show-user-menu)" },
+            HelpRow { key: "C-x !", desc: "External panelize — run command, list output (external-panelize)" },
+            HelpRow { key: "C-x r", desc: "Bulk rename selection via editor (bulk-rename-via-editor)" },
+            HelpRow { key: "C-x d", desc: "Compare two directories (compare-directories)" },
+            HelpRow { key: "C-x C-d", desc: "Diff two tagged files (diff-two-tagged-files)" },
+            HelpRow { key: "M-m", desc: "Toggle mouse capture; Shift+drag bypasses (toggle-mouse-capture)" },
+        ],
+    },
+    HelpSection {
+        title: "Preview",
+        rows: &[
+            HelpRow { key: "C-x X", desc: "Toggle hex view in previewer (toggle-hex-view)" },
+            HelpRow { key: "/", desc: "Search forward in preview (preview-search-forward)" },
+            HelpRow { key: "?", desc: "Search backward in preview (preview-search-backward)" },
+            HelpRow { key: "n", desc: "Jump to next search match in preview (preview-search-next)" },
+            HelpRow { key: "N", desc: "Jump to previous search match in preview (preview-search-prev)" },
+        ],
+    },
+    HelpSection {
+        title: "Search Mode",
+        rows: &[
+            HelpRow { key: "Esc", desc: "Close search overlay (close-search)" },
+            HelpRow { key: "Enter", desc: "Navigate to highlighted search result (search-go-to-result)" },
+        ],
+    },
+    HelpSection {
+        title: "Dialogs",
+        rows: &[
+            HelpRow { key: "Esc", desc: "Cancel / close current dialog (dialog-cancel)" },
+            HelpRow { key: "Enter", desc: "Confirm current dialog action (dialog-confirm)" },
+        ],
+    },
+    HelpSection {
+        title: "Orthodox-FM Compat (mc_keys=true)",
+        rows: &[
+            HelpRow { key: "M-5", desc: "Copy selection — alt binding (copy-selection)" },
+            HelpRow { key: "M-6", desc: "Move or rename — alt binding (move-or-rename-selection)" },
+        ],
+    },
+    HelpSection {
+        title: "About",
+        rows: &[
+            HelpRow {
+                key: "cargonaut",
+                desc: "A dual-pane TUI file manager. Press Esc or F1 to close help.",
+            },
+        ],
+    },
+];
+
+/// Outcome returned by [`HelpOverlay::handle_key`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpAction {
+    /// Close the help overlay and return to pane mode.
+    Close,
+    /// Key was consumed; overlay stays open.
+    Swallow,
+}
+
+/// State for the scrollable F1 help overlay.
+#[derive(Debug, Clone)]
+pub struct HelpOverlay {
+    /// Current scroll offset in lines.
+    pub scroll_offset: u16,
+    /// Total rendered lines (computed once at construction).
+    pub total_lines: u16,
+    /// Visible lines in the overlay (set from the frame height at open time).
+    pub visible_height: u16,
+}
+
+impl HelpOverlay {
+    /// Construct a new overlay. `visible_height` is the inner area height of
+    /// the overlay as rendered; computes `total_lines` from `HELP_SECTIONS`.
+    pub fn new(visible_height: u16) -> Self {
+        // Each section contributes: 1 title line + N row lines.
+        let total_lines = HELP_SECTIONS
+            .iter()
+            .map(|s| 1 + s.rows.len())
+            .sum::<usize>() as u16;
+        Self {
+            scroll_offset: 0,
+            total_lines,
+            visible_height,
+        }
+    }
+
+    /// Handle a key event. Returns [`HelpAction`] indicating whether to close
+    /// or swallow. The overlay swallows every key that is not a navigation or
+    /// dismiss key — it MUST NOT fall through to pane commands while open.
+    pub fn handle_key(&mut self, code: KeyCode) -> HelpAction {
+        let max_offset = self.total_lines.saturating_sub(self.visible_height);
+        match code {
+            KeyCode::Up => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                HelpAction::Swallow
+            }
+            KeyCode::Down => {
+                self.scroll_offset = self.scroll_offset.saturating_add(1).min(max_offset);
+                HelpAction::Swallow
+            }
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(self.visible_height);
+                HelpAction::Swallow
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self
+                    .scroll_offset
+                    .saturating_add(self.visible_height)
+                    .min(max_offset);
+                HelpAction::Swallow
+            }
+            KeyCode::Home => {
+                self.scroll_offset = 0;
+                HelpAction::Swallow
+            }
+            KeyCode::End => {
+                self.scroll_offset = max_offset;
+                HelpAction::Swallow
+            }
+            KeyCode::Esc | KeyCode::F(1) => HelpAction::Close,
+            _ => HelpAction::Swallow,
+        }
+    }
+
+    /// Render the overlay into `area`, clearing it first.
+    pub fn render(
+        &self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        theme: &crate::theme::Theme,
+    ) {
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+        use ratatui::text::{Line, Span, Text};
+        use ratatui::style::{Modifier, Style};
+
+        f.render_widget(Clear, area);
+
+        // Build content lines from HELP_SECTIONS.
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for sec in HELP_SECTIONS {
+            // Section title — bold.
+            lines.push(Line::from(vec![Span::styled(
+                sec.title,
+                Style::default().add_modifier(Modifier::BOLD),
+            )]));
+            for row in sec.rows {
+                let key_span = Span::styled(row.key, Style::default().add_modifier(Modifier::BOLD));
+                let sep = Span::raw("  ");
+                let desc_span = Span::raw(row.desc);
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    key_span,
+                    sep,
+                    desc_span,
+                ]));
+            }
+        }
+
+        let total = lines.len() as u16;
+        let indicator = format!("[{}/{}]", self.scroll_offset + 1, total.max(1));
+        let title = format!(" Help — Cargonaut  {indicator} ");
+
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+
+        let paragraph = Paragraph::new(Text::from(lines))
+            .block(block)
+            .scroll((self.scroll_offset, 0));
+
+        f.render_widget(paragraph, area);
+    }
+}
+
 // Re-export of crossterm's KeyCode so callers don't need a second use.
 pub use crossterm::event::KeyCode;
 
