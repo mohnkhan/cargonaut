@@ -1563,7 +1563,9 @@ impl App {
             }
         }
         let mut evs = self.refresh_active_pane().await?;
-        evs.push(Event::Status(recursive_status("chmod -R", ok, &failures, truncated)));
+        evs.push(Event::Status(recursive_status(
+            "chmod -R", ok, &failures, truncated,
+        )));
         Ok(evs)
     }
 
@@ -1596,7 +1598,9 @@ impl App {
             }
         }
         let mut evs = self.refresh_active_pane().await?;
-        evs.push(Event::Status(recursive_status("chown -R", ok, &failures, truncated)));
+        evs.push(Event::Status(recursive_status(
+            "chown -R", ok, &failures, truncated,
+        )));
         Ok(evs)
     }
 
@@ -2093,7 +2097,9 @@ mod tests {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         std::fs::create_dir_all(td_l.path().join("a/b/c")).unwrap();
-        fs::write(td_l.path().join("a/b/c/deep.txt"), b"x").await.unwrap();
+        fs::write(td_l.path().join("a/b/c/deep.txt"), b"x")
+            .await
+            .unwrap();
         let app = make_app(&td_l, &td_r).await;
         let root = app.pane(PaneId::Left).cwd.join("a");
         let (paths, truncated) = app.collect_subtree(&[root]).await;
@@ -2103,7 +2109,10 @@ mod tests {
             .map(|p| p.display())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("a/b/c/deep.txt"), "deep entry missing:\n{joined}");
+        assert!(
+            joined.contains("a/b/c/deep.txt"),
+            "deep entry missing:\n{joined}"
+        );
         assert!(joined.contains("/a/b"), "intermediate dir missing");
     }
 
@@ -2113,7 +2122,9 @@ mod tests {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
-        fs::write(outside.path().join("secret.txt"), b"x").await.unwrap();
+        fs::write(outside.path().join("secret.txt"), b"x")
+            .await
+            .unwrap();
         std::fs::create_dir(td_l.path().join("a")).unwrap();
         std::os::unix::fs::symlink(outside.path(), td_l.path().join("a/link")).unwrap();
         let app = make_app(&td_l, &td_r).await;
@@ -2124,7 +2135,10 @@ mod tests {
             .map(|p| p.display())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("/a/link"), "the link entry itself should be listed");
+        assert!(
+            joined.contains("/a/link"),
+            "the link entry itself should be listed"
+        );
         assert!(
             !joined.contains("secret.txt"),
             "must NOT descend into a symlinked dir:\n{joined}"
@@ -2148,12 +2162,17 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         std::fs::create_dir(td_l.path().join("a")).unwrap();
         for n in 0..10 {
-            fs::write(td_l.path().join(format!("a/f{n}")), b"x").await.unwrap();
+            fs::write(td_l.path().join(format!("a/f{n}")), b"x")
+                .await
+                .unwrap();
         }
         let app = make_app(&td_l, &td_r).await;
         let root = app.pane(PaneId::Left).cwd.join("a");
         let (paths, truncated) = app.collect_subtree_capped(&[root], 3).await;
-        assert!(truncated, "a tree larger than the cap must report truncation");
+        assert!(
+            truncated,
+            "a tree larger than the cap must report truncation"
+        );
         assert!(paths.len() <= 4); // root + up to cap children before stopping
     }
 
@@ -2167,7 +2186,9 @@ mod tests {
         fs::write(td_l.path().join("a/b/deep"), b"x").await.unwrap();
         let md = std::fs::metadata(td_l.path().join("a/b/deep")).unwrap();
         let mut app = make_app(&td_l, &td_r).await;
-        app.chown_recursive(&format!("{}:{}", md.uid(), md.gid())).await.unwrap();
+        app.chown_recursive(&format!("{}:{}", md.uid(), md.gid()))
+            .await
+            .unwrap();
         let md2 = std::fs::metadata(td_l.path().join("a/b/deep")).unwrap();
         assert_eq!((md2.uid(), md2.gid()), (md.uid(), md.gid()));
     }
@@ -2201,7 +2222,9 @@ mod tests {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         std::fs::create_dir_all(td_l.path().join("a/b/c")).unwrap();
-        fs::write(td_l.path().join("a/b/c/deep.txt"), b"x").await.unwrap();
+        fs::write(td_l.path().join("a/b/c/deep.txt"), b"x")
+            .await
+            .unwrap();
         let mut app = make_app(&td_l, &td_r).await; // focused = "a"
         app.chmod_recursive("700").await.unwrap();
         assert_eq!(mode_of(&td_l.path().join("a")), 0o700);

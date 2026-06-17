@@ -1854,7 +1854,10 @@ mod tests {
     // Feature 044: help documents the recursive attribute keys.
     #[test]
     fn help_documents_recursive_keys() {
-        assert!(HELP_BODY.contains("C-x C"), "help must mention recursive chmod key");
+        assert!(
+            HELP_BODY.contains("C-x C"),
+            "help must mention recursive chmod key"
+        );
         assert!(
             HELP_BODY.to_lowercase().contains("recursive") || HELP_BODY.contains("-R"),
             "help must mention recursion"
@@ -2618,22 +2621,70 @@ mod tests {
         std::fs::set_permissions(&f, PermissionsExt::from_mode(0o644)).unwrap();
         let mut app = app_with(&td_l, &td_r).await; // focused = "a"
         let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, true);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
         let mut status = String::new();
         let mut quit = false;
-        dispatch_ui_command(Command::ChmodRecursive, &mut app, &mut mode, &mut dlg, &mut status, &mut quit, &mut ui).await.unwrap();
-        assert!(matches!(dlg, Some(ActiveDialog::Input { kind: InputKind::ChmodRecursive, .. })));
+        dispatch_ui_command(
+            Command::ChmodRecursive,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::Input {
+                kind: InputKind::ChmodRecursive,
+                ..
+            })
+        ));
         // Type "700", Enter → should chain a ConfirmDialog (not apply yet).
         for c in ['7', '0', '0'] {
-            feed_key(KeyCode::Char(c), &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+            feed_key(
+                KeyCode::Char(c),
+                &mut app,
+                &keymap,
+                &mut mode,
+                &mut dlg,
+                &mut ui,
+            )
+            .await;
         }
-        feed_key(KeyCode::Enter, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
-        assert!(matches!(dlg, Some(ActiveDialog::Confirm { .. })), "submit must chain a confirm");
+        feed_key(
+            KeyCode::Enter,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        assert!(
+            matches!(dlg, Some(ActiveDialog::Confirm { .. })),
+            "submit must chain a confirm"
+        );
         // Cancel the confirmation → nothing changes (SC-003).
-        feed_key(KeyCode::Esc, &mut app, &keymap, &mut mode, &mut dlg, &mut ui).await;
+        feed_key(
+            KeyCode::Esc,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
         assert!(dlg.is_none());
         let m = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
         assert_eq!(m, 0o644, "Cancel must leave the tree unchanged");

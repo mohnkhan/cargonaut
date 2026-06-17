@@ -6,8 +6,8 @@
 [![CI](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml/badge.svg)](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
-[![Binary](https://img.shields.io/badge/binary-2.61%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-325%20unit%20%2B%209%20integration-brightgreen.svg)](#at-a-glance)
+[![Binary](https://img.shields.io/badge/binary-2.62%20MiB-success.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-341%20unit%20%2B%209%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,9 +31,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 9 features since (031–043) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 325 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
-| **Binary** | 2.61 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Alpha · Phase 1 shipped, plus 10 features since (031–044) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 341 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Binary** | 2.62 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **Platform** | Linux terminal (local filesystem) |
@@ -82,7 +82,7 @@ So Cargonaut keeps the muscle memory and adds:
 
 ## What works today
 
-Phase 1 plus Features 031–042 are merged — Cargonaut is a runnable dual-pane TUI
+Phase 1 plus Features 031–044 are merged — Cargonaut is a runnable dual-pane TUI
 for the local filesystem:
 
 - **Themed dual panes** with type-colored entries, a cursor bar, and tagged-file
@@ -126,8 +126,13 @@ for the local filesystem:
   (`C-x s`) and hard (`C-x l`) links, on the tagged/focused selection; also in the
   File menu. Errors (permission denied, bad mode) are reported, never crash
   (Feature 043).
+- **Recursive file attributes** — `C-x C` (chmod) and `C-x O` (chown) apply a
+  permission/ownership change to a whole directory subtree after a confirmation;
+  a bounded walk (never following symlinks) changes entries deepest-first so a
+  restrictive mode can't lock the walk out, with per-entry failures reported
+  (Feature 044).
 
-The full per-feature history (Features 001 → 043) lives in
+The full per-feature history (Features 001 → 044) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
@@ -237,7 +242,7 @@ dialogs), `cargonaut-transfer` (the resumable copy engine), `cargonaut-vfs`
 | Topic | Where |
 |---|---|
 | Build, run, test, make targets, CI, gates | [`docs/BUILD.md`](./docs/BUILD.md) |
-| Per-feature changelog (001 → 043) | [`CHANGELOG.md`](./CHANGELOG.md) |
+| Per-feature changelog (001 → 044) | [`CHANGELOG.md`](./CHANGELOG.md) |
 | Engineering retrospectives (what was hard & why) | [`Learnings.md`](./Learnings.md) |
 | Forward-looking, issue-backed roadmap | [`ROADMAP.md`](./ROADMAP.md) |
 | Architecture & full design tunnel | [`docs/architecture.md`](./docs/architecture.md) · [`design/INDEX.md`](./design/INDEX.md) |

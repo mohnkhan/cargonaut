@@ -132,15 +132,15 @@ after confirmation.
   test that the F1 help text contains `C-x C` and "recursive" (or "-R").
 - [X] T016 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document the
   recursive keys (`C-x C` recursive chmod, `C-x O` recursive chown). Make T015 pass.
-- [ ] T017 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
+- [X] T017 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate); then `cargo run -p cargonaut-bin -- /tmp/rtest /tmp` and walk
   quickstart.md steps 1–9. Fix any clippy/fmt issues.
-- [ ] T018 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
+- [X] T018 [P] [POLISH] Docs (Constitution / CLAUDE.md MANDATORY): update
   `README.md` ("At a Glance" test count + binary size; Feature History one-liner
   for Feature 044) and append a Feature 044 section to `Learnings.md` (≥3 bullets:
   no-vfs-change orchestration, deepest-first apply avoids lock-out,
   symlink-excluded-for-free via `VfsKind`). Update `CHANGELOG.md`.
-- [ ] T019 [POLISH] Close issue #65: confirm recursive chmod/chown delivered;
+- [X] T019 [POLISH] Close issue #65: confirm recursive chmod/chown delivered;
   reference the merged PR; remove the #65 row from `ROADMAP.md` (resolved).
 
 ---

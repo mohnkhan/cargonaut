@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-17 (Feature 043 shipped file attributes — chmod/chown + symlink/hardlink, resolving #46; recursion deferred to new #65).
+**Last updated**: 2026-06-17 (Feature 044 shipped recursive chmod/chown into subtrees, resolving #65; Tier 3 now: external themes #49, PTY nav test #30).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,7 +42,6 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#65](https://github.com/mohnkhan/cargonaut/issues/65) | Recursive chmod/chown into subtrees | S–M | Feature 043 follow-up — files-only shipped; subtree walk + confirm deferred |
 | [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
 | [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
 

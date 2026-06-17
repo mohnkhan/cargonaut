@@ -663,7 +663,10 @@ action = "this-action-does-not-exist"
             code: KeyCode::Char(c),
             modifiers: KeyModifiers::empty(),
         };
-        for (ch, cmd) in [('C', Command::ChmodRecursive), ('O', Command::ChownRecursive)] {
+        for (ch, cmd) in [
+            ('C', Command::ChmodRecursive),
+            ('O', Command::ChownRecursive),
+        ] {
             assert_eq!(
                 km.lookup_sequence(Mode::Pane, &[c_x, upper(ch)]),
                 SeqLookup::Command(cmd),
@@ -674,7 +677,13 @@ action = "this-action-does-not-exist"
         assert_eq!(
             km.lookup_sequence(
                 Mode::Pane,
-                &[c_x, KeyChord { code: KeyCode::Char('c'), modifiers: KeyModifiers::empty() }]
+                &[
+                    c_x,
+                    KeyChord {
+                        code: KeyCode::Char('c'),
+                        modifiers: KeyModifiers::empty()
+                    }
+                ]
             ),
             SeqLookup::Command(Command::Chmod)
         );
