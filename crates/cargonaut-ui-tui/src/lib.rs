@@ -2499,7 +2499,39 @@ mod tests {
     // equivalent to the keyboard F2 path.
     #[tokio::test]
     async fn f2_mouse_click_opens_user_menu() {
-        assert!(false, "T002 red: stub — replace with real assertion in T003");
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
+        // 100-wide fkey bar, 10 buttons → each slot is 10px wide.
+        // F2 is button index 1 (0-indexed) → x in [10, 20). Click x=15.
+        ui.layout.fkeys = Rect {
+            x: 0,
+            y: 23,
+            width: 100,
+            height: 1,
+        };
+        let (l, r) = synced_views(&app);
+        let (_status, dlg) =
+            mouse_with_dlg(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(dlg, Some(ActiveDialog::UserMenu { .. })),
+            "left-click on F2 button must open UserMenu dialog; got {dlg:?}"
+        );
     }
 
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
