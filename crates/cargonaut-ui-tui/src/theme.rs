@@ -655,6 +655,84 @@ dialog_sel_fg = "#f8f8f2"
         assert_eq!(theme.name, "empty-skin");
     }
 
+    // ---------------------------------------------------------------------------
+    // T017 (US3): invalid color name falls back gracefully
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_invalid_color_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = write_skin(&dir, "broken", "panel_bg = \"Bleu\"\n");
+        let err = load_skin("broken", &themes_dir).expect_err("invalid color must return Err");
+        assert!(
+            err.contains("Bleu"),
+            "error must name the bad value; got: {err:?}"
+        );
+        assert!(
+            err.contains("broken"),
+            "error must name the skin; got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T018 (US3): unknown field name rejected by deny_unknown_fields
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_unknown_field_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = write_skin(&dir, "wrong-key", "frobnicate = \"Blue\"\n");
+        let err = load_skin("wrong-key", &themes_dir).expect_err("unknown field must return Err");
+        assert!(
+            err.contains("wrong-key"),
+            "error must name the skin; got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T019 (US3): invalid TOML syntax returns descriptive error
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_bad_toml_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = write_skin(&dir, "bad-toml", "panel_bg = \n");
+        let err = load_skin("bad-toml", &themes_dir).expect_err("bad TOML must return Err");
+        assert!(
+            err.contains("bad-toml"),
+            "error must name the skin; got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T020 (US3): directory-as-skin-path falls back (treated as not-found)
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_directory_path_returns_err() {
+        let dir = TempDir::new().unwrap();
+        // Create a directory where the .toml file would be
+        let themes_dir = dir.path().join("cargonaut/themes");
+        fs::create_dir_all(&themes_dir).unwrap();
+        fs::create_dir_all(themes_dir.join("dir-skin.toml")).unwrap();
+        let err = load_skin("dir-skin", &themes_dir).expect_err("directory must return Err");
+        assert!(
+            err.contains("dir-skin"),
+            "error must name the skin; got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T030 (US3): XDG_CONFIG_HOME env override changes search directory
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_xdg_env_override() {
+        let dir = TempDir::new().unwrap();
+        write_skin(&dir, "xdg-test", "exec_fg = 46\n");
+        // Test resolve_from directly (avoids touching global env)
+        let (theme, err) =
+            Theme::resolve_from("xdg-test", &dir.path().join("cargonaut/themes"));
+        assert!(err.is_none(), "valid skin via XDG path must have no error; got: {err:?}");
+        assert_eq!(theme.exec_fg, Color::Indexed(46));
+        assert_eq!(theme.name, "xdg-test");
+    }
+
     // T-THEME-2: unknown name falls back to default, never panics (FR-006).
     #[test]
     fn resolve_unknown_falls_back_to_default() {
