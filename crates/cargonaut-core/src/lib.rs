@@ -1929,6 +1929,77 @@ mod tests {
             .expect("entry present")
     }
 
+    // ===== Feature 044: recursive chmod/chown — collect_subtree =====
+
+    #[tokio::test]
+    async fn collect_subtree_enumerates_depth_first_to_last() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir_all(td_l.path().join("a/b/c")).unwrap();
+        fs::write(td_l.path().join("a/b/c/deep.txt"), b"x").await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let root = app.pane(PaneId::Left).cwd.join("a");
+        let (paths, truncated) = app.collect_subtree(&[root]).await;
+        assert!(!truncated);
+        let joined = paths
+            .iter()
+            .map(|p| p.display())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("a/b/c/deep.txt"), "deep entry missing:\n{joined}");
+        assert!(joined.contains("/a/b"), "intermediate dir missing");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn collect_subtree_does_not_follow_symlinked_dir() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("secret.txt"), b"x").await.unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), td_l.path().join("a/link")).unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let root = app.pane(PaneId::Left).cwd.join("a");
+        let (paths, _) = app.collect_subtree(&[root]).await;
+        let joined = paths
+            .iter()
+            .map(|p| p.display())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("/a/link"), "the link entry itself should be listed");
+        assert!(
+            !joined.contains("secret.txt"),
+            "must NOT descend into a symlinked dir:\n{joined}"
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_subtree_file_root_is_only_itself() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let root = app.pane(PaneId::Left).cwd.join("f");
+        let (paths, _) = app.collect_subtree(&[root]).await;
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn collect_subtree_capped_truncates() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        for n in 0..10 {
+            fs::write(td_l.path().join(format!("a/f{n}")), b"x").await.unwrap();
+        }
+        let app = make_app(&td_l, &td_r).await;
+        let root = app.pane(PaneId::Left).cwd.join("a");
+        let (paths, truncated) = app.collect_subtree_capped(&[root], 3).await;
+        assert!(truncated, "a tree larger than the cap must report truncation");
+        assert!(paths.len() <= 4); // root + up to cap children before stopping
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn chmod_selection_sets_focused_file() {
