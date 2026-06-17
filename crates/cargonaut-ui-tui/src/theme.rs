@@ -468,8 +468,7 @@ pub fn load_skin(name: &str, dir: &Path) -> Result<Theme, String> {
     let path = dir.join(format!("{name}.toml"));
     let content = std::fs::read_to_string(&path)
         .map_err(|_e| format!("Unknown theme {name:?} — using commander-dark"))?;
-    let skin: SkinFile = toml::from_str(&content)
-        .map_err(|e| format!("Skin {name:?}: {e}"))?;
+    let skin: SkinFile = toml::from_str(&content).map_err(|e| format!("Skin {name:?}: {e}"))?;
     Theme::from_skin(name, skin).map_err(|e| format!("Skin {name:?}: {e}"))
 }
 
@@ -615,7 +614,10 @@ dialog_sel_fg = "#f8f8f2"
         write_skin(&dir, "test-skin", "panel_bg = \"Red\"\n");
         // Full resolve chain: not a builtin → load from dir → return (theme, None)
         let (theme, err) = Theme::resolve_from("test-skin", &dir.path().join("cargonaut/themes"));
-        assert!(err.is_none(), "valid skin must return no error; got: {err:?}");
+        assert!(
+            err.is_none(),
+            "valid skin must return no error; got: {err:?}"
+        );
         assert_eq!(theme.panel_bg, Color::Red);
         assert_eq!(theme.name, "test-skin");
     }
@@ -626,7 +628,11 @@ dialog_sel_fg = "#f8f8f2"
     #[test]
     fn skin_partial_inherits_defaults() {
         let dir = TempDir::new().unwrap();
-        let themes_dir = write_skin(&dir, "green-cursor", "cursor_bg = \"Green\"\ncursor_fg = \"Black\"\n");
+        let themes_dir = write_skin(
+            &dir,
+            "green-cursor",
+            "cursor_bg = \"Green\"\ncursor_fg = \"Black\"\n",
+        );
         let theme = load_skin("green-cursor", &themes_dir).expect("partial skin must load");
         // Overridden fields
         assert_eq!(theme.cursor_bg, Color::Green);
@@ -726,9 +732,11 @@ dialog_sel_fg = "#f8f8f2"
         let dir = TempDir::new().unwrap();
         write_skin(&dir, "xdg-test", "exec_fg = 46\n");
         // Test resolve_from directly (avoids touching global env)
-        let (theme, err) =
-            Theme::resolve_from("xdg-test", &dir.path().join("cargonaut/themes"));
-        assert!(err.is_none(), "valid skin via XDG path must have no error; got: {err:?}");
+        let (theme, err) = Theme::resolve_from("xdg-test", &dir.path().join("cargonaut/themes"));
+        assert!(
+            err.is_none(),
+            "valid skin via XDG path must have no error; got: {err:?}"
+        );
         assert_eq!(theme.exec_fg, Color::Indexed(46));
         assert_eq!(theme.name, "xdg-test");
     }
