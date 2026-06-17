@@ -8,6 +8,7 @@ description = "ratatui-based renderer for Cargonaut."
 
 [dependencies]
 cargonaut-core = { path = "../cargonaut-core" }
+cargonaut-config = { path = "../cargonaut-config" }
 cargonaut-vfs = { path = "../cargonaut-vfs" }
 ratatui = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
@@ -23,7 +24,6 @@ thiserror = { workspace = true }
 smol_str = { workspace = true }
 humantime = "2"
 tempfile = { workspace = true }
-cargonaut-config = { path = "../cargonaut-config" }
 
 [[bench]]
 name = "keypress_latency"
@@ -37,5 +37,10 @@ test = false
 
 [[bench]]
 name = "theme_resolve"
+harness = false
+test = false
+
+[[bench]]
+name = "help_overlay_render_time"
 harness = false
 test = false

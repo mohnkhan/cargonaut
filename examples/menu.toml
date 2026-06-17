@@ -1,0 +1,44 @@
+# ~/.config/cargonaut/menu.toml — User action menu for Cargonaut (Feature 047)
+#
+# Activated by F2.  Each [[actions]] entry adds one item to the menu.
+#
+# Required fields:
+#   label   = "Human-readable name shown in the menu"
+#   command = "Shell command; {path} is replaced with the shell-quoted path
+#              of the focused entry in the active pane."
+#
+# Optional fields:
+#   key     = 'x'   # Single-letter shortcut — press in the open menu to execute
+#   only_if = "..."  # Shell condition; item is hidden when this exits non-zero
+#                    # Receives the same {path} substitution. Timeout: 200 ms.
+
+[[actions]]
+label   = "Open in $PAGER"
+command = "$PAGER {path}"
+key     = 'v'
+
+[[actions]]
+label   = "Edit in $EDITOR"
+command = "$EDITOR {path}"
+key     = 'e'
+
+[[actions]]
+label   = "Copy path to clipboard"
+command = "printf '%s' {path} | xclip -selection clipboard 2>/dev/null || printf '%s' {path} | pbcopy"
+key     = 'c'
+
+[[actions]]
+label   = "Show file info"
+command = "file {path} | less"
+key     = 'i'
+
+[[actions]]
+label   = "Checksum (sha256)"
+command = "sha256sum {path} | less"
+key     = 's'
+only_if = "test -f {path}"
+
+[[actions]]
+label   = "Archive selection as tar.gz"
+command = "tar czf {path}.tar.gz {path}"
+key     = 'a'
