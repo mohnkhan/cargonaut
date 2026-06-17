@@ -8,6 +8,12 @@
 
 **Input**: User description: "Recursive chmod/chown into directory subtrees. Extend the Feature 043 file-attribute operations so that changing permissions (chmod) or ownership (chown) can optionally be applied recursively to a selected directory and its entire subtree, not just the directory entry itself — the reference orthodox-FM "recurse into subdirectories" option. When the selection includes a directory, the user can opt into recursion; recursion always requires explicit confirmation before applying. The subtree is walked with a bounded traversal (so a huge tree cannot wedge the UI), applying the operation to every entry; symbolic chmod is applied per-file relative to each entry's current mode; per-entry failures (e.g. permission denied deep in the tree) are aggregated and reported without rolling back the successes. Symlinked directories are not traversed into (no following links across the tree). The affected pane refreshes afterward. This implements the deferred recursion capability from Feature 043 (issue #65, tracked as a follow-up)."
 
+## Clarifications
+
+### Session 2026-06-17
+
+- Q: How should the user opt into a recursive chmod/chown (vs the existing shallow `C-x c` / `C-x o`)? → A: **Dedicated recursive chords** — add `C-x C` (recursive chmod) and `C-x O` (recursive chown) plus File-menu entries, parallel to the shallow `C-x c` / `C-x o`. Each reuses the same mode/owner input, then a single confirmation where Cancel = abort. (Both chords are free; case-sensitive like the existing `C-x X`.)
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Recursively change permissions of a directory tree (Priority: P1)
@@ -57,8 +63,8 @@ A user with the necessary privileges wants to reassign ownership of an entire di
 
 ### Functional Requirements
 
-- **FR-001**: When the current selection includes a directory, the system MUST let the user apply a permission (chmod) or ownership (chown) change **recursively** to that directory's entire subtree.
-- **FR-002**: A recursive change MUST require an explicit confirmation before any entry is modified.
+- **FR-001**: The system MUST provide dedicated recursive operations — `C-x C` (recursive chmod) and `C-x O` (recursive chown), plus File-menu entries — that apply a permission/ownership change to a selected directory's entire subtree. These are distinct from the existing shallow `C-x c` / `C-x o`.
+- **FR-002**: A recursive change MUST require an explicit confirmation before any entry is modified; declining the confirmation (Cancel) aborts with no change.
 - **FR-003**: A recursive permission change MUST apply to every entry in the subtree (files and subdirectories); a symbolic mode MUST be applied to each entry relative to that entry's own current mode.
 - **FR-004**: A recursive ownership change MUST apply the new user and/or group to every entry in the subtree (where permitted).
 - **FR-005**: Subtree traversal MUST be bounded so that an arbitrarily large tree cannot wedge the interface; if the bound is reached, the system MUST report that the result was truncated.
@@ -89,7 +95,7 @@ A user with the necessary privileges wants to reassign ownership of an entire di
 ## Assumptions
 
 - **Extends Feature 043**: this builds directly on the shipped file-attribute operations (chmod octal/symbolic, chown by name/id, the selection model, the per-entry-failure status). Non-recursive behavior is unchanged.
-- **Opt-in mechanism**: the user opts into recursion through the attribute flow (the exact mechanism — e.g. a confirmation that offers "recurse", a dedicated recursive action/key, or a toggle — is finalized in clarification). Whatever the mechanism, recursion always confirms (FR-002).
+- **Opt-in mechanism**: recursion is invoked through dedicated chords `C-x C` (chmod) and `C-x O` (chown) and matching File-menu entries (clarified), parallel to the shallow `C-x c` / `C-x o`; each reuses the existing mode/owner input dialog and then always shows a confirmation (FR-002), where Cancel aborts.
 - **Collect-then-apply**: the subtree's entry set is enumerated first and the change applied afterward, so a restrictive mode/owner change cannot prevent the walk from completing (FR-011). Order within apply favors children before their parent directory for restrictive changes.
 - **Bounded walk**: traversal reuses the project's existing bounded-walk convention (a node cap, as used by recursive directory size); the exact cap is an implementation detail.
 - **No symlink following**: links are treated as leaves; the operation applies to the link entry per the platform default and never traverses through it (FR-006), preventing cycles and tree-escape.
