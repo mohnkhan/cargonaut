@@ -108,7 +108,7 @@ A user who wants to add custom actions to F2 can read a short built-in help snip
 - **FR-011**: The menu overlay MUST be navigable with Up/Down arrow keys; pressing Enter on a highlighted item MUST execute that action's command.
 - **FR-012**: Pressing Esc while the F2 menu is open MUST close it without executing any action.
 - **FR-013**: When an action's command contains the literal placeholder `{path}`, the application MUST substitute the absolute path of the currently highlighted entry, shell-quoted, before execution.
-- **FR-014**: Shell-quoting of the substituted path MUST use the `shell-quote` crate (or `Command::new(prog).arg(arg)` without a shell when the command has no shell operators) — raw string interpolation is forbidden (constitution macro-safety rule).
+- **FR-014**: Shell-quoting of the substituted path MUST use the `shell-words` crate (`shell_words::quote()`) or `Command::new(prog).arg(arg)` without a shell when the command has no shell operators — raw string interpolation into shell strings is forbidden (constitution macro-safety rule).
 - **FR-015**: The action's command MUST run asynchronously so the TUI remains responsive during execution; the user MUST NOT be blocked from interacting with the app while the command runs.
 - **FR-016**: After an action completes, its exit code MUST be shown in the status bar: success (exit 0) shows a brief confirmation; non-zero exit shows the exit code and the first line of stderr.
 - **FR-017**: When `~/.config/cargonaut/menu.toml` does not exist or is empty, the F2 overlay MUST open showing a single informational placeholder row; it MUST NOT crash or show an error.
@@ -144,8 +144,8 @@ A user who wants to add custom actions to F2 can read a short built-in help snip
 
 ## Assumptions
 
-- The `menu.toml` config directory (`~/.config/cargonaut/`) follows XDG Base Directory conventions; the path is resolved via the `dirs` crate (already a dependency) or an equivalent.
-- The `shell-quote` crate is available or can be added as a dependency; if it is not already present, it will be added to `cargonaut-ui-tui`'s `Cargo.toml`.
+- The `menu.toml` config directory (`~/.config/cargonaut/`) follows XDG Base Directory conventions; the path is resolved via `std::env::var("XDG_CONFIG_HOME")` with `$HOME/.config` fallback — the same pattern already used for `config.toml` and `themes/` resolution. No `dirs` crate dependency is needed.
+- The `shell-words 1.1` crate will be added to `cargonaut-ui-tui`'s `[dependencies]` (T001) for safe shell tokenization and quoting.
 - The existing `centered_rect` / dialog infrastructure in `cargonaut-ui-tui` is sufficient for both overlays; no new layout primitives are required.
 - The `only_if` condition is evaluated synchronously at menu-open time using `std::process::Command` with a short timeout (≤200 ms); conditions that exceed the timeout are treated as false (hidden).
 - Actions that produce no output and exit 0 show a brief "Done" confirmation in the status bar for 2 seconds, then revert to the normal status line.
