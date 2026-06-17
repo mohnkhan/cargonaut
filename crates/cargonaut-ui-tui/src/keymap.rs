@@ -646,6 +646,35 @@ action = "this-action-does-not-exist"
         }
     }
 
+    // Feature 044: recursive attribute chords C-x C / C-x O (case-sensitive).
+    #[test]
+    fn recursive_attribute_chords_resolve() {
+        let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
+        let c_x = KeyChord {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::CONTROL,
+        };
+        let upper = |c| KeyChord {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::empty(),
+        };
+        for (ch, cmd) in [('C', Command::ChmodRecursive), ('O', Command::ChownRecursive)] {
+            assert_eq!(
+                km.lookup_sequence(Mode::Pane, &[c_x, upper(ch)]),
+                SeqLookup::Command(cmd),
+                "C-x {ch} must resolve to {cmd:?}"
+            );
+        }
+        // …and the lowercase shallow chords still resolve distinctly.
+        assert_eq!(
+            km.lookup_sequence(
+                Mode::Pane,
+                &[c_x, KeyChord { code: KeyCode::Char('c'), modifiers: KeyModifiers::empty() }]
+            ),
+            SeqLookup::Command(Command::Chmod)
+        );
+    }
+
     #[test]
     fn lookup_sequence_no_match_for_unbound_prefix() {
         let km = Keymap::load(DEFAULT_KEYMAP_TOML).unwrap();
