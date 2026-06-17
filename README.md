@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Binary](https://img.shields.io/badge/binary-2.62%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-341%20unit%20%2B%209%20integration-brightgreen.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-341%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 10 features since (031–044) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 341 unit + 9 integration, all green (+ a gated binary-level SC-002 SIGKILL-resume PTY test, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 11 features since (031–045) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 341 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.62 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -82,7 +82,7 @@ So Cargonaut keeps the muscle memory and adds:
 
 ## What works today
 
-Phase 1 plus Features 031–044 are merged — Cargonaut is a runnable dual-pane TUI
+Phase 1 plus Features 031–045 are merged — Cargonaut is a runnable dual-pane TUI
 for the local filesystem:
 
 - **Themed dual panes** with type-colored entries, a cursor bar, and tagged-file
@@ -131,8 +131,13 @@ for the local filesystem:
   a bounded walk (never following symlinks) changes entries deepest-first so a
   restrictive mode can't lock the walk out, with per-entry failures reported
   (Feature 044).
+- **PTY navigation smoke test** — three binary-level integration tests (`nav_cursor_arrow_keys`,
+  `nav_descend_enter`, `nav_ascend_backspace`) launch the real cargonaut binary under a PTY
+  and assert that arrow keys, Enter (descend), and Backspace (ascend) produce the expected TUI
+  output. Gated behind `CARGONAUT_PTY_TESTS=1` (SC-004); replaces the previous `#[ignore]`d
+  stub; zero ignored tests remain in `cargonaut-bin` (Feature 045).
 
-The full per-feature history (Features 001 → 044) lives in
+The full per-feature history (Features 001 → 045) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
@@ -242,7 +247,7 @@ dialogs), `cargonaut-transfer` (the resumable copy engine), `cargonaut-vfs`
 | Topic | Where |
 |---|---|
 | Build, run, test, make targets, CI, gates | [`docs/BUILD.md`](./docs/BUILD.md) |
-| Per-feature changelog (001 → 044) | [`CHANGELOG.md`](./CHANGELOG.md) |
+| Per-feature changelog (001 → 045) | [`CHANGELOG.md`](./CHANGELOG.md) |
 | Engineering retrospectives (what was hard & why) | [`Learnings.md`](./Learnings.md) |
 | Forward-looking, issue-backed roadmap | [`ROADMAP.md`](./ROADMAP.md) |
 | Architecture & full design tunnel | [`docs/architecture.md`](./docs/architecture.md) · [`design/INDEX.md`](./design/INDEX.md) |
