@@ -1710,6 +1710,7 @@ Cargonaut — quick help\n\
   M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
   C-b: directory hotlist (bookmarks) — [a]dd · [d]el · Enter jumps\n\
   C-x c chmod · C-x o chown · C-x s symlink · C-x l hardlink\n\
+  C-x C / C-x O: recursive chmod / chown (whole subtree, -R)\n\
 \n\
   Press any key to close.";
 
@@ -1847,6 +1848,16 @@ mod tests {
         assert!(
             s.contains("1000"),
             "teardown must emit the mouse-disable sequence; got: {s:?}"
+        );
+    }
+
+    // Feature 044: help documents the recursive attribute keys.
+    #[test]
+    fn help_documents_recursive_keys() {
+        assert!(HELP_BODY.contains("C-x C"), "help must mention recursive chmod key");
+        assert!(
+            HELP_BODY.to_lowercase().contains("recursive") || HELP_BODY.contains("-R"),
+            "help must mention recursion"
         );
     }
 

@@ -128,9 +128,9 @@ after confirmation.
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T015 [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a failing
+- [X] T015 [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs` add a failing
   test that the F1 help text contains `C-x C` and "recursive" (or "-R").
-- [ ] T016 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document the
+- [X] T016 [POLISH] (green) Update the help overlay (`HELP_BODY`) to document the
   recursive keys (`C-x C` recursive chmod, `C-x O` recursive chown). Make T015 pass.
 - [ ] T017 [POLISH] Run `make ci-local` (fmt, clippy `-D warnings`, test, release
   build, docs-gate); then `cargo run -p cargonaut-bin -- /tmp/rtest /tmp` and walk
