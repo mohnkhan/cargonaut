@@ -256,6 +256,7 @@ dependencies = [
  "humantime",
  "ratatui",
  "serde",
+ "shell-words",
  "smol_str",
  "tempfile",
  "thiserror",
