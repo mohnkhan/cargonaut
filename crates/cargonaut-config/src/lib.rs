@@ -977,4 +977,50 @@ wibble = 42
         );
         assert!(serde_json::from_str::<ZoxideMode>(r#""bogus""#).is_err());
     }
+
+    // ===== Feature 047: user menu config types =====
+
+    #[test]
+    fn menu_item_full_deserialization() {
+        let toml_text = r#"
+[[actions]]
+label   = "Edit"
+command = "$EDITOR {path}"
+only_if = "test -f {path}"
+key     = "e"
+"#;
+        let cfg: UserMenuConfig = toml::from_str(toml_text).unwrap();
+        assert_eq!(cfg.actions.len(), 1);
+        let item = &cfg.actions[0];
+        assert_eq!(item.label, "Edit");
+        assert_eq!(item.command, "$EDITOR {path}");
+        assert_eq!(item.only_if, Some("test -f {path}".into()));
+        assert_eq!(item.key, Some('e'));
+    }
+
+    #[test]
+    fn menu_item_only_required_fields() {
+        let toml_text = r#"
+[[actions]]
+label   = "Do something"
+command = "echo hello"
+"#;
+        let cfg: UserMenuConfig = toml::from_str(toml_text).unwrap();
+        assert_eq!(cfg.actions.len(), 1);
+        assert!(cfg.actions[0].only_if.is_none());
+        assert!(cfg.actions[0].key.is_none());
+    }
+
+    #[test]
+    fn menu_config_empty_actions_array() {
+        let toml_text = "actions = []\n";
+        let cfg: UserMenuConfig = toml::from_str(toml_text).unwrap();
+        assert!(cfg.actions.is_empty());
+    }
+
+    #[test]
+    fn menu_config_empty_toml_gives_empty_actions() {
+        let cfg: UserMenuConfig = toml::from_str("").unwrap();
+        assert!(cfg.actions.is_empty());
+    }
 }
