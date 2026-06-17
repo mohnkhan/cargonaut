@@ -204,12 +204,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
     // US1 (FR-001/005/006): resolve the configured theme once. An unknown
     // name falls back to the built-in default with a non-fatal notice.
     let theme_name = app.config().ui.theme.clone();
-    let theme = Theme::resolve(&theme_name);
-    let mut status: String = if Theme::builtin(&theme_name).is_none() {
-        format!("Unknown theme {theme_name:?} — using {}", theme.name)
-    } else {
-        String::new()
-    };
+    let (theme, theme_err) = Theme::resolve(&theme_name);
+    let mut status: String = theme_err.unwrap_or_default();
 
     // Per-pane PaneView, synced from App state once per frame.
     let mut left = PaneView::new(

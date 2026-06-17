@@ -33,3 +33,8 @@ test = false
 name = "large_dir_scroll"
 harness = false
 test = false
+
+[[bench]]
+name = "theme_resolve"
+harness = false
+test = false
