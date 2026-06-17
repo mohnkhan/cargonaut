@@ -21,8 +21,8 @@ the green implementation. The red→green commit pair is the unit of progress.
 module and add the new `delta_contains` helper and key constants. CI must stay
 green throughout this phase.
 
-- [ ] T001 Create `crates/cargonaut-bin/tests/common/mod.rs` and move `spawn`, `output_contains`, `wait_until`, `sigkill`, and the `PtyHandle` type alias from `crates/cargonaut-bin/tests/resume_sigkill.rs` into it; add `pub use` exports; add `pub fn enabled() -> bool { std::env::var("CARGONAUT_PTY_TESTS").map(|v| v == "1").unwrap_or(false) }`; annotate with `#[allow(dead_code)]` to silence unused-in-this-binary warnings from Cargo
-- [ ] T002 Add `delta_contains(sink: &Arc<Mutex<Vec<u8>>>, prev_len: usize, needle: &str) -> bool` helper to `crates/cargonaut-bin/tests/common/mod.rs`; add key-sequence constants `KEY_DOWN`, `KEY_UP`, `KEY_ENTER`, `KEY_BACKSPACE`, `KEY_F10` as `pub const &[u8]`; verify `enabled()` (from T001) is exported from the module
+- [ ] T001 Create `crates/cargonaut-bin/tests/common/mod.rs` and move `spawn`, `output_contains`, `wait_until`, `sigkill`, and the `PtyHandle` type alias from `crates/cargonaut-bin/tests/resume_sigkill.rs` into it; add `pub use` exports; annotate with `#[allow(dead_code)]` to silence unused-in-this-binary warnings from Cargo
+- [ ] T002 Add `delta_contains(sink: &Arc<Mutex<Vec<u8>>>, prev_len: usize, needle: &str) -> bool` helper to `crates/cargonaut-bin/tests/common/mod.rs`; add key-sequence constants `KEY_DOWN`, `KEY_UP`, `KEY_ENTER`, `KEY_BACKSPACE`, `KEY_F10` as `pub const &[u8]`
 - [ ] T003 Update `crates/cargonaut-bin/tests/resume_sigkill.rs` to import helpers via `#[path = "common/mod.rs"] mod common; use common::*;`; remove the duplicated local definitions; run `CARGONAUT_PTY_TESTS=1 cargo test -p cargonaut --test resume_sigkill` and confirm it passes
 
 **Checkpoint**: `resume_sigkill_smoke` still passes; `common/mod.rs` compiles cleanly.
@@ -72,9 +72,9 @@ subdirectory changes the pane's CWD to that subdirectory, observable in the pane
 **Independent Test**: `CARGONAUT_PTY_TESTS=1 cargo test -p cargonaut --test local_navigation nav_descend_enter` passes.
 
 - [ ] T006 [US2] Implement `nav_descend_enter` in `crates/cargonaut-bin/tests/local_navigation.rs`:
-  1. Same fixture as T005 (`aaa/`, `bbb/`, `ccc/` inside `left`). Note: fixture uses only directories — Enter on a file is implicitly not exercised (US2 AC2); the fixture design makes this a non-issue since all navigable entries are directories.
+  1. Same fixture as T005 (`aaa/`, `bbb/`, `ccc/` inside `left`)
   2. Spawn, wait for `"Quit"` signal
-  3. Navigate to `bbb` using the polling pattern from T005: `prev1 = len()` → `KEY_DOWN` → `wait_until(5s, || delta_contains(&sink, prev1, "aaa"))` (land on aaa), then `prev2 = len()` → `KEY_DOWN` → `wait_until(5s, || delta_contains(&sink, prev2, "bbb"))` (land on bbb). Do NOT use a fixed sleep — poll each step per FR-006.
+  3. Navigate to `bbb`: write `KEY_DOWN` twice with a 50 ms flush interval between presses (past `..` to `aaa`, then to `bbb`)
   4. `prev = sink.lock().unwrap().len()`
   5. Write `KEY_ENTER`, flush
   6. `assert!(wait_until(5s, || delta_contains(&sink, prev, "bbb")), "pane did not descend into bbb")`
@@ -94,7 +94,7 @@ the pane to the parent directory, observable in the pane title.
 - [ ] T007 [US3] Implement `nav_ascend_backspace` in `crates/cargonaut-bin/tests/local_navigation.rs`:
   1. Same fixture; record `left_name = left.path().file_name().unwrap().to_string_lossy().into_owned()`
   2. Spawn, wait for `"Quit"` signal
-  3. Navigate to `aaa` using polling: `prev_nav = len()` → `KEY_DOWN` → `wait_until(5s, || delta_contains(&sink, prev_nav, "aaa"))`. Then `prev_desc = len()` → `KEY_ENTER` → `wait_until(5s, || delta_contains(&sink, prev_desc, "aaa"))` to confirm descent. Do NOT use fixed sleep between steps per FR-006.
+  3. Navigate to `aaa` (one `KEY_DOWN`) and descend (`KEY_ENTER`); wait for `delta_contains(&sink, prev, "aaa")` to confirm descent
   4. `prev = sink.lock().unwrap().len()`
   5. Write `KEY_BACKSPACE`, flush
   6. `assert!(wait_until(5s, || delta_contains(&sink, prev, &left_name)), "pane did not ascend back to {left_name}")`
