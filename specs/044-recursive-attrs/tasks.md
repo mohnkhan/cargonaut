@@ -28,7 +28,7 @@ gets a red→green pair; git history MUST show `(red)` before `(green)`.
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
+- [X] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
   baseline builds + tests (`make build && make test`). Confirm no `Cargo.toml`
   changes are needed (no new deps).
 
@@ -41,13 +41,13 @@ on (enumerate the tree, no-follow symlinks, bounded, ordered).
 
 **⚠️ No user-story phase can start until this is complete.**
 
-- [ ] T002 [FOUND] (red) In `crates/cargonaut-core/src/lib.rs` add failing
+- [X] T002 [FOUND] (red) In `crates/cargonaut-core/src/lib.rs` add failing
   `#[tokio::test]`s for `collect_subtree`: a nested tree (`a/b/c/deep`) yields all
   entry paths incl. the deep one in shallow→deep order; a `VfsKind::Symlink`
   directory is **not** descended (its target's entries absent); a file root
   contributes only itself (FR-009); a lowered cap (test seam) sets the
   `truncated` flag (SC-004).
-- [ ] T003 [FOUND] (green) Implement `async fn collect_subtree(&self, roots:
+- [X] T003 [FOUND] (green) Implement `async fn collect_subtree(&self, roots:
   &[VfsPath]) -> (Vec<VfsPath>, bool)` in `crates/cargonaut-core/src/lib.rs`:
   BFS via `local_fs.list`, push only `VfsKind::Dir` children (never `Symlink`),
   cap at `NODE_CAP` (reuse `recursive_dir_size`'s value; make the cap overridable

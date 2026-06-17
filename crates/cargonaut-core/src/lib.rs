@@ -1470,6 +1470,56 @@ impl App {
         Ok(evs)
     }
 
+    // ===== Feature 044: recursive chmod/chown =====
+
+    /// Enumerate every entry under `roots` for a recursive attribute op. Each
+    /// root is included; directory roots are walked breadth-first, descending
+    /// **only** into real directories (`VfsKind::Dir`) — `VfsKind::Symlink` dirs
+    /// are leaves, so links are never followed out of the subtree (FR-006).
+    /// Bounded by [`RECURSE_NODE_CAP`]; returns paths shallow→deep plus whether
+    /// the cap truncated the walk (FR-005).
+    async fn collect_subtree(&self, roots: &[VfsPath]) -> (Vec<VfsPath>, bool) {
+        self.collect_subtree_capped(roots, RECURSE_NODE_CAP).await
+    }
+
+    /// [`collect_subtree`](Self::collect_subtree) with an explicit cap (test seam).
+    async fn collect_subtree_capped(&self, roots: &[VfsPath], cap: usize) -> (Vec<VfsPath>, bool) {
+        use std::collections::VecDeque;
+        let mut out: Vec<VfsPath> = Vec::new();
+        let mut queue: VecDeque<VfsPath> = VecDeque::new();
+        let mut truncated = false;
+        for r in roots {
+            out.push(r.clone());
+            if let Ok(m) = self.local_fs.stat(r).await {
+                if matches!(m.kind, cargonaut_vfs::VfsKind::Dir) {
+                    queue.push_back(r.clone());
+                }
+            }
+        }
+        while let Some(dir) = queue.pop_front() {
+            let listing = match self.local_fs.list(&dir, Sort::NameAsc).await {
+                Ok(l) => l,
+                Err(_) => continue, // unreadable dir: skip its subtree, keep going
+            };
+            for e in listing.entries {
+                if out.len() >= cap {
+                    truncated = true;
+                    break;
+                }
+                let child = dir.join(e.name.as_str());
+                out.push(child.clone());
+                // Descend only into real directories — never symlinks (FR-006).
+                if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir) {
+                    queue.push_back(child);
+                }
+            }
+            if truncated {
+                break;
+            }
+        }
+        (out, truncated)
+    }
+
     /// Create a symbolic link named `link_name` in the active pane's directory,
     /// pointing at the focused entry (a relative link to the sibling). Blank
     /// name ⇒ [`AppError::BadAttr`]; an existing name or OS error is reported.
@@ -1761,6 +1811,11 @@ fn pane_idx(id: PaneId) -> usize {
         PaneId::Right => 1,
     }
 }
+
+/// Feature 044 — cap on entries enumerated by a recursive attribute walk, so an
+/// arbitrarily large tree cannot wedge the UI (FR-005). Matches the
+/// `recursive_dir_size` bound.
+const RECURSE_NODE_CAP: usize = 200_000;
 
 /// Feature 043 — status line for a batch attribute op: how many succeeded and,
 /// if any failed, which (partial failures are surfaced, not rolled back).
