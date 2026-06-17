@@ -1096,6 +1096,174 @@ impl HelpOverlay {
     }
 }
 
+// =====================================================================
+// Helpers
+// =====================================================================
+
+/// Centre a `percent_x × percent_y` rect inside `r`.
+pub(crate) fn centered_rect_pct(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    let vchunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vchunks[1])[1]
+}
+
+// =====================================================================
+// User menu dialog (Feature 047 — US2, T020-T022)
+// =====================================================================
+
+/// Outcome returned by [`UserMenuDialog::handle_key`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserMenuAction {
+    /// Close the menu without executing anything.
+    Close,
+    /// Execute the action at the given index.
+    Execute(usize),
+}
+
+/// The F2 user action menu. Items are loaded fresh from `menu.toml` on each
+/// F2 press; an `error` variant displays the parse error instead of items.
+#[derive(Debug)]
+pub struct UserMenuDialog {
+    /// Menu items (empty when `menu.toml` is absent or empty).
+    pub items: Vec<cargonaut_config::MenuItem>,
+    /// List selection state.
+    state: ListState,
+    /// If set, display this error message instead of the item list.
+    pub error: Option<String>,
+}
+
+impl UserMenuDialog {
+    /// Construct a new menu from the given items. Selects the first row.
+    pub fn new(items: Vec<cargonaut_config::MenuItem>) -> Self {
+        let mut state = ListState::default();
+        if !items.is_empty() {
+            state.select(Some(0));
+        }
+        Self { items, state, error: None }
+    }
+
+    /// Construct an error-state menu (shows the parse error instead of items).
+    pub fn new_error(msg: impl Into<String>) -> Self {
+        Self {
+            items: vec![],
+            state: ListState::default(),
+            error: Some(msg.into()),
+        }
+    }
+
+    /// Index of the currently focused item, or `None` if no items.
+    pub fn focused_index(&self) -> Option<usize> {
+        self.state.selected()
+    }
+
+    /// Handle a key event. Returns `Some(action)` when the dialog should act or
+    /// close, `None` when the key is consumed without acting (navigation).
+    pub fn handle_key(&mut self, code: KeyCode) -> Option<UserMenuAction> {
+        match code {
+            KeyCode::Esc | KeyCode::F(1) => Some(UserMenuAction::Close),
+            KeyCode::Up => {
+                if let Some(i) = self.state.selected() {
+                    if i > 0 {
+                        self.state.select(Some(i - 1));
+                    }
+                }
+                None
+            }
+            KeyCode::Down => {
+                if let Some(i) = self.state.selected() {
+                    if i + 1 < self.items.len() {
+                        self.state.select(Some(i + 1));
+                    }
+                }
+                None
+            }
+            KeyCode::Enter => self.state.selected().map(UserMenuAction::Execute),
+            KeyCode::Char(c) => {
+                // Shortcut key — find first item whose `key == Some(c)` (first wins).
+                self.items
+                    .iter()
+                    .position(|item| item.key == Some(c))
+                    .map(UserMenuAction::Execute)
+            }
+            _ => None,
+        }
+    }
+
+    /// Render the dialog into `area`, clearing it first.
+    pub fn render(&mut self, f: &mut ratatui::Frame, area: ratatui::layout::Rect, theme: &crate::theme::Theme) {
+        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, StatefulWidget};
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+
+        let darea = centered_rect_pct(50, 60, area);
+        f.render_widget(Clear, darea);
+
+        let block = Block::default()
+            .title(" User Menu (F2) ")
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+
+        if let Some(err) = &self.error {
+            let body = format!("Error loading menu.toml:\n{err}\n\nPress Esc to close.");
+            let para = Paragraph::new(body).block(block).style(theme.dialog_style());
+            f.render_widget(para, darea);
+            return;
+        }
+
+        if self.items.is_empty() {
+            let body = "No actions defined — see ~/.config/cargonaut/menu.toml";
+            let para = Paragraph::new(body).block(block).style(theme.dialog_style());
+            f.render_widget(para, darea);
+            return;
+        }
+
+        let max_label = darea.width.saturating_sub(8) as usize;
+        let items: Vec<ListItem<'_>> = self
+            .items
+            .iter()
+            .map(|item| {
+                let label = if item.label.chars().count() > max_label {
+                    item.label.chars().take(max_label.saturating_sub(1)).collect::<String>() + "…"
+                } else {
+                    item.label.clone()
+                };
+                let key_hint = item.key.map(|c| format!(" [{c}]")).unwrap_or_default();
+                let line = Line::from(vec![
+                    Span::raw(label),
+                    Span::styled(key_hint, Style::default().add_modifier(Modifier::DIM)),
+                ]);
+                ListItem::new(line)
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(block)
+            .style(theme.dialog_style())
+            .highlight_style(
+                Style::default()
+                    .fg(theme.dialog_sel_fg)
+                    .bg(theme.dialog_sel_bg),
+            )
+            .highlight_symbol("▶ ");
+
+        StatefulWidget::render(list, darea, f.buffer_mut(), &mut self.state);
+    }
+}
+
 // Re-export of crossterm's KeyCode so callers don't need a second use.
 pub use crossterm::event::KeyCode;
 

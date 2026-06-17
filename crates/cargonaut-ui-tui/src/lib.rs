@@ -149,6 +149,14 @@ enum ActiveDialog {
         /// The hotlist list widget.
         widget: HotlistDialog,
     },
+    /// Feature 047 — F2 user-defined action menu. Items loaded from
+    /// `~/.config/cargonaut/menu.toml`; filtered by `only_if` condition.
+    UserMenu {
+        /// The user menu widget.
+        widget: dialog::UserMenuDialog,
+        /// The path of the focused entry at the time the menu was opened.
+        entry_path: std::path::PathBuf,
+    },
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -745,6 +753,47 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 047 US2 (FR-006/007/008): F2 user-defined action menu.
+            ActiveDialog::UserMenu { widget, entry_path: _ } => {
+                match widget.handle_key(key.code) {
+                    Some(dialog::UserMenuAction::Close) => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    Some(dialog::UserMenuAction::Execute(idx)) => {
+                        // Extract command before mutably borrowing `active_dialog`.
+                        let (cmd_str, exec_path) = if let Some(ActiveDialog::UserMenu {
+                            widget,
+                            entry_path,
+                        }) = active_dialog.as_ref()
+                        {
+                            let cmd_str = widget.items.get(idx).map(|i| i.command.clone()).unwrap_or_default();
+                            (cmd_str, entry_path.clone())
+                        } else {
+                            (String::new(), std::path::PathBuf::new())
+                        };
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        if !cmd_str.is_empty() {
+                            let (prog, args) = build_action_command(&cmd_str, &exec_path);
+                            // Spawn detached — fire-and-forget (FR-007).
+                            let _ = std::process::Command::new(&prog)
+                                .args(&args)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .spawn();
+                        }
+                    }
+                    None => {
+                        // F1 while menu is open closes the menu (FR-010).
+                        if key.code == dialog::KeyCode::F(1) {
+                            *active_dialog = None;
+                            *mode = Mode::Pane;
+                        }
+                    }
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -970,6 +1019,57 @@ async fn dispatch_ui_command(
         }
         Command::Edit => {
             queue_external(app, ui, status, ExternalTool::Editor);
+            return Ok(());
+        }
+        // Feature 047 US2 (FR-006): F2 opens the user action menu.
+        // Guard: if another dialog is already open, ignore.
+        Command::ShowUserMenu => {
+            if active_dialog.is_some() {
+                return Ok(());
+            }
+            // Build local entry path from active pane cwd + focused entry name.
+            let entry_path: std::path::PathBuf = {
+                let p = app.active_pane_state();
+                let name = focused_entry_name(app);
+                let cwd_vfs = if name.is_empty() || name == ".." {
+                    p.cwd.clone()
+                } else {
+                    p.cwd.join(&name)
+                };
+                let disp = cwd_vfs.display();
+                let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+                std::path::PathBuf::from(local)
+            };
+            let menu_path = cargonaut_config::menu_config_path();
+            let cfg = cargonaut_config::load_user_menu(&menu_path).unwrap_or_default();
+            // Filter items whose `only_if` condition fails. Evaluate sequentially
+            // (rare — menus are small) to keep the borrow on `entry_path` simple.
+            let mut filtered = Vec::new();
+            for item in &cfg.actions {
+                let keep = if let Some(cond) = &item.only_if {
+                    evaluate_only_if(cond, &entry_path).await
+                } else {
+                    true
+                };
+                if keep {
+                    filtered.push(item.clone());
+                }
+            }
+            if filtered.is_empty() {
+                // Surface a user-visible "menu is empty" dialog rather than silently doing nothing.
+                *active_dialog = Some(ActiveDialog::UserMenu {
+                    widget: dialog::UserMenuDialog::new_error(
+                        "No menu actions available. Create ~/.config/cargonaut/menu.toml.",
+                    ),
+                    entry_path,
+                });
+            } else {
+                *active_dialog = Some(ActiveDialog::UserMenu {
+                    widget: dialog::UserMenuDialog::new(filtered),
+                    entry_path,
+                });
+            }
+            *mode = Mode::Dialog;
             return Ok(());
         }
         _ => {}
@@ -1618,6 +1718,8 @@ fn draw_frame(
             ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::TasksPanel { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Hotlist { widget } => widget.render(darea, f.buffer_mut(), theme),
+            // Feature 047 US2: UserMenuDialog::render manages its own centering.
+            ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
         }
     }
 
@@ -1713,6 +1815,66 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(vchunks[1])[1]
+}
+
+// Feature 047 US2 — T023: safe shell-command builder (SC-003 macro-safety).
+//
+// Rules:
+//  • Substitute `{path}` with the shell-quoted path.
+//  • If the command string contains shell metacharacters (|, ;, &, $, `, >, <)
+//    after substitution, route through `sh -c` so the shell processes them.
+//  • Otherwise split with shell_words::split and exec directly (no shell).
+fn build_action_command(command: &str, path: &std::path::Path) -> (String, Vec<String>) {
+    let path_str = path.to_string_lossy();
+    let quoted = shell_words::quote(&path_str).into_owned();
+    let substituted = command.replace("{path}", &quoted);
+    // Detect shell metacharacters that require a shell intermediary.
+    let needs_shell = substituted.contains('|')
+        || substituted.contains(';')
+        || substituted.contains('&')
+        || substituted.contains('$')
+        || substituted.contains('`')
+        || substituted.contains('>')
+        || substituted.contains('<');
+    if needs_shell {
+        ("sh".into(), vec!["-c".into(), substituted])
+    } else {
+        let tokens = shell_words::split(&substituted).unwrap_or_else(|_| vec![substituted.clone()]);
+        if tokens.is_empty() {
+            ("sh".into(), vec!["-c".into(), substituted])
+        } else {
+            (tokens[0].clone(), tokens[1..].to_vec())
+        }
+    }
+}
+
+// Feature 047 US2 — T024: evaluate `only_if` shell condition (SC-004 timeout).
+//
+// Spawns the condition string as `sh -c <cond>` with a 200 ms wall-clock
+// timeout. Returns `true` when the process exits with status 0 within the
+// deadline; `false` on non-zero exit, spawn failure, or timeout.
+async fn evaluate_only_if(condition: &str, path: &std::path::Path) -> bool {
+    let path_str = path.to_string_lossy();
+    let quoted = shell_words::quote(&path_str).into_owned();
+    let script = condition.replace("{path}", &quoted);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        tokio::task::spawn_blocking(move || {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&script)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }),
+    )
+    .await;
+    match result {
+        Ok(Ok(ok)) => ok,
+        _ => false,
+    }
 }
 
 /// TUI errors.
@@ -2446,7 +2608,8 @@ mod tests {
     }
 
     // T-MOUSE-5 (FR-017): clicking a function-key button invokes its
-    // command. Button 2 (Menu/user-menu) is deferred → status message.
+    // command. Button 2 (Menu/user-menu — F2) now opens the user menu
+    // dialog (Feature 047); no menu.toml in tests → error-state dialog.
     #[tokio::test]
     async fn click_fkey_button_dispatches_command() {
         let td_l = TempDir::new().unwrap();
@@ -2474,11 +2637,13 @@ mod tests {
             height: 1,
         };
         let (l, r) = synced_views(&app);
-        // Button 2 (Menu = user menu) ≈ 2nd of 10 slots (x 10..20) → deferred.
+        // Button 2 (F2 = ShowUserMenu) ≈ 2nd of 10 slots (x 10..20).
+        // ShowUserMenu is now wired (Feature 047): it opens the user menu
+        // dialog without writing to the status line.
         let status = mouse(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
         assert!(
-            status.contains("not yet available"),
-            "expected deferred-action notice, got {status:?}"
+            !status.contains("not yet available"),
+            "F2 must not show deferred-action notice after Feature 047: {status:?}"
         );
     }
 
