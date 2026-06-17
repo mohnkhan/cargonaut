@@ -754,7 +754,10 @@ async fn handle_key(
                 return Ok(true);
             }
             // Feature 047 US2 (FR-006/007/008): F2 user-defined action menu.
-            ActiveDialog::UserMenu { widget, entry_path: _ } => {
+            ActiveDialog::UserMenu {
+                widget,
+                entry_path: _,
+            } => {
                 match widget.handle_key(key.code) {
                     Some(dialog::UserMenuAction::Close) => {
                         *active_dialog = None;
@@ -762,16 +765,19 @@ async fn handle_key(
                     }
                     Some(dialog::UserMenuAction::Execute(idx)) => {
                         // Extract command before mutably borrowing `active_dialog`.
-                        let (cmd_str, exec_path) = if let Some(ActiveDialog::UserMenu {
-                            widget,
-                            entry_path,
-                        }) = active_dialog.as_ref()
-                        {
-                            let cmd_str = widget.items.get(idx).map(|i| i.command.clone()).unwrap_or_default();
-                            (cmd_str, entry_path.clone())
-                        } else {
-                            (String::new(), std::path::PathBuf::new())
-                        };
+                        let (cmd_str, exec_path) =
+                            if let Some(ActiveDialog::UserMenu { widget, entry_path }) =
+                                active_dialog.as_ref()
+                            {
+                                let cmd_str = widget
+                                    .items
+                                    .get(idx)
+                                    .map(|i| i.command.clone())
+                                    .unwrap_or_default();
+                                (cmd_str, entry_path.clone())
+                            } else {
+                                (String::new(), std::path::PathBuf::new())
+                            };
                         *active_dialog = None;
                         *mode = Mode::Pane;
                         if !cmd_str.is_empty() {
@@ -3230,9 +3236,14 @@ mod tests {
 
     #[test]
     fn build_action_command_path_with_spaces_is_quoted() {
-        let (prog, args) = build_action_command("cat {path} | wc", std::path::Path::new("/tmp/my file"));
+        let (_prog, args) =
+            build_action_command("cat {path} | wc", std::path::Path::new("/tmp/my file"));
         // Path should be quoted so shell sees it as a single arg.
-        assert!(args[1].contains("'") || args[1].contains(r"\"), "path not shell-quoted: {:?}", args);
+        assert!(
+            args[1].contains("'") || args[1].contains(r"\"),
+            "path not shell-quoted: {:?}",
+            args
+        );
     }
 
     #[test]
