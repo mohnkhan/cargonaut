@@ -834,140 +834,343 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
     HelpSection {
         title: "Navigation",
         rows: &[
-            HelpRow { key: "F1", desc: "Show this help overlay (show-help)" },
-            HelpRow { key: "F10", desc: "Quit the application (quit)" },
-            HelpRow { key: "Tab", desc: "Switch active pane (focus-swap-pane)" },
-            HelpRow { key: "M-1", desc: "Focus left pane (focus-left-pane)" },
-            HelpRow { key: "M-2", desc: "Focus right pane (focus-right-pane)" },
-            HelpRow { key: "j / Down", desc: "Move cursor down (cursor-down)" },
-            HelpRow { key: "k / Up", desc: "Move cursor up (cursor-up)" },
-            HelpRow { key: "Enter", desc: "Open directory or file (descend-or-open)" },
-            HelpRow { key: "Backspace / h", desc: "Go up to parent directory (ascend-parent)" },
-            HelpRow { key: "~", desc: "Go to home directory (cd-home)" },
-            HelpRow { key: "/", desc: "Go to root directory (cd-root)" },
-            HelpRow { key: ":", desc: "Open command line (open-cmdline)" },
+            HelpRow {
+                key: "F1",
+                desc: "Show this help overlay (show-help)",
+            },
+            HelpRow {
+                key: "F10",
+                desc: "Quit the application (quit)",
+            },
+            HelpRow {
+                key: "Tab",
+                desc: "Switch active pane (focus-swap-pane)",
+            },
+            HelpRow {
+                key: "M-1",
+                desc: "Focus left pane (focus-left-pane)",
+            },
+            HelpRow {
+                key: "M-2",
+                desc: "Focus right pane (focus-right-pane)",
+            },
+            HelpRow {
+                key: "j / Down",
+                desc: "Move cursor down (cursor-down)",
+            },
+            HelpRow {
+                key: "k / Up",
+                desc: "Move cursor up (cursor-up)",
+            },
+            HelpRow {
+                key: "Enter",
+                desc: "Open directory or file (descend-or-open)",
+            },
+            HelpRow {
+                key: "Backspace / h",
+                desc: "Go up to parent directory (ascend-parent)",
+            },
+            HelpRow {
+                key: "~",
+                desc: "Go to home directory (cd-home)",
+            },
+            HelpRow {
+                key: "/",
+                desc: "Go to root directory (cd-root)",
+            },
+            HelpRow {
+                key: ":",
+                desc: "Open command line (open-cmdline)",
+            },
         ],
     },
     HelpSection {
         title: "Selection",
         rows: &[
-            HelpRow { key: "Insert", desc: "Toggle selection on current entry (selection-toggle)" },
-            HelpRow { key: "*", desc: "Invert selection (selection-invert)" },
-            HelpRow { key: "+", desc: "Add to selection by pattern (selection-add-by-pattern)" },
-            HelpRow { key: "-", desc: "Remove from selection by pattern (selection-remove-by-pattern)" },
+            HelpRow {
+                key: "Insert",
+                desc: "Toggle selection on current entry (selection-toggle)",
+            },
+            HelpRow {
+                key: "*",
+                desc: "Invert selection (selection-invert)",
+            },
+            HelpRow {
+                key: "+",
+                desc: "Add to selection by pattern (selection-add-by-pattern)",
+            },
+            HelpRow {
+                key: "-",
+                desc: "Remove from selection by pattern (selection-remove-by-pattern)",
+            },
         ],
     },
     HelpSection {
         title: "File Operations",
         rows: &[
-            HelpRow { key: "F3", desc: "Preview file or directory (preview)" },
-            HelpRow { key: "F4", desc: "Edit file in $EDITOR (edit)" },
-            HelpRow { key: "F5", desc: "Copy selection to other pane (copy-selection)" },
-            HelpRow { key: "F6", desc: "Move or rename selection (move-or-rename-selection)" },
-            HelpRow { key: "F7", desc: "Create a new directory (mkdir)" },
-            HelpRow { key: "F8", desc: "Delete selection (delete-selection)" },
-            HelpRow { key: "C-c", desc: "Cancel current operation (cancel-current-operation)" },
-            HelpRow { key: "C-s", desc: "Cycle sort key (cycle-sort-key)" },
-            HelpRow { key: "C-z", desc: "Undo last file operation (undo-last-op)" },
+            HelpRow {
+                key: "F3",
+                desc: "Preview file or directory (preview)",
+            },
+            HelpRow {
+                key: "F4",
+                desc: "Edit file in $EDITOR (edit)",
+            },
+            HelpRow {
+                key: "F5",
+                desc: "Copy selection to other pane (copy-selection)",
+            },
+            HelpRow {
+                key: "F6",
+                desc: "Move or rename selection (move-or-rename-selection)",
+            },
+            HelpRow {
+                key: "F7",
+                desc: "Create a new directory (mkdir)",
+            },
+            HelpRow {
+                key: "F8",
+                desc: "Delete selection (delete-selection)",
+            },
+            HelpRow {
+                key: "C-c",
+                desc: "Cancel current operation (cancel-current-operation)",
+            },
+            HelpRow {
+                key: "C-s",
+                desc: "Cycle sort key (cycle-sort-key)",
+            },
+            HelpRow {
+                key: "C-z",
+                desc: "Undo last file operation (undo-last-op)",
+            },
         ],
     },
     HelpSection {
         title: "Panels & Modes",
         rows: &[
-            HelpRow { key: "F9", desc: "Open menu bar (open-menu-bar)" },
-            HelpRow { key: "F12", desc: "Show active transfers panel (show-tasks-panel)" },
-            HelpRow { key: "M-c", desc: "Quick CD popup (quick-cd-popup)" },
-            HelpRow { key: "M-!", desc: "Toggle panel filter prompt (toggle-panel-filter)" },
-            HelpRow { key: "<", desc: "Open fuzzy entry filter (open-fuzzy-filter)" },
-            HelpRow { key: "C-f", desc: "Filter entries in current directory (filter-current-dir)" },
-            HelpRow { key: "M-i", desc: "Sync other panel to this path (sync-other-panel-path)" },
-            HelpRow { key: "M-o", desc: "Show focused entry in other panel (show-focused-in-other-panel)" },
-            HelpRow { key: "M-.", desc: "Toggle hidden files (toggle-hidden)" },
-            HelpRow { key: "M-,", desc: "Toggle split orientation (toggle-split-orientation)" },
-            HelpRow { key: "C-Space", desc: "Calculate recursive directory size (recursive-dir-size)" },
-            HelpRow { key: "M-t", desc: "Cycle listing mode (cycle-listing-mode)" },
-            HelpRow { key: "C-t", desc: "Open new tab (new-tab)" },
-            HelpRow { key: "C-w", desc: "Close current tab (close-tab)" },
-            HelpRow { key: "C-o", desc: "Open subshell in current directory (open-subshell)" },
-            HelpRow { key: "C-r", desc: "Reload config and themes (reload-config-and-themes)" },
+            HelpRow {
+                key: "F9",
+                desc: "Open menu bar (open-menu-bar)",
+            },
+            HelpRow {
+                key: "F12",
+                desc: "Show active transfers panel (show-tasks-panel)",
+            },
+            HelpRow {
+                key: "M-c",
+                desc: "Quick CD popup (quick-cd-popup)",
+            },
+            HelpRow {
+                key: "M-!",
+                desc: "Toggle panel filter prompt (toggle-panel-filter)",
+            },
+            HelpRow {
+                key: "<",
+                desc: "Open fuzzy entry filter (open-fuzzy-filter)",
+            },
+            HelpRow {
+                key: "C-f",
+                desc: "Filter entries in current directory (filter-current-dir)",
+            },
+            HelpRow {
+                key: "M-i",
+                desc: "Sync other panel to this path (sync-other-panel-path)",
+            },
+            HelpRow {
+                key: "M-o",
+                desc: "Show focused entry in other panel (show-focused-in-other-panel)",
+            },
+            HelpRow {
+                key: "M-.",
+                desc: "Toggle hidden files (toggle-hidden)",
+            },
+            HelpRow {
+                key: "M-,",
+                desc: "Toggle split orientation (toggle-split-orientation)",
+            },
+            HelpRow {
+                key: "C-Space",
+                desc: "Calculate recursive directory size (recursive-dir-size)",
+            },
+            HelpRow {
+                key: "M-t",
+                desc: "Cycle listing mode (cycle-listing-mode)",
+            },
+            HelpRow {
+                key: "C-t",
+                desc: "Open new tab (new-tab)",
+            },
+            HelpRow {
+                key: "C-w",
+                desc: "Close current tab (close-tab)",
+            },
+            HelpRow {
+                key: "C-o",
+                desc: "Open subshell in current directory (open-subshell)",
+            },
+            HelpRow {
+                key: "C-r",
+                desc: "Reload config and themes (reload-config-and-themes)",
+            },
         ],
     },
     HelpSection {
         title: "History",
         rows: &[
-            HelpRow { key: "M-S-h", desc: "Show directory history popup (show-directory-history)" },
-            HelpRow { key: "M-h", desc: "Show command history popup (show-command-history)" },
-            HelpRow { key: "M-y", desc: "Navigate to previous directory in history (history-prev-dir)" },
-            HelpRow { key: "M-u", desc: "Navigate to next directory in history (history-next-dir)" },
+            HelpRow {
+                key: "M-S-h",
+                desc: "Show directory history popup (show-directory-history)",
+            },
+            HelpRow {
+                key: "M-h",
+                desc: "Show command history popup (show-command-history)",
+            },
+            HelpRow {
+                key: "M-y",
+                desc: "Navigate to previous directory in history (history-prev-dir)",
+            },
+            HelpRow {
+                key: "M-u",
+                desc: "Navigate to next directory in history (history-next-dir)",
+            },
         ],
     },
     HelpSection {
         title: "Bookmarks",
-        rows: &[
-            HelpRow { key: "C-b", desc: "Open bookmarks menu; add / remove entries (bookmarks-menu)" },
-        ],
+        rows: &[HelpRow {
+            key: "C-b",
+            desc: "Open bookmarks menu; add / remove entries (bookmarks-menu)",
+        }],
     },
     HelpSection {
         title: "File Attributes",
         rows: &[
-            HelpRow { key: "C-x c", desc: "Change file permissions (chmod)" },
-            HelpRow { key: "C-x o", desc: "Change file ownership (chown)" },
-            HelpRow { key: "C-x s", desc: "Create symbolic link (create-symlink)" },
-            HelpRow { key: "C-x l", desc: "Create hard link (create-hard-link)" },
-            HelpRow { key: "C-x C", desc: "Recursive chmod into subtree (chmod-recursive)" },
-            HelpRow { key: "C-x O", desc: "Recursive chown into subtree (chown-recursive)" },
+            HelpRow {
+                key: "C-x c",
+                desc: "Change file permissions (chmod)",
+            },
+            HelpRow {
+                key: "C-x o",
+                desc: "Change file ownership (chown)",
+            },
+            HelpRow {
+                key: "C-x s",
+                desc: "Create symbolic link (create-symlink)",
+            },
+            HelpRow {
+                key: "C-x l",
+                desc: "Create hard link (create-hard-link)",
+            },
+            HelpRow {
+                key: "C-x C",
+                desc: "Recursive chmod into subtree (chmod-recursive)",
+            },
+            HelpRow {
+                key: "C-x O",
+                desc: "Recursive chown into subtree (chown-recursive)",
+            },
         ],
     },
     HelpSection {
         title: "Power Features",
         rows: &[
-            HelpRow { key: "F2", desc: "Open user action menu from menu.toml (show-user-menu)" },
-            HelpRow { key: "C-x !", desc: "External panelize — run command, list output (external-panelize)" },
-            HelpRow { key: "C-x r", desc: "Bulk rename selection via editor (bulk-rename-via-editor)" },
-            HelpRow { key: "C-x d", desc: "Compare two directories (compare-directories)" },
-            HelpRow { key: "C-x C-d", desc: "Diff two tagged files (diff-two-tagged-files)" },
-            HelpRow { key: "M-m", desc: "Toggle mouse capture; Shift+drag bypasses (toggle-mouse-capture)" },
+            HelpRow {
+                key: "F2",
+                desc: "Open user action menu from menu.toml (show-user-menu)",
+            },
+            HelpRow {
+                key: "C-x !",
+                desc: "External panelize — run command, list output (external-panelize)",
+            },
+            HelpRow {
+                key: "C-x r",
+                desc: "Bulk rename selection via editor (bulk-rename-via-editor)",
+            },
+            HelpRow {
+                key: "C-x d",
+                desc: "Compare two directories (compare-directories)",
+            },
+            HelpRow {
+                key: "C-x C-d",
+                desc: "Diff two tagged files (diff-two-tagged-files)",
+            },
+            HelpRow {
+                key: "M-m",
+                desc: "Toggle mouse capture; Shift+drag bypasses (toggle-mouse-capture)",
+            },
         ],
     },
     HelpSection {
         title: "Preview",
         rows: &[
-            HelpRow { key: "C-x X", desc: "Toggle hex view in previewer (toggle-hex-view)" },
-            HelpRow { key: "/", desc: "Search forward in preview (preview-search-forward)" },
-            HelpRow { key: "?", desc: "Search backward in preview (preview-search-backward)" },
-            HelpRow { key: "n", desc: "Jump to next search match in preview (preview-search-next)" },
-            HelpRow { key: "N", desc: "Jump to previous search match in preview (preview-search-prev)" },
+            HelpRow {
+                key: "C-x X",
+                desc: "Toggle hex view in previewer (toggle-hex-view)",
+            },
+            HelpRow {
+                key: "/",
+                desc: "Search forward in preview (preview-search-forward)",
+            },
+            HelpRow {
+                key: "?",
+                desc: "Search backward in preview (preview-search-backward)",
+            },
+            HelpRow {
+                key: "n",
+                desc: "Jump to next search match in preview (preview-search-next)",
+            },
+            HelpRow {
+                key: "N",
+                desc: "Jump to previous search match in preview (preview-search-prev)",
+            },
         ],
     },
     HelpSection {
         title: "Search Mode",
         rows: &[
-            HelpRow { key: "Esc", desc: "Close search overlay (close-search)" },
-            HelpRow { key: "Enter", desc: "Navigate to highlighted search result (search-go-to-result)" },
+            HelpRow {
+                key: "Esc",
+                desc: "Close search overlay (close-search)",
+            },
+            HelpRow {
+                key: "Enter",
+                desc: "Navigate to highlighted search result (search-go-to-result)",
+            },
         ],
     },
     HelpSection {
         title: "Dialogs",
         rows: &[
-            HelpRow { key: "Esc", desc: "Cancel / close current dialog (dialog-cancel)" },
-            HelpRow { key: "Enter", desc: "Confirm current dialog action (dialog-confirm)" },
+            HelpRow {
+                key: "Esc",
+                desc: "Cancel / close current dialog (dialog-cancel)",
+            },
+            HelpRow {
+                key: "Enter",
+                desc: "Confirm current dialog action (dialog-confirm)",
+            },
         ],
     },
     HelpSection {
         title: "Orthodox-FM Compat (mc_keys=true)",
         rows: &[
-            HelpRow { key: "M-5", desc: "Copy selection — alt binding (copy-selection)" },
-            HelpRow { key: "M-6", desc: "Move or rename — alt binding (move-or-rename-selection)" },
+            HelpRow {
+                key: "M-5",
+                desc: "Copy selection — alt binding (copy-selection)",
+            },
+            HelpRow {
+                key: "M-6",
+                desc: "Move or rename — alt binding (move-or-rename-selection)",
+            },
         ],
     },
     HelpSection {
         title: "About",
-        rows: &[
-            HelpRow {
-                key: "cargonaut",
-                desc: "A dual-pane TUI file manager. Press Esc or F1 to close help.",
-            },
-        ],
+        rows: &[HelpRow {
+            key: "cargonaut",
+            desc: "A dual-pane TUI file manager. Press Esc or F1 to close help.",
+        }],
     },
 ];
 
@@ -1052,9 +1255,9 @@ impl HelpOverlay {
         area: ratatui::layout::Rect,
         theme: &crate::theme::Theme,
     ) {
-        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-        use ratatui::text::{Line, Span, Text};
         use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span, Text};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
         f.render_widget(Clear, area);
 
@@ -1070,12 +1273,7 @@ impl HelpOverlay {
                 let key_span = Span::styled(row.key, Style::default().add_modifier(Modifier::BOLD));
                 let sep = Span::raw("  ");
                 let desc_span = Span::raw(row.desc);
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    key_span,
-                    sep,
-                    desc_span,
-                ]));
+                lines.push(Line::from(vec![Span::raw("  "), key_span, sep, desc_span]));
             }
         }
 
@@ -1101,7 +1299,11 @@ impl HelpOverlay {
 // =====================================================================
 
 /// Centre a `percent_x × percent_y` rect inside `r`.
-pub(crate) fn centered_rect_pct(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+pub(crate) fn centered_rect_pct(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
     use ratatui::layout::{Constraint, Direction, Layout};
     let vchunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1153,7 +1355,11 @@ impl UserMenuDialog {
         if !items.is_empty() {
             state.select(Some(0));
         }
-        Self { items, state, error: None }
+        Self {
+            items,
+            state,
+            error: None,
+        }
     }
 
     /// Construct an error-state menu (shows the parse error instead of items).
@@ -1204,10 +1410,15 @@ impl UserMenuDialog {
     }
 
     /// Render the dialog into `area`, clearing it first.
-    pub fn render(&mut self, f: &mut ratatui::Frame, area: ratatui::layout::Rect, theme: &crate::theme::Theme) {
-        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, StatefulWidget};
+    pub fn render(
+        &mut self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        theme: &crate::theme::Theme,
+    ) {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, StatefulWidget};
 
         let darea = centered_rect_pct(50, 60, area);
         f.render_widget(Clear, darea);
@@ -1219,14 +1430,18 @@ impl UserMenuDialog {
 
         if let Some(err) = &self.error {
             let body = format!("Error loading menu.toml:\n{err}\n\nPress Esc to close.");
-            let para = Paragraph::new(body).block(block).style(theme.dialog_style());
+            let para = Paragraph::new(body)
+                .block(block)
+                .style(theme.dialog_style());
             f.render_widget(para, darea);
             return;
         }
 
         if self.items.is_empty() {
             let body = "No actions defined — see ~/.config/cargonaut/menu.toml";
-            let para = Paragraph::new(body).block(block).style(theme.dialog_style());
+            let para = Paragraph::new(body)
+                .block(block)
+                .style(theme.dialog_style());
             f.render_widget(para, darea);
             return;
         }
@@ -1237,7 +1452,11 @@ impl UserMenuDialog {
             .iter()
             .map(|item| {
                 let label = if item.label.chars().count() > max_label {
-                    item.label.chars().take(max_label.saturating_sub(1)).collect::<String>() + "…"
+                    item.label
+                        .chars()
+                        .take(max_label.saturating_sub(1))
+                        .collect::<String>()
+                        + "…"
                 } else {
                     item.label.clone()
                 };
@@ -1778,15 +1997,26 @@ mod tests {
     fn help_sections_every_row_has_non_empty_key_and_desc() {
         for sec in HELP_SECTIONS {
             for row in sec.rows {
-                assert!(!row.key.is_empty(), "row key empty in section '{}'", sec.title);
-                assert!(!row.desc.is_empty(), "row desc empty in section '{}'", sec.title);
+                assert!(
+                    !row.key.is_empty(),
+                    "row key empty in section '{}'",
+                    sec.title
+                );
+                assert!(
+                    !row.desc.is_empty(),
+                    "row desc empty in section '{}'",
+                    sec.title
+                );
             }
         }
     }
 
     #[test]
     fn help_overlay_scroll_down_increments_offset() {
-        let total = HELP_SECTIONS.iter().map(|s| s.rows.len() + 1).sum::<usize>() as u16;
+        let total = HELP_SECTIONS
+            .iter()
+            .map(|s| s.rows.len() + 1)
+            .sum::<usize>() as u16;
         let visible = 10u16;
         let mut ov = HelpOverlay::new(visible);
         assert_eq!(ov.scroll_offset, 0);
@@ -1857,7 +2087,10 @@ mod tests {
 
     #[test]
     fn user_menu_new_with_items_selects_first() {
-        let items = vec![menu_item("Edit", "vi {path}", Some('e')), menu_item("List", "ls {path}", None)];
+        let items = vec![
+            menu_item("Edit", "vi {path}", Some('e')),
+            menu_item("List", "ls {path}", None),
+        ];
         let d = UserMenuDialog::new(items);
         assert_eq!(d.focused_index(), Some(0));
     }
@@ -1894,7 +2127,10 @@ mod tests {
     fn user_menu_enter_returns_execute_index() {
         let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
         let mut d = UserMenuDialog::new(items);
-        assert_eq!(d.handle_key(KeyCode::Enter), Some(UserMenuAction::Execute(0)));
+        assert_eq!(
+            d.handle_key(KeyCode::Enter),
+            Some(UserMenuAction::Execute(0))
+        );
     }
 
     #[test]
@@ -1904,7 +2140,10 @@ mod tests {
             menu_item("List", "ls {path}", Some('l')),
         ];
         let mut d = UserMenuDialog::new(items);
-        assert_eq!(d.handle_key(KeyCode::Char('l')), Some(UserMenuAction::Execute(1)));
+        assert_eq!(
+            d.handle_key(KeyCode::Char('l')),
+            Some(UserMenuAction::Execute(1))
+        );
     }
 
     #[test]

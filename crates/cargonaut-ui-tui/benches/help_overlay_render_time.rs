@@ -28,9 +28,7 @@ fn main() {
     }
     let elapsed = start.elapsed();
     let per_iter_us = elapsed.as_micros() / u64::from(iterations) as u128;
-    println!(
-        "help-content build: {iterations} iters in {elapsed:?} ({per_iter_us} µs/iter)"
-    );
+    println!("help-content build: {iterations} iters in {elapsed:?} ({per_iter_us} µs/iter)");
     // NFR-001: must complete in < 1 ms (1000 µs).
     assert!(
         per_iter_us < 1_000,

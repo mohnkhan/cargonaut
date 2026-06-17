@@ -1173,9 +1173,6 @@ only_if = "test -d {path}"
         let msg = err.to_string();
         // Error message should contain the file path
         let path_str = f.path().to_str().unwrap();
-        assert!(
-            msg.contains(path_str),
-            "expected path in error: {msg}"
-        );
+        assert!(msg.contains(path_str), "expected path in error: {msg}");
     }
 }
