@@ -620,6 +620,41 @@ dialog_sel_fg = "#f8f8f2"
         assert_eq!(theme.name, "test-skin");
     }
 
+    // ---------------------------------------------------------------------------
+    // T014 (US2): skin_partial_inherits_defaults — only specified fields change
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_partial_inherits_defaults() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = write_skin(&dir, "green-cursor", "cursor_bg = \"Green\"\ncursor_fg = \"Black\"\n");
+        let theme = load_skin("green-cursor", &themes_dir).expect("partial skin must load");
+        // Overridden fields
+        assert_eq!(theme.cursor_bg, Color::Green);
+        assert_eq!(theme.cursor_fg, Color::Black);
+        // Unspecified fields fall back to commander-dark defaults
+        let def = Theme::commander_dark();
+        assert_eq!(theme.panel_bg, def.panel_bg);
+        assert_eq!(theme.dir_fg, def.dir_fg);
+        assert_eq!(theme.status_bg, def.status_bg);
+        assert_eq!(theme.name, "green-cursor");
+    }
+
+    // ---------------------------------------------------------------------------
+    // T015 (US2): skin_empty_equals_default_colors — all fields inherit default
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_empty_equals_default_colors() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = write_skin(&dir, "empty-skin", "");
+        let theme = load_skin("empty-skin", &themes_dir).expect("empty skin must load");
+        let def = Theme::commander_dark();
+        // All color fields match commander-dark; only name differs
+        assert_eq!(theme.panel_bg, def.panel_bg);
+        assert_eq!(theme.cursor_bg, def.cursor_bg);
+        assert_eq!(theme.dir_fg, def.dir_fg);
+        assert_eq!(theme.name, "empty-skin");
+    }
+
     // T-THEME-2: unknown name falls back to default, never panics (FR-006).
     #[test]
     fn resolve_unknown_falls_back_to_default() {
