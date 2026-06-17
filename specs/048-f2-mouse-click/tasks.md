@@ -30,7 +30,7 @@ the two-commit pair.
 
 **Purpose**: Confirm toolchain and build hygiene before adding tests.
 
-- [ ] T001 Confirm `make tmpfs-status` shows active symlink; run `make test` green as baseline in `crates/cargonaut-ui-tui/`
+- [x] T001 Confirm `make tmpfs-status` shows active symlink; run `make test` green as baseline in `crates/cargonaut-ui-tui/`
 
 ---
 
@@ -39,7 +39,7 @@ the two-commit pair.
 **Purpose**: Add the `mouse_with_dlg()` test helper that all new tests depend on.
 This is the enabling infrastructure — without it, the T-MOUSE-5b test cannot be written.
 
-- [ ] T002 (red) Add `async fn mouse_with_dlg(…) -> (String, Option<ActiveDialog>)` helper in `crates/cargonaut-ui-tui/src/lib.rs` `#[cfg(test)]` block, mirroring `mouse()` but returning `dlg` alongside `status`; add stub test `f2_mouse_click_opens_user_menu` with `assert!(false, "T002 red: stub")` so the test compiles but fails — commit as red
+- [x] T002 (red) Add `async fn mouse_with_dlg(…) -> (String, Option<ActiveDialog>)` helper in `crates/cargonaut-ui-tui/src/lib.rs` `#[cfg(test)]` block, mirroring `mouse()` but returning `dlg` alongside `status`; add stub test `f2_mouse_click_opens_user_menu` with `assert!(false, "T002 red: stub")` so the test compiles but fails — commit as red
 
 **Checkpoint**: `cargo test -p cargonaut-ui-tui f2_mouse_click_opens_user_menu` fails with assertion error (red state confirmed).
 
@@ -54,9 +54,9 @@ the mouse path is equivalent to the keyboard F2 path.
 
 ### Implementation for User Story 1
 
-- [ ] T003 (green) [US1] Replace the stub body in `f2_mouse_click_opens_user_menu` (`crates/cargonaut-ui-tui/src/lib.rs`) with the real assertion: call `mouse_with_dlg(left_click(15, 23), …)`, then `assert!(matches!(dlg, Some(ActiveDialog::UserMenu { .. })), …)` — commit as green; verify test passes
-- [ ] T004 [US1] Strengthen existing T-MOUSE-5 test `click_fkey_button_dispatches_command` in `crates/cargonaut-ui-tui/src/lib.rs` to also use `mouse_with_dlg` and replace the weak negative string check with `assert!(matches!(dlg, Some(ActiveDialog::UserMenu { .. })))` — one commit
-- [ ] T005 [US1] Run `cargo clippy -p cargonaut-ui-tui -- -D warnings` and `cargo fmt --check`; fix any warnings in `crates/cargonaut-ui-tui/src/lib.rs`
+- [x] T003 (green) [US1] Replace the stub body in `f2_mouse_click_opens_user_menu` (`crates/cargonaut-ui-tui/src/lib.rs`) with the real assertion: call `mouse_with_dlg(left_click(15, 23), …)`, then `assert!(matches!(dlg, Some(ActiveDialog::UserMenu { .. })), …)` — commit as green; verify test passes
+- [x] T004 [US1] Strengthen existing T-MOUSE-5 test `click_fkey_button_dispatches_command` in `crates/cargonaut-ui-tui/src/lib.rs` to also use `mouse_with_dlg` and replace the weak negative string check with `assert!(matches!(dlg, Some(ActiveDialog::UserMenu { .. })))` — one commit
+- [x] T005 [US1] Run `cargo clippy -p cargonaut-ui-tui -- -D warnings` and `cargo fmt --check`; fix any warnings in `crates/cargonaut-ui-tui/src/lib.rs`
 
 **Checkpoint**: `cargo test -p cargonaut-ui-tui` is fully green; T-MOUSE-5 and T-MOUSE-5b both assert `ActiveDialog::UserMenu`.
 
@@ -66,10 +66,10 @@ the mouse path is equivalent to the keyboard F2 path.
 
 **Purpose**: CI gate, documentation, and roadmap cleanup required before PR merge.
 
-- [ ] T006 Run `make ci-local` and confirm all five pipeline steps pass (clippy → test → build → check-pr-body → docs-gate) in repo root
-- [ ] T007 Update `README.md`: bump test count in "At a Glance" table and add Feature 048 entry to "Feature History" section
-- [ ] T008 Update `Learnings.md`: append Feature 048 section with ≥3 bullets covering what was hard, root causes, and non-obvious decisions
-- [ ] T009 Update `ROADMAP.md`: remove (or move to a `## Closed` section) the Tier 3 row for issue [#70](https://github.com/mohnkhan/cargonaut/issues/70) now that this feature closes it
+- [x] T006 Run `make ci-local` and confirm all five pipeline steps pass (clippy → test → build → check-pr-body → docs-gate) in repo root
+- [x] T007 Update `README.md`: bump test count in "At a Glance" table and add Feature 048 entry to "Feature History" section
+- [x] T008 Update `Learnings.md`: append Feature 048 section with ≥3 bullets covering what was hard, root causes, and non-obvious decisions
+- [x] T009 Update `ROADMAP.md`: remove (or move to a `## Closed` section) the Tier 3 row for issue [#70](https://github.com/mohnkhan/cargonaut/issues/70) now that this feature closes it
 
 ---
 
