@@ -106,7 +106,7 @@ struct UiState {
     fkeybar: FunctionKeyBar,
     layout: FrameLayout,
     last_click: Option<(u16, u16, Instant)>,
-    help_open: bool,
+    help_overlay: Option<dialog::HelpOverlay>,
     mouse_enabled: bool,
     /// Set by F3/F4; run_loop suspends the TUI, runs it, and restores.
     pending_external: Option<PendingExternal>,
@@ -196,7 +196,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         fkeybar: FunctionKeyBar::new(),
         layout: FrameLayout::default(),
         last_click: None,
-        help_open: false,
+        help_overlay: None,
         mouse_enabled,
         pending_external: None,
     };
@@ -272,7 +272,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let mouse_captured = ui.mouse_enabled;
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
-        let help_open = ui.help_open;
+        let help_overlay = ui.help_overlay.as_ref().cloned();
         term.draw(|f| {
             layout = draw_frame(
                 f,
@@ -287,7 +287,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 fkeybar,
                 &ms_left,
                 &ms_right,
-                help_open,
+                help_overlay.as_ref(),
                 view_mode,
                 &qv_preview,
                 progress.as_deref(),
@@ -368,9 +368,12 @@ async fn handle_key(
 ) -> Result<bool, Error> {
     use crossterm::event::KeyCode;
 
-    // Help overlay swallows the next key (any key dismisses it).
-    if ui.help_open {
-        ui.help_open = false;
+    // Help overlay — swallows all keys; Esc/F1 close it.
+    if let Some(overlay) = ui.help_overlay.as_mut() {
+        let action = overlay.handle_key(key.code);
+        if action == dialog::HelpAction::Close {
+            ui.help_overlay = None;
+        }
         return Ok(true);
     }
 
@@ -785,7 +788,8 @@ async fn dispatch_ui_command(
             return Ok(());
         }
         Command::ShowHelp => {
-            ui.help_open = true;
+            let visible_h = ui.layout.left.height.saturating_sub(2).max(1);
+            ui.help_overlay = Some(dialog::HelpOverlay::new(visible_h));
             return Ok(());
         }
         // Feature 041 (FR-001/002/003/006): M-m toggles mouse capture at
@@ -1516,7 +1520,7 @@ fn draw_frame(
     fkeybar: &FunctionKeyBar,
     ms_left: &str,
     ms_right: &str,
-    help_open: bool,
+    help_overlay: Option<&dialog::HelpOverlay>,
     view_mode: cargonaut_core::ViewMode,
     qv_preview: &str,
     progress: Option<&str>,
@@ -1600,8 +1604,8 @@ fn draw_frame(
         draw_progress(f, theme, area, p);
     }
 
-    if help_open {
-        draw_help(f, theme, area);
+    if let Some(overlay) = help_overlay {
+        overlay.render(f, area, theme);
     }
 
     if let Some(d) = dialog {
@@ -1692,39 +1696,6 @@ fn draw_progress(f: &mut ratatui::Frame, theme: &Theme, area: Rect, body: &str) 
         .render(r, f.buffer_mut());
 }
 
-/// Minimal help overlay (F1). The full hypertext help viewer is deferred.
-/// Body text of the F1 quick-help overlay. A `const` (not an inline literal) so
-/// its content — e.g. the Feature 041 mouse-toggle line — is unit-testable.
-const HELP_BODY: &str = "\
-Cargonaut — quick help\n\
-\n\
-  Arrows / j k     move cursor      Tab        switch pane\n\
-  Enter            enter directory  Insert     tag file\n\
-  F5 Copy  F6 Move  F8 Delete  F7 Mkdir*  F9 Menu  F10 Quit\n\
-  F3 View*  F4 Edit*   (* not yet available)\n\
-  Mouse: click to focus/move, double-click to enter, wheel to scroll\n\
-  M-m: toggle mouse capture on/off  (Shift+drag selects text when on)\n\
-  C-b: directory hotlist (bookmarks) — [a]dd · [d]el · Enter jumps\n\
-  C-x c chmod · C-x o chown · C-x s symlink · C-x l hardlink\n\
-  C-x C / C-x O: recursive chmod / chown (whole subtree, -R)\n\
-\n\
-  Press any key to close.";
-
-fn draw_help(f: &mut ratatui::Frame, theme: &Theme, area: Rect) {
-    use ratatui::widgets::{Clear, Widget};
-    let r = centered_rect(60, 50, area);
-    Clear.render(r, f.buffer_mut());
-    let body = HELP_BODY;
-    let block = Block::default()
-        .title("Help")
-        .borders(Borders::ALL)
-        .style(theme.dialog_style());
-    Paragraph::new(body)
-        .block(block)
-        .style(theme.dialog_style())
-        .render(r, f.buffer_mut());
-}
-
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let vchunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1786,7 +1757,7 @@ mod tests {
                 },
             },
             last_click: None,
-            help_open: false,
+            help_overlay: None,
             mouse_enabled: mouse,
             pending_external: None,
         }
@@ -1847,15 +1818,24 @@ mod tests {
         );
     }
 
+    fn help_sections_text() -> String {
+        dialog::HELP_SECTIONS
+            .iter()
+            .flat_map(|s| s.rows.iter().map(|r| format!("{} {}", r.key, r.desc)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     // Feature 044: help documents the recursive attribute keys.
     #[test]
     fn help_documents_recursive_keys() {
+        let text = help_sections_text();
         assert!(
-            HELP_BODY.contains("C-x C"),
+            text.contains("C-x C"),
             "help must mention recursive chmod key"
         );
         assert!(
-            HELP_BODY.to_lowercase().contains("recursive") || HELP_BODY.contains("-R"),
+            text.to_lowercase().contains("recursive"),
             "help must mention recursion"
         );
     }
@@ -1863,9 +1843,10 @@ mod tests {
     // Feature 043: help documents the file-attribute keys.
     #[test]
     fn help_documents_attribute_keys() {
-        assert!(HELP_BODY.contains("C-x c"), "help must mention chmod key");
+        let text = help_sections_text();
+        assert!(text.contains("C-x c"), "help must mention chmod key");
         assert!(
-            HELP_BODY.to_lowercase().contains("chmod"),
+            text.to_lowercase().contains("chmod"),
             "help must mention chmod"
         );
     }
@@ -1873,12 +1854,10 @@ mod tests {
     // Feature 042: help documents the Ctrl-b hotlist + in-popup add/remove.
     #[test]
     fn help_documents_hotlist() {
+        let text = help_sections_text();
+        assert!(text.contains("C-b"), "help must mention the hotlist key");
         assert!(
-            HELP_BODY.contains("C-b"),
-            "help must mention the hotlist key"
-        );
-        assert!(
-            HELP_BODY.to_lowercase().contains("bookmark"),
+            text.to_lowercase().contains("bookmark"),
             "help must mention bookmarks"
         );
     }
@@ -1887,12 +1866,10 @@ mod tests {
     // terminal Shift-drag bypass for one-off native text selection.
     #[test]
     fn help_documents_mouse_toggle_and_shift_bypass() {
+        let text = help_sections_text();
+        assert!(text.contains("M-m"), "help must mention the M-m toggle");
         assert!(
-            HELP_BODY.contains("M-m"),
-            "help must mention the M-m toggle"
-        );
-        assert!(
-            HELP_BODY.contains("Shift"),
+            text.to_lowercase().contains("shift"),
             "help must mention the Shift-drag bypass"
         );
     }
