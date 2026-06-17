@@ -363,6 +363,8 @@ fn is_executable(mode: Option<&FileMode>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn mode(bits: u32) -> FileMode {
         FileMode {
@@ -370,6 +372,139 @@ mod tests {
             uid: None,
             gid: None,
         }
+    }
+
+    /// Write a skin file into `<dir>/cargonaut/themes/<name>.toml` and
+    /// return the themes directory path.
+    fn write_skin(dir: &TempDir, name: &str, content: &str) -> std::path::PathBuf {
+        let themes = dir.path().join("cargonaut/themes");
+        fs::create_dir_all(&themes).unwrap();
+        fs::write(themes.join(format!("{name}.toml")), content).unwrap();
+        themes
+    }
+
+    // ---------------------------------------------------------------------------
+    // T005 (red): skin_full_palette_loads — calls load_skin which doesn't exist
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_full_palette_loads() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = write_skin(
+            &dir,
+            "dracula",
+            r##"
+panel_bg  = "#282a36"
+panel_fg  = "#f8f8f2"
+dir_fg    = "#8be9fd"
+exec_fg   = "#50fa7b"
+symlink_fg = "#ff79c6"
+hidden_fg  = "#6272a4"
+cursor_bg  = "#ff79c6"
+cursor_fg  = "#282a36"
+marked_fg  = "#f1fa8c"
+border_focused   = "#ff79c6"
+border_unfocused = "#6272a4"
+menu_bg    = "#44475a"
+menu_fg    = "#f8f8f2"
+menu_sel_bg = "#6272a4"
+menu_sel_fg = "#f8f8f2"
+fkey_num_bg  = "#44475a"
+fkey_num_fg  = "#ff79c6"
+fkey_label_bg = "#282a36"
+fkey_label_fg = "#6272a4"
+status_bg  = "#44475a"
+status_fg  = "#f8f8f2"
+dialog_bg  = "#44475a"
+dialog_fg  = "#f8f8f2"
+dialog_sel_bg = "#6272a4"
+dialog_sel_fg = "#f8f8f2"
+"##,
+        );
+        let result = load_skin("dracula", &themes_dir);
+        let theme = result.expect("full dracula skin must load without error");
+        assert_eq!(theme.panel_bg, Color::Rgb(40, 42, 54));
+        assert_eq!(theme.name, "dracula");
+    }
+
+    // ---------------------------------------------------------------------------
+    // T006 (red): skin_missing_file_falls_back — resolve new sig not yet present
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_missing_file_falls_back() {
+        let dir = TempDir::new().unwrap();
+        let themes_dir = dir.path().join("cargonaut/themes");
+        fs::create_dir_all(&themes_dir).unwrap();
+        let result = load_skin("no-such-skin", &themes_dir);
+        let err = result.expect_err("missing skin file must return Err");
+        assert!(
+            err.contains("no-such-skin"),
+            "error must name the missing skin; got: {err:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T007 (red): parse_color_spec — three format variants
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn parse_color_spec_named() {
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Named("Blue".into())).unwrap(),
+            Color::Blue
+        );
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Named("reset".into())).unwrap(),
+            Color::Reset
+        );
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Named("LIGHTGREEN".into())).unwrap(),
+            Color::LightGreen
+        );
+    }
+
+    #[test]
+    fn parse_color_spec_indexed() {
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Indexed(196)).unwrap(),
+            Color::Indexed(196)
+        );
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Indexed(0)).unwrap(),
+            Color::Indexed(0)
+        );
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Indexed(255)).unwrap(),
+            Color::Indexed(255)
+        );
+    }
+
+    #[test]
+    fn parse_color_spec_rgb_hex() {
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Named("#ff8800".into())).unwrap(),
+            Color::Rgb(255, 136, 0)
+        );
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Named("#282a36".into())).unwrap(),
+            Color::Rgb(40, 42, 54)
+        );
+        assert_eq!(
+            parse_color_spec(&ColorSpec::Named("#000000".into())).unwrap(),
+            Color::Rgb(0, 0, 0)
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T029 (red): skin_resolve_via_theme_name — FR-008 full resolve chain
+    // ---------------------------------------------------------------------------
+    #[test]
+    fn skin_resolve_via_theme_name() {
+        let dir = TempDir::new().unwrap();
+        write_skin(&dir, "test-skin", "panel_bg = \"Red\"\n");
+        // Full resolve chain: not a builtin → load from dir → return (theme, None)
+        let (theme, err) = Theme::resolve_from("test-skin", &dir.path().join("cargonaut/themes"));
+        assert!(err.is_none(), "valid skin must return no error; got: {err:?}");
+        assert_eq!(theme.panel_bg, Color::Red);
+        assert_eq!(theme.name, "test-skin");
     }
 
     // T-THEME-2: unknown name falls back to default, never panics (FR-006).
