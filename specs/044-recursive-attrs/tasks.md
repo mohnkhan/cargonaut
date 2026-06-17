@@ -91,7 +91,8 @@ after confirmation.
 - [ ] T009 [US1] (green) Add `InputKind::ChmodRecursive`; wire the `C-x C`
   dispatch arm (open prefilled input) and the Input-submit arm (open
   `ConfirmDialog` with `on_confirm = AppCommand::ChmodRecursive(text)`); add a
-  File-menu "Chmod -R" entry. Make T008 pass.
+  File-menu "Chmod -R" entry. Make T008 pass. Include an explicit test that
+  **Cancelling** the confirmation leaves the tree unchanged (SC-003).
 
 **Checkpoint**: recursive chmod works end-to-end via key + menu + confirm. **MVP.**
 
