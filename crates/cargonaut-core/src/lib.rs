@@ -310,6 +310,12 @@ pub enum Command {
     /// Feature 043 (#46) — change ownership of the selection to `user[:group]`
     /// (routed through a confirmation dialog; see `chown_selection`).
     Chown(String),
+    /// Feature 044 (#65) — recursively chmod the selection's subtree(s) to the
+    /// given mode (routed through a confirmation dialog).
+    ChmodRecursive(String),
+    /// Feature 044 (#65) — recursively chown the selection's subtree(s)
+    /// (routed through a confirmation dialog).
+    ChownRecursive(String),
     /// F10 — quit cargonaut.
     Quit,
 }
@@ -960,6 +966,8 @@ impl App {
             SelectByPattern(pat) => Ok(self.select_by_pattern(&pat, true)),
             UnselectByPattern(pat) => Ok(self.select_by_pattern(&pat, false)),
             Chown(owner) => self.chown_selection(&owner).await,
+            ChmodRecursive(spec) => self.chmod_recursive(&spec).await,
+            ChownRecursive(owner) => self.chown_recursive(&owner).await,
             Quit => Ok(vec![Event::QuitRequested]),
         }
     }
@@ -1520,6 +1528,90 @@ impl App {
         (out, truncated)
     }
 
+    /// Recursively change permissions of the selection's subtree(s). `spec` is
+    /// octal or symbolic ([`cargonaut_vfs::ModeSpec`]); invalid ⇒
+    /// [`AppError::BadAttr`] with no walk. Symbolic specs are applied per entry
+    /// relative to its current bits. Entries are changed **deepest-first** so a
+    /// restrictive mode can't lock the walk out of a child (FR-011); symlink
+    /// entries are skipped (never modified through a link, FR-006); per-entry
+    /// failures are aggregated (FR-007); a truncated walk is noted (FR-005).
+    pub async fn chmod_recursive(&mut self, spec: &str) -> Result<Vec<Event>, AppError> {
+        let mode_spec = cargonaut_vfs::ModeSpec::parse(spec)
+            .map_err(|e| AppError::BadAttr(format!("invalid mode {spec:?} ({e:?})")))?;
+        let (mut paths, truncated) = match self.attr_roots() {
+            Some(roots) => self.collect_subtree(&roots).await,
+            None => return Ok(vec![Event::Status("No files selected".into())]),
+        };
+        paths.reverse(); // deepest-first (collect is shallow→deep)
+        let mut ok = 0usize;
+        let mut failures = Vec::new();
+        for p in &paths {
+            let meta = match self.local_fs.stat(p).await {
+                Ok(m) => m,
+                Err(e) => {
+                    failures.push(format!("{}: {e}", p.display()));
+                    continue;
+                }
+            };
+            if matches!(meta.kind, cargonaut_vfs::VfsKind::Symlink { .. }) {
+                continue; // never chmod through a symlink (FR-006)
+            }
+            let current = meta.mode.map(|fm| fm.bits).unwrap_or(0);
+            match self.local_fs.chmod(p, mode_spec.apply(current)).await {
+                Ok(()) => ok += 1,
+                Err(e) => failures.push(format!("{}: {e}", p.display())),
+            }
+        }
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(recursive_status("chmod -R", ok, &failures, truncated)));
+        Ok(evs)
+    }
+
+    /// Recursively change ownership of the selection's subtree(s). `owner` is
+    /// `user[:group]` (name or numeric); invalid/unknown ⇒ [`AppError::BadAttr`]
+    /// with no walk. Deepest-first; symlink entries skipped (FR-006); per-entry
+    /// failures aggregated (FR-007); truncation noted (FR-005).
+    pub async fn chown_recursive(&mut self, owner: &str) -> Result<Vec<Event>, AppError> {
+        let (uid, gid) = cargonaut_vfs::parse_owner(owner)
+            .map_err(|e| AppError::BadAttr(format!("invalid owner {owner:?} ({e:?})")))?;
+        let (mut paths, truncated) = match self.attr_roots() {
+            Some(roots) => self.collect_subtree(&roots).await,
+            None => return Ok(vec![Event::Status("No files selected".into())]),
+        };
+        paths.reverse(); // deepest-first
+        let mut ok = 0usize;
+        let mut failures = Vec::new();
+        for p in &paths {
+            match self.local_fs.stat(p).await {
+                Ok(m) if matches!(m.kind, cargonaut_vfs::VfsKind::Symlink { .. }) => continue,
+                Ok(_) => {}
+                Err(e) => {
+                    failures.push(format!("{}: {e}", p.display()));
+                    continue;
+                }
+            }
+            match self.local_fs.chown(p, uid, gid).await {
+                Ok(()) => ok += 1,
+                Err(e) => failures.push(format!("{}: {e}", p.display())),
+            }
+        }
+        let mut evs = self.refresh_active_pane().await?;
+        evs.push(Event::Status(recursive_status("chown -R", ok, &failures, truncated)));
+        Ok(evs)
+    }
+
+    /// The recursive-op root paths from the current selection (tagged, else
+    /// focused; excludes `..`), or `None` if nothing is selected.
+    fn attr_roots(&self) -> Option<Vec<VfsPath>> {
+        let id = self.active;
+        let names = self.selection_or_focused(id);
+        if names.is_empty() {
+            return None;
+        }
+        let cwd = self.pane(id).cwd.clone();
+        Some(names.iter().map(|n| cwd.join(n)).collect())
+    }
+
     /// Create a symbolic link named `link_name` in the active pane's directory,
     /// pointing at the focused entry (a relative link to the sibling). Blank
     /// name ⇒ [`AppError::BadAttr`]; an existing name or OS error is reported.
@@ -1817,6 +1909,16 @@ fn pane_idx(id: PaneId) -> usize {
 /// `recursive_dir_size` bound.
 const RECURSE_NODE_CAP: usize = 200_000;
 
+/// Feature 044 — status line for a recursive attribute op: [`attr_status`] plus
+/// a "(truncated)" suffix when the bounded walk hit its cap.
+fn recursive_status(op: &str, ok: usize, failures: &[String], truncated: bool) -> String {
+    let mut s = attr_status(op, ok, failures);
+    if truncated {
+        s.push_str(" (truncated)");
+    }
+    s
+}
+
 /// Feature 043 — status line for a batch attribute op: how many succeeded and,
 /// if any failed, which (partial failures are surfaced, not rolled back).
 fn attr_status(op: &str, ok: usize, failures: &[String]) -> String {
@@ -2101,15 +2203,18 @@ mod tests {
         // Strip all bits: a top-down apply would lose `x` on `a` and fail to
         // reach the leaf. Deepest-first must still change it (FR-011).
         app.chmod_recursive("000").await.unwrap();
-        assert_eq!(mode_of(&td_l.path().join("a/b/leaf")), 0o000);
-        // restore so TempDir can clean up
-        for p in ["a/b/leaf", "a/b", "a"] {
+        // Restore traverse on the ancestor dirs so the test can stat the leaf
+        // (this does NOT touch the leaf's own bits).
+        for p in ["a", "a/b"] {
             std::fs::set_permissions(
                 td_l.path().join(p),
                 std::os::unix::fs::PermissionsExt::from_mode(0o755),
             )
-            .ok();
+            .unwrap();
         }
+        // If deepest-first worked, the leaf was reached and is now 000; a
+        // top-down apply would have locked out and left it unchanged.
+        assert_eq!(mode_of(&td_l.path().join("a/b/leaf")), 0o000);
     }
 
     #[cfg(unix)]
