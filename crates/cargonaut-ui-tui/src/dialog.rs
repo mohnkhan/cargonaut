@@ -1675,4 +1675,74 @@ mod tests {
             assert!(ov.scroll_offset > before);
         }
     }
+
+    // ---------- UserMenuDialog (Feature 047 — T018) ----------
+
+    fn menu_item(label: &str, command: &str, key: Option<char>) -> cargonaut_config::MenuItem {
+        cargonaut_config::MenuItem {
+            label: label.into(),
+            command: command.into(),
+            only_if: None,
+            key,
+        }
+    }
+
+    #[test]
+    fn user_menu_new_with_items_selects_first() {
+        let items = vec![menu_item("Edit", "vi {path}", Some('e')), menu_item("List", "ls {path}", None)];
+        let d = UserMenuDialog::new(items);
+        assert_eq!(d.focused_index(), Some(0));
+    }
+
+    #[test]
+    fn user_menu_new_empty_has_no_selection() {
+        let d = UserMenuDialog::new(vec![]);
+        assert_eq!(d.focused_index(), None);
+    }
+
+    #[test]
+    fn user_menu_down_moves_selection() {
+        let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(d.handle_key(KeyCode::Down), None);
+        assert_eq!(d.focused_index(), Some(1));
+    }
+
+    #[test]
+    fn user_menu_up_clamps_at_zero() {
+        let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(d.handle_key(KeyCode::Up), None);
+        assert_eq!(d.focused_index(), Some(0));
+    }
+
+    #[test]
+    fn user_menu_esc_returns_close() {
+        let mut d = UserMenuDialog::new(vec![menu_item("A", "a", None)]);
+        assert_eq!(d.handle_key(KeyCode::Esc), Some(UserMenuAction::Close));
+    }
+
+    #[test]
+    fn user_menu_enter_returns_execute_index() {
+        let items = vec![menu_item("A", "a", None), menu_item("B", "b", None)];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(d.handle_key(KeyCode::Enter), Some(UserMenuAction::Execute(0)));
+    }
+
+    #[test]
+    fn user_menu_shortcut_char_executes_matching_item() {
+        let items = vec![
+            menu_item("Edit", "vi {path}", Some('e')),
+            menu_item("List", "ls {path}", Some('l')),
+        ];
+        let mut d = UserMenuDialog::new(items);
+        assert_eq!(d.handle_key(KeyCode::Char('l')), Some(UserMenuAction::Execute(1)));
+    }
+
+    #[test]
+    fn user_menu_new_error_sets_error_field() {
+        let d = UserMenuDialog::new_error("parse error: line 5");
+        assert!(d.error.is_some());
+        assert!(d.error.as_deref().unwrap().contains("parse error"));
+    }
 }

@@ -3047,6 +3047,36 @@ mod tests {
         assert!(!app.job_views().is_empty());
     }
 
+    // Feature 047 — T019(red): build_action_command shell-safety tests
+    #[test]
+    fn build_action_command_no_shell_ops_splits_directly() {
+        let (prog, args) = build_action_command("echo {path}", std::path::Path::new("/tmp/a"));
+        assert_eq!(prog, "echo");
+        assert_eq!(args, vec!["/tmp/a"]);
+    }
+
+    #[test]
+    fn build_action_command_shell_op_uses_sh_c() {
+        let (prog, args) = build_action_command("cat {path} | wc", std::path::Path::new("/tmp/a"));
+        assert_eq!(prog, "sh");
+        assert_eq!(args[0], "-c");
+        assert!(args[1].contains("/tmp/a"), "substituted path missing");
+    }
+
+    #[test]
+    fn build_action_command_path_with_spaces_is_quoted() {
+        let (prog, args) = build_action_command("cat {path} | wc", std::path::Path::new("/tmp/my file"));
+        // Path should be quoted so shell sees it as a single arg.
+        assert!(args[1].contains("'") || args[1].contains(r"\"), "path not shell-quoted: {:?}", args);
+    }
+
+    #[test]
+    fn build_action_command_no_path_placeholder_runs_as_is() {
+        let (prog, args) = build_action_command("git status", std::path::Path::new("/tmp/a"));
+        assert_eq!(prog, "git");
+        assert_eq!(args, vec!["status"]);
+    }
+
     // Feature 047 SC-002: every action in keymap.toml must appear in HELP_SECTIONS.
     #[test]
     fn help_covers_all_keymap_bindings() {
