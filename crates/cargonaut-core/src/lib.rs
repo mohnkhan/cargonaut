@@ -2057,6 +2057,103 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn chmod_recursive_applies_at_depth() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir_all(td_l.path().join("a/b/c")).unwrap();
+        fs::write(td_l.path().join("a/b/c/deep.txt"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "a"
+        app.chmod_recursive("700").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("a")), 0o700);
+        assert_eq!(mode_of(&td_l.path().join("a/b")), 0o700);
+        assert_eq!(mode_of(&td_l.path().join("a/b/c/deep.txt")), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_recursive_symbolic_is_per_entry() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        let f = td_l.path().join("a/f");
+        fs::write(&f, b"x").await.unwrap();
+        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(
+            td_l.path().join("a"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.chmod_recursive("g+r").await.unwrap();
+        // each entry changed relative to its own mode
+        assert_eq!(mode_of(&f), 0o640);
+        assert_eq!(mode_of(&td_l.path().join("a")), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_recursive_deepest_first_no_lockout() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir_all(td_l.path().join("a/b")).unwrap();
+        fs::write(td_l.path().join("a/b/leaf"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Strip all bits: a top-down apply would lose `x` on `a` and fail to
+        // reach the leaf. Deepest-first must still change it (FR-011).
+        app.chmod_recursive("000").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("a/b/leaf")), 0o000);
+        // restore so TempDir can clean up
+        for p in ["a/b/leaf", "a/b", "a"] {
+            std::fs::set_permissions(
+                td_l.path().join(p),
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .ok();
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_recursive_does_not_follow_symlink() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret");
+        fs::write(&secret, b"x").await.unwrap();
+        std::fs::set_permissions(&secret, std::os::unix::fs::PermissionsExt::from_mode(0o644))
+            .unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), td_l.path().join("a/link")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.chmod_recursive("700").await.unwrap();
+        assert_eq!(mode_of(&secret), 0o644, "must not chmod through a symlink");
+    }
+
+    #[tokio::test]
+    async fn chmod_recursive_invalid_does_not_walk() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::create_dir(td_l.path().join("a")).unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        assert!(matches!(
+            app.chmod_recursive("nope").await,
+            Err(AppError::BadAttr(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chmod_recursive_file_only_is_shallow() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        fs::write(td_l.path().join("f"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await; // focused = "f"
+        app.chmod_recursive("700").await.unwrap();
+        assert_eq!(mode_of(&td_l.path().join("f")), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn chmod_selection_sets_focused_file() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
