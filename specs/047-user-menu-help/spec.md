@@ -78,7 +78,7 @@ A user who wants to add custom actions to F2 can read a short built-in help snip
 - **Command contains no shell metacharacters**: prefer `Command::new(prog).arg(arg)` over `sh -c` to avoid shell injection entirely; only fall back to `sh -c` when the command string contains shell operators (`|`, `;`, `&&`, `$`, etc.).
 - **Highlighted entry is the `..` parent row**: `{path}` resolves to the parent directory's absolute path.
 - **Highlighted entry is a symlink**: `{path}` is the symlink path itself, not the resolved target.
-- **User runs the action on a path containing spaces, quotes, or backslashes**: the path MUST be shell-quoted (via the `shell-quote` crate or equivalent) so the shell sees it as a single token.
+- **User runs the action on a path containing spaces, quotes, or backslashes**: the path MUST be shell-quoted (via `shell_words::quote()` from the `shell-words` crate) so the shell sees it as a single token.
 - **Action command hangs indefinitely**: the UI must remain responsive; the command runs in a background task and can be interrupted (or the user can dismiss with Esc).
 - **Very long action label**: truncated with ellipsis to fit the menu column width.
 - **`menu.toml` is readable but the command binary does not exist**: the error is captured and shown in the status bar; no crash.
@@ -104,7 +104,7 @@ A user who wants to add custom actions to F2 can read a short built-in help snip
 
 #### F2 — User action menu (US2)
 
-- **FR-010**: Pressing F2 MUST open a modal menu overlay listing the actions defined in `~/.config/cargonaut/menu.toml`.
+- **FR-010**: Pressing F2 MUST open a modal menu overlay listing the actions defined in `~/.config/cargonaut/menu.toml`. The file MUST be loaded fresh on each F2 press so edits take effect without restarting the application.
 - **FR-011**: The menu overlay MUST be navigable with Up/Down arrow keys; pressing Enter on a highlighted item MUST execute that action's command.
 - **FR-012**: Pressing Esc while the F2 menu is open MUST close it without executing any action.
 - **FR-013**: When an action's command contains the literal placeholder `{path}`, the application MUST substitute the absolute path of the currently highlighted entry, shell-quoted, before execution.
@@ -113,8 +113,8 @@ A user who wants to add custom actions to F2 can read a short built-in help snip
 - **FR-016**: After an action completes, its exit code MUST be shown in the status bar: success (exit 0) shows a brief confirmation; non-zero exit shows the exit code and the first line of stderr.
 - **FR-017**: When `~/.config/cargonaut/menu.toml` does not exist or is empty, the F2 overlay MUST open showing a single informational placeholder row; it MUST NOT crash or show an error.
 - **FR-018**: When `menu.toml` exists but contains a TOML parse error, the F2 overlay MUST open and display the parse error (filename and line number); the application MUST continue without crashing.
-- **FR-019**: If an action defines an `only_if` field containing a shell expression, the action MUST be shown only when that expression exits 0; actions whose condition exits non-zero MUST be hidden.
-- **FR-020**: If an action defines a `key` field (single printable character), pressing that character while the F2 menu is open MUST execute that action immediately.
+- **FR-019**: If an action defines an `only_if` field containing a shell expression, the action MUST be shown only when that expression exits 0; actions whose condition exits non-zero MUST be hidden. Each condition is evaluated with a 200 ms timeout; a timed-out condition is treated as non-zero (hidden). Total menu-open time may be N×200 ms for N conditional actions in the worst case.
+- **FR-020**: If an action defines a `key` field (single printable ASCII character, 0x21–0x7E, excluding space), pressing that character while the F2 menu is open MUST execute that action immediately. If two or more actions share the same `key` character, the first one in the TOML file wins.
 - **FR-021**: F2 MUST be ignored (swallowed) while any other modal dialog is already open (confirm, input, tasks panel, hotlist, filter prompt, quick-cd). Menus MUST NOT stack.
 
 #### Config format (US3)
@@ -150,5 +150,5 @@ A user who wants to add custom actions to F2 can read a short built-in help snip
 - The `only_if` condition is evaluated synchronously at menu-open time using `std::process::Command` with a short timeout (≤200 ms); conditions that exceed the timeout are treated as false (hidden).
 - Actions that produce no output and exit 0 show a brief "Done" confirmation in the status bar for 2 seconds, then revert to the normal status line.
 - The F1 overlay uses a simple line-based scroll model (scroll offset in lines); no hyper-links or interactive elements are needed in this feature.
-- Mouse support for the F2 menu (clicking to select and activate items) is included as a natural extension of the existing mouse infrastructure; clicking outside the overlay closes it.
+- Mouse support for the F2 menu (clicking to select and activate items) is deferred to a follow-up feature (see ROADMAP.md); it is not in scope for this feature (T033 opens the tracking issue).
 - Keyboard navigation in the F2 menu uses the same pattern as the existing `TasksPanelDialog` (Up/Down to move, Enter to act, Esc to dismiss).
