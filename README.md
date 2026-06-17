@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Binary](https://img.shields.io/badge/binary-2.8%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-388%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-390%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 13 features since (031–047) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 388 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 14 features since (031–048) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 390 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.8 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -148,8 +148,14 @@ for the local filesystem:
   scrollable help overlay (13 sections, every keybinding) that replaces the old one-page static
   banner; Page Down / Up / Home / Esc navigate it. See `examples/menu.toml` for a starter
   config (Feature 047, closes #50).
+- **F2 mouse-click integration test** — adds the `mouse_with_dlg()` test helper that
+  returns `Option<ActiveDialog>` alongside the status string; adds T-MOUSE-5b
+  (`f2_mouse_click_opens_user_menu`) asserting `ActiveDialog::UserMenu` is set on a
+  left-click of the on-screen F2 button; strengthens the existing T-MOUSE-5 assertion to
+  use the same positive check. No production code changed — routing was already correct.
+  (Feature 048, closes #70).
 
-The full per-feature history (Features 001 → 047) lives in
+The full per-feature history (Features 001 → 048) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
