@@ -2526,8 +2526,7 @@ mod tests {
             height: 1,
         };
         let (l, r) = synced_views(&app);
-        let (_status, dlg) =
-            mouse_with_dlg(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
+        let (_status, dlg) = mouse_with_dlg(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
         assert!(
             matches!(dlg, Some(ActiveDialog::UserMenu { .. })),
             "left-click on F2 button must open UserMenu dialog; got {dlg:?}"
@@ -2712,12 +2711,12 @@ mod tests {
         };
         let (l, r) = synced_views(&app);
         // Button 2 (F2 = ShowUserMenu) ≈ 2nd of 10 slots (x 10..20).
-        // ShowUserMenu is now wired (Feature 047): it opens the user menu
-        // dialog without writing to the status line.
-        let status = mouse(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
+        // ShowUserMenu wired in Feature 047; mouse-click assertion added by
+        // Feature 048 (issue #70) — use mouse_with_dlg to assert dialog state.
+        let (_status, dlg) = mouse_with_dlg(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
         assert!(
-            !status.contains("not yet available"),
-            "F2 must not show deferred-action notice after Feature 047: {status:?}"
+            matches!(dlg, Some(ActiveDialog::UserMenu { .. })),
+            "F2 click must open UserMenu dialog (not the old deferred-action stub): {dlg:?}"
         );
     }
 
