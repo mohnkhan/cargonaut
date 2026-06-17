@@ -2466,6 +2466,42 @@ mod tests {
         status
     }
 
+    /// Drive `handle_mouse` with a live dialog slot; return `(status, active_dialog)`.
+    async fn mouse_with_dlg(
+        m: MouseEvent,
+        app: &mut App,
+        ui: &mut UiState,
+        l: &PaneView,
+        r: &PaneView,
+    ) -> (String, Option<ActiveDialog>) {
+        let mut status = String::new();
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut quit = false;
+        handle_mouse(
+            m,
+            app,
+            ui,
+            l,
+            r,
+            &mut status,
+            &mut mode,
+            &mut dlg,
+            &mut quit,
+        )
+        .await
+        .unwrap();
+        (status, dlg)
+    }
+
+    // T-MOUSE-5b (issue #70 / FR-001/FR-004): left-click on the on-screen F2
+    // button opens ActiveDialog::UserMenu — proving the mouse path is
+    // equivalent to the keyboard F2 path.
+    #[tokio::test]
+    async fn f2_mouse_click_opens_user_menu() {
+        assert!(false, "T002 red: stub — replace with real assertion in T003");
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]
