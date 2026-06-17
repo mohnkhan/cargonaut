@@ -23,7 +23,7 @@
 use cargonaut_vfs::{FileMode, VfsKind};
 use ratatui::style::{Color, Modifier, Style};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The name resolved when no theme / an unknown theme is requested.
 pub const DEFAULT_THEME_NAME: &str = "commander-dark";
@@ -192,11 +192,65 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Resolve a theme by name. Unknown names fall back to the default
-    /// ([`Theme::commander_dark`]) — never panics (FR-006). Matching is
-    /// case-insensitive and tolerant of `_`/`-` differences.
-    pub fn resolve(name: &str) -> Theme {
-        Theme::builtin(name).unwrap_or_default()
+    /// Resolve a theme by name. Returns `(theme, error_message)`.
+    ///
+    /// Resolution order: built-in → skin file in [`default_theme_dir`] →
+    /// commander-dark fallback with a non-`None` error string (FR-006).
+    pub fn resolve(name: &str) -> (Theme, Option<String>) {
+        Theme::resolve_from(name, &default_theme_dir())
+    }
+
+    /// Like [`Theme::resolve`] but uses `dir` as the skin search directory.
+    /// Useful in tests to avoid env-var manipulation.
+    pub fn resolve_from(name: &str, dir: &Path) -> (Theme, Option<String>) {
+        if let Some(t) = Theme::builtin(name) {
+            return (t, None);
+        }
+        match load_skin(name, dir) {
+            Ok(t) => (t, None),
+            Err(e) => (Theme::commander_dark(), Some(e)),
+        }
+    }
+
+    /// Build a `Theme` from a parsed [`SkinFile`], inheriting missing fields
+    /// from [`Theme::commander_dark`].
+    fn from_skin(name: &str, skin: SkinFile) -> Result<Theme, String> {
+        let mut t = Theme::commander_dark();
+        t.name = name.to_owned();
+        macro_rules! apply {
+            ($field:ident) => {
+                if let Some(cs) = skin.$field {
+                    t.$field = parse_color_spec(&cs)
+                        .map_err(|e| format!("field {}: {e}", stringify!($field)))?;
+                }
+            };
+        }
+        apply!(panel_bg);
+        apply!(panel_fg);
+        apply!(dir_fg);
+        apply!(exec_fg);
+        apply!(symlink_fg);
+        apply!(hidden_fg);
+        apply!(cursor_bg);
+        apply!(cursor_fg);
+        apply!(marked_fg);
+        apply!(border_focused);
+        apply!(border_unfocused);
+        apply!(menu_bg);
+        apply!(menu_fg);
+        apply!(menu_sel_bg);
+        apply!(menu_sel_fg);
+        apply!(fkey_num_bg);
+        apply!(fkey_num_fg);
+        apply!(fkey_label_bg);
+        apply!(fkey_label_fg);
+        apply!(status_bg);
+        apply!(status_fg);
+        apply!(dialog_bg);
+        apply!(dialog_fg);
+        apply!(dialog_sel_bg);
+        apply!(dialog_sel_fg);
+        Ok(t)
     }
 
     /// Look up a built-in theme by name, or `None` if unknown.
@@ -360,6 +414,65 @@ fn is_executable(mode: Option<&FileMode>) -> bool {
     mode.map(|m| m.bits & 0o111 != 0).unwrap_or(false)
 }
 
+/// Convert a [`ColorSpec`] from a skin file into a ratatui [`Color`] (FR-003).
+///
+/// - `Indexed(u8)` → `Color::Indexed`
+/// - `Named` starting with `#` → `Color::Rgb` (exactly `#RRGGBB`)
+/// - `Named` otherwise → case-insensitive match against the 17 named colors
+fn parse_color_spec(cs: &ColorSpec) -> Result<Color, String> {
+    match cs {
+        ColorSpec::Indexed(i) => Ok(Color::Indexed(*i)),
+        ColorSpec::Named(s) => {
+            if let Some(hex) = s.strip_prefix('#') {
+                if hex.len() != 6 {
+                    return Err(format!("invalid hex color {s:?}: expected #RRGGBB"));
+                }
+                let r = u8::from_str_radix(&hex[0..2], 16)
+                    .map_err(|_| format!("invalid hex color {s:?}"))?;
+                let g = u8::from_str_radix(&hex[2..4], 16)
+                    .map_err(|_| format!("invalid hex color {s:?}"))?;
+                let b = u8::from_str_radix(&hex[4..6], 16)
+                    .map_err(|_| format!("invalid hex color {s:?}"))?;
+                Ok(Color::Rgb(r, g, b))
+            } else {
+                match s.to_ascii_lowercase().as_str() {
+                    "reset" => Ok(Color::Reset),
+                    "black" => Ok(Color::Black),
+                    "red" => Ok(Color::Red),
+                    "green" => Ok(Color::Green),
+                    "yellow" => Ok(Color::Yellow),
+                    "blue" => Ok(Color::Blue),
+                    "magenta" => Ok(Color::Magenta),
+                    "cyan" => Ok(Color::Cyan),
+                    "gray" | "grey" => Ok(Color::Gray),
+                    "darkgray" | "darkgrey" | "dark_gray" | "dark_grey" => Ok(Color::DarkGray),
+                    "lightred" | "light_red" => Ok(Color::LightRed),
+                    "lightgreen" | "light_green" => Ok(Color::LightGreen),
+                    "lightyellow" | "light_yellow" => Ok(Color::LightYellow),
+                    "lightblue" | "light_blue" => Ok(Color::LightBlue),
+                    "lightmagenta" | "light_magenta" => Ok(Color::LightMagenta),
+                    "lightcyan" | "light_cyan" => Ok(Color::LightCyan),
+                    "white" => Ok(Color::White),
+                    _ => Err(format!("unknown color {s:?}")),
+                }
+            }
+        }
+    }
+}
+
+/// Load and parse a skin TOML file from `dir/<name>.toml` (FR-001, FR-005).
+///
+/// Returns an `Err` with a human-readable status message on any failure
+/// (file not found, invalid TOML, unknown field, bad color value).
+pub fn load_skin(name: &str, dir: &Path) -> Result<Theme, String> {
+    let path = dir.join(format!("{name}.toml"));
+    let content = std::fs::read_to_string(&path)
+        .map_err(|_e| format!("Unknown theme {name:?} — using commander-dark"))?;
+    let skin: SkinFile = toml::from_str(&content)
+        .map_err(|e| format!("Skin {name:?}: {e}"))?;
+    Theme::from_skin(name, skin).map_err(|e| format!("Skin {name:?}: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,17 +623,18 @@ dialog_sel_fg = "#f8f8f2"
     // T-THEME-2: unknown name falls back to default, never panics (FR-006).
     #[test]
     fn resolve_unknown_falls_back_to_default() {
-        let t = Theme::resolve("does-not-exist");
+        let (t, err) = Theme::resolve("does-not-exist");
         assert_eq!(t, Theme::default());
         assert_eq!(t.name, DEFAULT_THEME_NAME);
+        assert!(err.is_some(), "unknown name must produce an error message");
     }
 
     #[test]
     fn resolve_known_names_and_aliases() {
-        assert_eq!(Theme::resolve("commander-dark").name, "commander-dark");
-        assert_eq!(Theme::resolve("Commander_Dark").name, "commander-dark");
-        assert_eq!(Theme::resolve("monochrome").name, "monochrome");
-        assert_eq!(Theme::resolve("mono").name, "monochrome");
+        assert_eq!(Theme::resolve("commander-dark").0.name, "commander-dark");
+        assert_eq!(Theme::resolve("Commander_Dark").0.name, "commander-dark");
+        assert_eq!(Theme::resolve("monochrome").0.name, "monochrome");
+        assert_eq!(Theme::resolve("mono").0.name, "monochrome");
         assert!(Theme::builtin("nope").is_none());
     }
 
