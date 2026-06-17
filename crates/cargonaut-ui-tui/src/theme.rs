@@ -1,39 +1,131 @@
 // Copyright (c) 2024-2026 Mohiuddin Khan Inamdar.
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Typed color theme for the TUI (Feature 031, US1).
+//! Typed color theme for the TUI (Feature 031/046).
 //!
 //! Constitution §III requires theme variables to be *typed* — no
 //! hardcoded ANSI escapes in feature code. Every themable element maps to
 //! a [`ratatui::style::Color`]. Themes are resolved from a name
 //! ([`Theme::resolve`]); an unknown name falls back to the built-in
 //! default ([`Theme::default`]) so a bad `--theme`/config value never
-//! crashes the app (FR-006).
+//! crashes the app.
 //!
-//! Built-ins (FR-004):
+//! Built-ins:
 //! - [`Theme::commander_dark`] — the default; the signature blue-panel,
 //!   bright-directory, cyan-selection look of the reference manager.
-//! - [`Theme::monochrome`] — a 16-color-safe fallback that stays legible
-//!   on the most limited terminals (FR-007).
+//! - [`Theme::monochrome`] — a 16-color-safe fallback for limited terminals.
 //!
-//! ratatui's [`Color`] already supports `Indexed(u8)` (16/256) and
-//! `Rgb` (truecolor); the default theme uses only named colors so it
-//! renders on a 16-color terminal without degradation.
+//! User skins (Feature 046): TOML files at
+//! `$XDG_CONFIG_HOME/cargonaut/themes/<name>.toml` are loaded when the
+//! configured theme name is not a built-in. Load errors fall back to
+//! `commander-dark` with a one-line status message (FR-006).
 
 use cargonaut_vfs::{FileMode, VfsKind};
 use ratatui::style::{Color, Modifier, Style};
+use serde::Deserialize;
+use std::path::PathBuf;
 
 /// The name resolved when no theme / an unknown theme is requested.
 pub const DEFAULT_THEME_NAME: &str = "commander-dark";
+
+/// A color value as written in a TOML skin file.
+///
+/// Supports three formats (FR-003):
+/// - Named 16-color: `"Blue"`, `"LightGreen"`, `"Reset"` (case-insensitive)
+/// - RGB hex string: `"#RRGGBB"`
+/// - 256-color index: integer `0`–`255`
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ColorSpec {
+    /// Named 16-color string or `#RRGGBB` hex string.
+    Named(String),
+    /// 256-color palette index (0–255).
+    Indexed(u8),
+}
+
+/// The deserialized form of a TOML skin file.
+///
+/// Every field is `Option<ColorSpec>`: absent fields (`None`) inherit
+/// from [`Theme::commander_dark`] (FR-004). Unknown TOML keys are
+/// rejected by `deny_unknown_fields`, producing a descriptive error
+/// (FR-006, FR-008).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SkinFile {
+    /// Panel (listing) background.
+    pub panel_bg: Option<ColorSpec>,
+    /// Regular-file foreground.
+    pub panel_fg: Option<ColorSpec>,
+    /// Directory entries.
+    pub dir_fg: Option<ColorSpec>,
+    /// Executable files.
+    pub exec_fg: Option<ColorSpec>,
+    /// Symlink entries.
+    pub symlink_fg: Option<ColorSpec>,
+    /// Hidden (dotfile) entries.
+    pub hidden_fg: Option<ColorSpec>,
+    /// Cursor row background.
+    pub cursor_bg: Option<ColorSpec>,
+    /// Cursor row foreground.
+    pub cursor_fg: Option<ColorSpec>,
+    /// Tagged / marked entries.
+    pub marked_fg: Option<ColorSpec>,
+    /// Focused panel border.
+    pub border_focused: Option<ColorSpec>,
+    /// Unfocused panel border.
+    pub border_unfocused: Option<ColorSpec>,
+    /// Menu bar background.
+    pub menu_bg: Option<ColorSpec>,
+    /// Menu bar foreground.
+    pub menu_fg: Option<ColorSpec>,
+    /// Selected menu entry background.
+    pub menu_sel_bg: Option<ColorSpec>,
+    /// Selected menu entry foreground.
+    pub menu_sel_fg: Option<ColorSpec>,
+    /// F-key number chip background.
+    pub fkey_num_bg: Option<ColorSpec>,
+    /// F-key number chip foreground.
+    pub fkey_num_fg: Option<ColorSpec>,
+    /// F-key label background.
+    pub fkey_label_bg: Option<ColorSpec>,
+    /// F-key label foreground.
+    pub fkey_label_fg: Option<ColorSpec>,
+    /// Status bar background.
+    pub status_bg: Option<ColorSpec>,
+    /// Status bar foreground.
+    pub status_fg: Option<ColorSpec>,
+    /// Dialog background.
+    pub dialog_bg: Option<ColorSpec>,
+    /// Dialog foreground.
+    pub dialog_fg: Option<ColorSpec>,
+    /// Selected dialog element background.
+    pub dialog_sel_bg: Option<ColorSpec>,
+    /// Selected dialog element foreground.
+    pub dialog_sel_fg: Option<ColorSpec>,
+}
+
+/// Returns the directory where user skin files are stored (FR-001).
+///
+/// Resolution order: `$XDG_CONFIG_HOME/cargonaut/themes/` →
+/// `$HOME/.config/cargonaut/themes/` → `.config/cargonaut/themes/`.
+pub fn default_theme_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg).join("cargonaut/themes")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config/cargonaut/themes")
+    } else {
+        PathBuf::from(".config/cargonaut/themes")
+    }
+}
 
 /// A fully-specified color palette for every themable interface element.
 ///
 /// All fields are concrete [`Color`]s — no element falls back to the
 /// terminal default unintentionally (FR-002).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     /// The name this theme resolved from.
-    pub name: &'static str,
+    pub name: String,
 
     /// Panel (listing) background.
     pub panel_bg: Color,
@@ -126,9 +218,9 @@ impl Theme {
     /// panel background, bright-white directories, green executables, a
     /// cyan selection bar, yellow tags. Named colors only, so it renders
     /// correctly on a 16-color terminal (FR-004, FR-007).
-    pub const fn commander_dark() -> Theme {
+    pub fn commander_dark() -> Theme {
         Theme {
-            name: "commander-dark",
+            name: "commander-dark".to_owned(),
             panel_bg: Color::Blue,
             panel_fg: Color::Gray,
             dir_fg: Color::White,
@@ -160,9 +252,9 @@ impl Theme {
     /// A 16-color-safe fallback that stays legible on minimal terminals
     /// (FR-007). Uses only the base palette + bold; selection via a
     /// light-gray bar.
-    pub const fn monochrome() -> Theme {
+    pub fn monochrome() -> Theme {
         Theme {
-            name: "monochrome",
+            name: "monochrome".to_owned(),
             panel_bg: Color::Reset,
             panel_fg: Color::Reset,
             dir_fg: Color::White,
