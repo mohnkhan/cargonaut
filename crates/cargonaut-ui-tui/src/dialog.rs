@@ -1294,4 +1294,95 @@ mod tests {
         assert_eq!(d.handle_key(KeyCode::Down), None);
         assert_eq!(d.handle_key(KeyCode::Esc), Some(TasksAction::Close));
     }
+
+    // ---------- HelpOverlay (Feature 047 — T008/T009) ----------
+
+    #[test]
+    fn help_sections_is_non_empty() {
+        assert!(!HELP_SECTIONS.is_empty());
+    }
+
+    #[test]
+    fn help_sections_each_section_has_non_empty_title() {
+        for sec in HELP_SECTIONS {
+            assert!(!sec.title.is_empty(), "section title must not be empty");
+        }
+    }
+
+    #[test]
+    fn help_sections_each_section_has_at_least_one_row() {
+        for sec in HELP_SECTIONS {
+            assert!(!sec.rows.is_empty(), "section '{}' has no rows", sec.title);
+        }
+    }
+
+    #[test]
+    fn help_sections_every_row_has_non_empty_key_and_desc() {
+        for sec in HELP_SECTIONS {
+            for row in sec.rows {
+                assert!(!row.key.is_empty(), "row key empty in section '{}'", sec.title);
+                assert!(!row.desc.is_empty(), "row desc empty in section '{}'", sec.title);
+            }
+        }
+    }
+
+    #[test]
+    fn help_overlay_scroll_down_increments_offset() {
+        let total = HELP_SECTIONS.iter().map(|s| s.rows.len() + 1).sum::<usize>() as u16;
+        let visible = 10u16;
+        let mut ov = HelpOverlay::new(visible);
+        assert_eq!(ov.scroll_offset, 0);
+        ov.handle_key(KeyCode::Down);
+        if total > visible {
+            assert_eq!(ov.scroll_offset, 1);
+        }
+    }
+
+    #[test]
+    fn help_overlay_scroll_up_clamps_at_zero() {
+        let mut ov = HelpOverlay::new(10);
+        let action = ov.handle_key(KeyCode::Up);
+        assert_eq!(ov.scroll_offset, 0);
+        assert_eq!(action, HelpAction::Swallow);
+    }
+
+    #[test]
+    fn help_overlay_home_resets_to_zero() {
+        let mut ov = HelpOverlay::new(5);
+        ov.handle_key(KeyCode::Down);
+        ov.handle_key(KeyCode::Down);
+        ov.handle_key(KeyCode::Home);
+        assert_eq!(ov.scroll_offset, 0);
+    }
+
+    #[test]
+    fn help_overlay_f1_returns_close() {
+        let mut ov = HelpOverlay::new(10);
+        assert_eq!(ov.handle_key(KeyCode::F(1)), HelpAction::Close);
+    }
+
+    #[test]
+    fn help_overlay_esc_returns_close() {
+        let mut ov = HelpOverlay::new(10);
+        assert_eq!(ov.handle_key(KeyCode::Esc), HelpAction::Close);
+    }
+
+    #[test]
+    fn help_overlay_unrecognized_key_swallows() {
+        let mut ov = HelpOverlay::new(10);
+        assert_eq!(ov.handle_key(KeyCode::Char('j')), HelpAction::Swallow);
+        assert_eq!(ov.handle_key(KeyCode::Enter), HelpAction::Swallow);
+        assert_eq!(ov.handle_key(KeyCode::Char('q')), HelpAction::Swallow);
+    }
+
+    #[test]
+    fn help_overlay_page_down_increments_by_visible_height() {
+        let mut ov = HelpOverlay::new(10);
+        let before = ov.scroll_offset;
+        ov.handle_key(KeyCode::PageDown);
+        // If content is taller than visible, offset should move by visible_height
+        if ov.total_lines > ov.visible_height {
+            assert!(ov.scroll_offset > before);
+        }
+    }
 }

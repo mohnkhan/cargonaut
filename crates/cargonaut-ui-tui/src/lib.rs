@@ -3069,4 +3069,36 @@ mod tests {
         assert!(matches!(dlg, Some(ActiveDialog::TasksPanel { .. })));
         assert!(!app.job_views().is_empty());
     }
+
+    // Feature 047 SC-002: every action in keymap.toml must appear in HELP_SECTIONS.
+    #[test]
+    fn help_covers_all_keymap_bindings() {
+        #[derive(serde::Deserialize)]
+        struct Binding {
+            action: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct KeymapFile {
+            binding: Vec<Binding>,
+        }
+        let keymap_src = include_str!("../../../design/contracts/keymap.toml");
+        let kf: KeymapFile = toml::from_str(keymap_src).expect("keymap.toml must parse");
+        let all_text: String = crate::dialog::HELP_SECTIONS
+            .iter()
+            .flat_map(|s| s.rows.iter().map(|r| format!("{} {}", r.key, r.desc)))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        let mut missing = Vec::new();
+        for b in &kf.binding {
+            let action = b.action.to_lowercase();
+            if !all_text.contains(&action) {
+                missing.push(b.action.as_str());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "keymap actions missing from HELP_SECTIONS: {missing:?}"
+        );
+    }
 }
