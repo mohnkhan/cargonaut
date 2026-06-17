@@ -322,6 +322,17 @@ mode = "pane"
 key = "C-x l"
 action = "create-hard-link"
 
+# Recursive attribute operations (Feature 044, #65) — uppercase = recurse
+[[binding]]
+mode = "pane"
+key = "C-x C"
+action = "chmod-recursive"
+
+[[binding]]
+mode = "pane"
+key = "C-x O"
+action = "chown-recursive"
+
 [[binding]]
 mode = "pane"
 key = "<"
