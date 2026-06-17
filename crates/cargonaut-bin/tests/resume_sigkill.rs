@@ -24,22 +24,19 @@
 
 #![cfg(unix)]
 
+#[path = "common/mod.rs"]
+mod common;
+use common::*;
+
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 const FILE_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB — big enough to stay in flight
 const THROTTLE_MIBPS: &str = "24"; // ~2.7 s total copy under throttle
 const NAME: &str = "big.bin";
-
-fn enabled() -> bool {
-    std::env::var("CARGONAUT_PTY_TESTS")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-}
 
 fn sha256_file(p: &Path) -> [u8; 32] {
     let bytes = std::fs::read(p).expect("read file for hashing");
@@ -61,18 +58,23 @@ fn write_payload(p: &Path, len: u64) {
     f.flush().unwrap();
 }
 
-/// A spawned cargonaut process under a PTY: the child handle, a writer to
-/// its PTY master (for key injection), and a shared buffer the drain
-/// thread appends all output to.
-type PtyHandle = (
-    Box<dyn portable_pty::Child + Send + Sync>,
-    Box<dyn Write + Send>,
-    Arc<Mutex<Vec<u8>>>,
-);
+fn has_sidecar(dir: &Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(".cargonaut-transfer-") && name.ends_with(".json") {
+            return true;
+        }
+    }
+    false
+}
 
-/// Spawn cargonaut under a PTY. A background thread drains the PTY master
-/// so the child never blocks on a full output buffer.
-fn spawn(exe: &str, left: &Path, right: &Path) -> PtyHandle {
+/// Spawn cargonaut under a PTY with the transfer throttle env var set,
+/// so the copy stays in flight long enough to SIGKILL mid-transfer.
+fn spawn_throttled(exe: &str, left: &Path, right: &Path) -> PtyHandle {
     let pty = native_pty_system();
     let pair = pty
         .openpty(PtySize {
@@ -108,42 +110,6 @@ fn spawn(exe: &str, left: &Path, right: &Path) -> PtyHandle {
     (child, writer, sink)
 }
 
-fn output_contains(sink: &Arc<Mutex<Vec<u8>>>, needle: &str) -> bool {
-    let guard = sink.lock().unwrap();
-    String::from_utf8_lossy(&guard).contains(needle)
-}
-
-fn wait_until<F: Fn() -> bool>(deadline: Duration, cond: F) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < deadline {
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    false
-}
-
-fn sigkill(pid: u32) {
-    let _ = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status();
-}
-
-fn has_sidecar(dir: &Path) -> bool {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in rd.flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with(".cargonaut-transfer-") && name.ends_with(".json") {
-            return true;
-        }
-    }
-    false
-}
-
 #[test]
 fn resume_sigkill_smoke() {
     if !enabled() {
@@ -159,20 +125,20 @@ fn resume_sigkill_smoke() {
     write_payload(&src_file, FILE_BYTES);
 
     // ---- Run 1: start the copy, then SIGKILL it mid-transfer. ----
-    let (mut child1, mut w1, _out1) = spawn(exe, src_dir.path(), dst_dir.path());
+    let (mut child1, mut w1, _out1) = spawn_throttled(exe, src_dir.path(), dst_dir.path());
     let pid1 = child1.process_id().expect("run1 has a pid");
 
     // Let the TUI initialise, then F5 (copy focused entry) + confirm.
-    std::thread::sleep(Duration::from_millis(700));
+    std::thread::sleep(std::time::Duration::from_millis(700));
     w1.write_all(b"\x1b[15~").unwrap(); // F5
     w1.flush().unwrap();
-    std::thread::sleep(Duration::from_millis(400));
+    std::thread::sleep(std::time::Duration::from_millis(400));
     w1.write_all(b"y").unwrap(); // confirm copy
     w1.flush().unwrap();
 
     // Wait until a checkpoint sidecar exists and the partial destination is
     // well under way (≥16 MiB, < full) — proof the copy is in flight.
-    let in_flight = wait_until(Duration::from_secs(20), || {
+    let in_flight = wait_until(std::time::Duration::from_secs(20), || {
         let size = std::fs::metadata(&dst_file).map(|m| m.len()).unwrap_or(0);
         has_sidecar(dst_dir.path()) && (16 * 1024 * 1024..FILE_BYTES).contains(&size)
     });
@@ -191,10 +157,10 @@ fn resume_sigkill_smoke() {
     );
 
     // ---- Run 2: relaunch; the resume prompt should appear; press `r`. ----
-    let (mut child2, mut w2, out2) = spawn(exe, src_dir.path(), dst_dir.path());
+    let (mut child2, mut w2, out2) = spawn_throttled(exe, src_dir.path(), dst_dir.path());
     let pid2 = child2.process_id().expect("run2 has a pid");
 
-    let prompt_shown = wait_until(Duration::from_secs(10), || {
+    let prompt_shown = wait_until(std::time::Duration::from_secs(10), || {
         output_contains(&out2, "Resumable transfers")
     });
     assert!(
@@ -206,7 +172,7 @@ fn resume_sigkill_smoke() {
     w2.flush().unwrap();
 
     // Wait for the resumed copy to finish: full size + sidecar removed.
-    let completed = wait_until(Duration::from_secs(60), || {
+    let completed = wait_until(std::time::Duration::from_secs(60), || {
         let size = std::fs::metadata(&dst_file).map(|m| m.len()).unwrap_or(0);
         size == FILE_BYTES && !has_sidecar(dst_dir.path())
     });
