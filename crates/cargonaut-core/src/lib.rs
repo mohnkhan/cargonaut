@@ -318,6 +318,9 @@ pub enum Command {
     ChownRecursive(String),
     /// F10 — quit cargonaut.
     Quit,
+    /// Feature 049 — compare both panels' visible listings and additively
+    /// mark all differing entries (name-only, size-differ, or hash-differ).
+    CompareDirectories,
 }
 
 /// FR-022 — the global listing/preview view mode.
@@ -968,6 +971,7 @@ impl App {
             Chown(owner) => self.chown_selection(&owner).await,
             ChmodRecursive(spec) => self.chmod_recursive(&spec).await,
             ChownRecursive(owner) => self.chown_recursive(&owner).await,
+            CompareDirectories => Ok(vec![]),
             Quit => Ok(vec![Event::QuitRequested]),
         }
     }
