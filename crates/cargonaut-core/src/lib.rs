@@ -4188,4 +4188,76 @@ mod tests {
             "skipped transfer is offered again next launch"
         );
     }
+
+    // ===== Feature 049: crc32_partial tests (T005 red) =====
+
+    #[test]
+    fn crc32_partial_same_content_same_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::write(&a, b"hello world").unwrap();
+        std::fs::write(&b, b"hello world").unwrap();
+        let ha = crc32_partial(&a, 11);
+        let hb = crc32_partial(&b, 11);
+        assert!(ha.is_some());
+        assert_eq!(ha, hb, "identical content must produce identical hash");
+    }
+
+    #[test]
+    fn crc32_partial_different_content_different_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::write(&a, b"aaaaaaa").unwrap();
+        std::fs::write(&b, b"bbbbbbb").unwrap();
+        let ha = crc32_partial(&a, 7);
+        let hb = crc32_partial(&b, 7);
+        assert!(ha.is_some());
+        assert!(hb.is_some());
+        assert_ne!(ha, hb, "different content must produce different hash");
+    }
+
+    #[test]
+    fn crc32_partial_large_file_uses_head_only() {
+        // File is 5 MiB (> 4 MiB threshold) — we only read the first 512 KiB.
+        // Two 5 MiB files with identical first 512 KiB but different tails
+        // must produce the same hash.
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a_large");
+        let b = dir.path().join("b_large");
+        let five_mib = 5 * 1024 * 1024;
+        let head = vec![0xABu8; 512 * 1024];
+        let tail_a = vec![0x11u8; five_mib - 512 * 1024];
+        let tail_b = vec![0x22u8; five_mib - 512 * 1024];
+        let mut content_a = head.clone();
+        content_a.extend_from_slice(&tail_a);
+        let mut content_b = head.clone();
+        content_b.extend_from_slice(&tail_b);
+        std::fs::write(&a, &content_a).unwrap();
+        std::fs::write(&b, &content_b).unwrap();
+        let ha = crc32_partial(&a, five_mib as u64);
+        let hb = crc32_partial(&b, five_mib as u64);
+        assert!(ha.is_some());
+        assert_eq!(ha, hb, "large files: same head 512 KiB => same hash (head-only strategy)");
+    }
+
+    #[test]
+    fn crc32_partial_unreadable_path_returns_none() {
+        let nonexistent = std::path::Path::new("/tmp/cargonaut_test_nonexistent_xyz_f049");
+        assert_eq!(crc32_partial(nonexistent, 0), None);
+    }
+
+    #[test]
+    fn crc32_partial_empty_file_consistent_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("empty_a");
+        let b = dir.path().join("empty_b");
+        std::fs::write(&a, b"").unwrap();
+        std::fs::write(&b, b"").unwrap();
+        let ha = crc32_partial(&a, 0);
+        let hb = crc32_partial(&b, 0);
+        assert_eq!(ha, hb, "empty files must produce same hash");
+        assert!(ha.is_some(), "empty file should not return None");
+    }
 }
