@@ -2074,6 +2074,51 @@ impl App {
     }
 }
 
+/// Feature 050 — validate editor output against the original listing.
+///
+/// Returns the changed pairs `(original_name, proposed_name)` in listing
+/// order, filtering out unchanged entries.
+///
+/// Errors:
+/// - line count differs from originals
+/// - any proposed name is empty after trimming
+/// - any proposed name contains `/`
+/// - any two proposed names are identical (would cause a collision)
+pub fn validate_rename_proposals(
+    originals: &[String],
+    edited: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    if originals.len() != edited.len() {
+        return Err(format!(
+            "Line count mismatch: expected {}, got {}",
+            originals.len(),
+            edited.len()
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut pairs = Vec::new();
+    for (orig, proposed_raw) in originals.iter().zip(edited.iter()) {
+        let proposed = proposed_raw.trim().to_string();
+        if proposed.is_empty() {
+            return Err(format!("Proposed name for '{orig}' is empty"));
+        }
+        if proposed.contains('/') {
+            return Err(format!(
+                "Proposed name '{proposed}' contains '/' — cross-directory renames are not supported"
+            ));
+        }
+        if !seen.insert(proposed.clone()) {
+            return Err(format!(
+                "Duplicate proposed name '{proposed}' — each file must have a unique name"
+            ));
+        }
+        if proposed != *orig {
+            pairs.push((orig.clone(), proposed));
+        }
+    }
+    Ok(pairs)
+}
+
 fn pane_idx(id: PaneId) -> usize {
     match id {
         PaneId::Left => 0,
