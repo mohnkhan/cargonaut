@@ -3474,7 +3474,7 @@ mod tests {
 
     #[tokio::test]
     async fn queue_diff_two_tagged_files_sets_pending_external() {
-        let (mut app, _td_l, _td_r) = app_with_tagged_files("left.txt", "right.txt").await;
+        let (app, _td_l, _td_r) = app_with_tagged_files("left.txt", "right.txt").await;
         let mut ui = fresh_ui(
             Rect { x: 0, y: 1, width: 40, height: 22 },
             Rect { x: 40, y: 1, width: 40, height: 22 },
@@ -3507,7 +3507,7 @@ mod tests {
 
     #[tokio::test]
     async fn queue_diff_path_ordering_left_before_right() {
-        let (mut app, td_l, td_r) = app_with_tagged_files("lf.txt", "rf.txt").await;
+        let (app, td_l, td_r) = app_with_tagged_files("lf.txt", "rf.txt").await;
         let mut ui = fresh_ui(
             Rect { x: 0, y: 1, width: 40, height: 22 },
             Rect { x: 40, y: 1, width: 40, height: 22 },
