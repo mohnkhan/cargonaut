@@ -4870,6 +4870,113 @@ mod tests {
         }
     }
 
+    // ===== Feature 050 T014 (red): undo_last_operation — 7 failing tests =====
+
+    #[tokio::test]
+    async fn undo_none_log_returns_nothing_to_undo() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app.undo_last_operation().await.unwrap();
+        let has_nothing = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Nothing")));
+        assert!(has_nothing, "None log must return 'Nothing to undo'; got {events:?}");
+    }
+
+    #[tokio::test]
+    async fn undo_rename_restores_files_on_disk() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("original.txt"), b"x").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Rename original.txt → renamed.txt
+        app.apply_bulk_rename(vec![("original.txt".to_string(), "renamed.txt".to_string())])
+            .await
+            .unwrap();
+        assert!(td_l.path().join("renamed.txt").exists());
+        // Undo: should restore original.txt
+        app.undo_last_operation().await.unwrap();
+        assert!(
+            td_l.path().join("original.txt").exists(),
+            "undo must restore original.txt"
+        );
+        assert!(!td_l.path().join("renamed.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn undo_copy_deletes_destination_copies() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let copy_target = td_r.path().join("copy.txt");
+        std::fs::write(&copy_target, b"x").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let copy_path = VfsPath::parse(&format!("file://{}", copy_target.display())).unwrap();
+        app.undo_log = Some(UndoEntry::Copy {
+            copies: vec![copy_path],
+        });
+        app.undo_last_operation().await.unwrap();
+        assert!(
+            !copy_target.exists(),
+            "undo Copy must delete the destination file"
+        );
+    }
+
+    #[tokio::test]
+    async fn undo_delete_returns_cannot_be_undone() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.undo_log = Some(UndoEntry::Delete);
+        let events = app.undo_last_operation().await.unwrap();
+        let has_warning = events.iter().any(|e| matches!(e, Event::Status(s) if s.to_lowercase().contains("cannot") || s.to_lowercase().contains("undo")));
+        assert!(has_warning, "Delete undo must emit cannot-be-undone status; got {events:?}");
+    }
+
+    #[tokio::test]
+    async fn undo_second_call_returns_nothing_to_undo() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"x").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.apply_bulk_rename(vec![("a.txt".to_string(), "A.txt".to_string())])
+            .await
+            .unwrap();
+        app.undo_last_operation().await.unwrap();
+        // Second undo — log is now None
+        let events = app.undo_last_operation().await.unwrap();
+        let has_nothing = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Nothing")));
+        assert!(has_nothing, "second undo must return 'Nothing to undo'; got {events:?}");
+    }
+
+    #[tokio::test]
+    async fn undo_clears_selection_on_both_panes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"x").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        app.apply_bulk_rename(vec![("a.txt".to_string(), "A.txt".to_string())])
+            .await
+            .unwrap();
+        app.undo_last_operation().await.unwrap();
+        assert!(app.pane(PaneId::Left).selected.is_empty(), "undo must clear left selection");
+        assert!(app.pane(PaneId::Right).selected.is_empty(), "undo must clear right selection");
+    }
+
+    #[tokio::test]
+    async fn undo_move_scaffold_does_not_crash() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let dummy_src = VfsPath::parse(&format!("file://{}/src.txt", td_l.path().display())).unwrap();
+        let dummy_dst = VfsPath::parse(&format!("file://{}/dst.txt", td_l.path().display())).unwrap();
+        app.undo_log = Some(UndoEntry::Move {
+            pairs: vec![(dummy_dst, dummy_src)],
+        });
+        // Must return Ok (not panic) — Move undo is a scaffold in Feature 050
+        let result = app.undo_last_operation().await;
+        assert!(result.is_ok(), "Move undo scaffold must not panic; got {result:?}");
+    }
+
     // ===== Feature 050 T005 (red): validate_rename_proposals — 7 failing tests =====
 
     #[test]
