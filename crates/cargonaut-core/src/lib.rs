@@ -4260,4 +4260,142 @@ mod tests {
         assert_eq!(ha, hb, "empty files must produce same hash");
         assert!(ha.is_some(), "empty file should not return None");
     }
+
+    // ===== Feature 049: compare_directories tests (T006 red) =====
+
+    async fn make_compare_app(td_l: &TempDir, td_r: &TempDir) -> App {
+        make_app(td_l, td_r).await
+    }
+
+    #[tokio::test]
+    async fn compare_left_only_tags_left_pane_only() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("only_left.txt"), b"x").unwrap();
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        let events = app.dispatch(Command::CompareDirectories).await.unwrap();
+        let statuses: Vec<_> = events.iter().filter_map(|e| if let Event::Status(s) = e { Some(s.clone()) } else { None }).collect();
+        let has_status = statuses.iter().any(|s| s.contains("differ") || s.contains("differ") || s.contains("1"));
+        assert!(has_status, "expected status message; got: {statuses:?}");
+        let left_sel = &app.pane(PaneId::Left).selected;
+        assert!(!left_sel.is_empty(), "left-only file must be tagged in left pane");
+        let right_sel = &app.pane(PaneId::Right).selected;
+        assert!(right_sel.is_empty(), "right pane should have no tags for a left-only file");
+    }
+
+    #[tokio::test]
+    async fn compare_right_only_tags_right_pane_only() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_r.path().join("only_right.txt"), b"x").unwrap();
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        app.dispatch(Command::CompareDirectories).await.unwrap();
+        assert!(app.pane(PaneId::Left).selected.is_empty());
+        assert!(!app.pane(PaneId::Right).selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn compare_size_differ_tags_both_panes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("f.txt"), b"aaa").unwrap();
+        std::fs::write(td_r.path().join("f.txt"), b"bb").unwrap();
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        app.dispatch(Command::CompareDirectories).await.unwrap();
+        assert!(!app.pane(PaneId::Left).selected.is_empty(), "left pane must be tagged for size-differ");
+        assert!(!app.pane(PaneId::Right).selected.is_empty(), "right pane must be tagged for size-differ");
+    }
+
+    #[tokio::test]
+    async fn compare_hash_differ_tags_both_panes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Same size (3 bytes) but different content → hash-differ
+        std::fs::write(td_l.path().join("f.txt"), b"aaa").unwrap();
+        std::fs::write(td_r.path().join("f.txt"), b"bbb").unwrap();
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        app.dispatch(Command::CompareDirectories).await.unwrap();
+        assert!(!app.pane(PaneId::Left).selected.is_empty(), "left pane must be tagged for hash-differ");
+        assert!(!app.pane(PaneId::Right).selected.is_empty(), "right pane must be tagged for hash-differ");
+    }
+
+    #[tokio::test]
+    async fn compare_identical_entries_not_tagged() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("same.txt"), b"identical content").unwrap();
+        std::fs::write(td_r.path().join("same.txt"), b"identical content").unwrap();
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        app.dispatch(Command::CompareDirectories).await.unwrap();
+        assert!(app.pane(PaneId::Left).selected.is_empty(), "identical file must NOT be tagged in left");
+        assert!(app.pane(PaneId::Right).selected.is_empty(), "identical file must NOT be tagged in right");
+    }
+
+    #[tokio::test]
+    async fn compare_same_path_both_panels_returns_status_no_tags() {
+        let td = TempDir::new().unwrap();
+        // Both panes pointed at same directory
+        let mut app = App::new(
+            cargonaut_config::Config::default(),
+            td.path().to_str().unwrap(),
+            td.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        let events = app.dispatch(Command::CompareDirectories).await.unwrap();
+        let has_same_dir_status = events.iter().any(|e| {
+            if let Event::Status(s) = e { s.contains("same directory") || s.contains("same path") || s.contains("mark nothing") } else { false }
+        });
+        assert!(has_same_dir_status, "must return a status warning when both panes are the same dir; got {events:?}");
+        assert!(app.pane(PaneId::Left).selected.is_empty());
+        assert!(app.pane(PaneId::Right).selected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn compare_additive_does_not_clear_existing_selection() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"x").unwrap();
+        std::fs::write(td_l.path().join("only.txt"), b"y").unwrap();
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        // Manually tag entry 0 (the first visible entry) in left pane
+        let first_idx = {
+            let p = app.pane(PaneId::Left);
+            p.visible_indices().into_iter().next().unwrap_or(0)
+        };
+        // Use SelectionToggle to pre-tag it
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        assert!(!app.pane(PaneId::Left).selected.is_empty(), "pre-condition: left pane has a tagged entry");
+        let pre_selected = app.pane(PaneId::Left).selected.clone();
+        // Now compare — should be additive, not clear existing tags
+        app.dispatch(Command::CompareDirectories).await.unwrap();
+        for idx in &pre_selected {
+            assert!(
+                app.pane(PaneId::Left).selected.contains(idx),
+                "pre-existing tag at index {first_idx} was cleared by compare — must be additive"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn compare_large_dir_emits_status_comparing_first() {
+        // >1000 visible entries should emit Status("Comparing…") as the first event.
+        // We use a small threshold test — the impl must check visible count, not file count.
+        // For efficiency in tests, we just verify the dispatch returns Ok (full 1000-file bench
+        // is in T010). This test checks the event ordering contract.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Create 1001 files in left only to ensure >1000 visible entries total
+        for i in 0..=1000usize {
+            std::fs::write(td_l.path().join(format!("f{i:04}.txt")), b"x").unwrap();
+        }
+        let mut app = make_compare_app(&td_l, &td_r).await;
+        let events = app.dispatch(Command::CompareDirectories).await.unwrap();
+        // First event should be Status("Comparing…")
+        if let Some(Event::Status(s)) = events.first() {
+            assert!(s.contains("Comparing"), "first event for >1000 entries must be Status(\"Comparing…\"); got {s:?}");
+        } else {
+            panic!("expected first event to be Status(\"Comparing…\") for >1000 visible entries; got {:?}", events.first());
+        }
+    }
 }
