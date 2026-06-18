@@ -3639,4 +3639,109 @@ mod tests {
             "status must mention empty tool string; got {status:?}"
         );
     }
+
+    // ===== Feature 050 T010 (red): queue_bulk_rename — 4 failing tests =====
+
+    #[tokio::test]
+    async fn queue_bulk_rename_no_tagged_entries_shows_status() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let app = app_with(&td_l, &td_r).await;
+        // No entries tagged
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        assert!(
+            ui.pending_external.is_none(),
+            "no tagged entries must not set pending_external"
+        );
+        assert!(
+            status.to_lowercase().contains("tag"),
+            "status must mention tagging; got {status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bulk_rename_tagged_entries_sets_pending_external() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag the first file
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        assert!(
+            ui.pending_external.is_some(),
+            "tagged entries must set pending_external; status={status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bulk_rename_kind_is_bulk_rename() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        let ext = ui.pending_external.as_ref().expect("must be set");
+        assert!(
+            matches!(ext.kind, PendingExternalKind::BulkRename { .. }),
+            "kind must be BulkRename; got {:?}", ext.kind
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bulk_rename_original_names_match_tagged_basenames() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("alpha.txt"), b"1").unwrap();
+        std::fs::write(td_l.path().join("beta.txt"), b"2").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag both files
+        app.dispatch(cargonaut_core::Command::SelectionToggle).await.unwrap();
+        app.dispatch(cargonaut_core::Command::CursorDown).await.unwrap();
+        app.dispatch(cargonaut_core::Command::SelectionToggle).await.unwrap();
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        let ext = ui.pending_external.as_ref().expect("must be set");
+        if let PendingExternalKind::BulkRename { original_names, .. } = &ext.kind {
+            assert!(
+                original_names.contains(&"alpha.txt".to_string()),
+                "original_names must contain alpha.txt; got {original_names:?}"
+            );
+            assert!(
+                original_names.contains(&"beta.txt".to_string()),
+                "original_names must contain beta.txt; got {original_names:?}"
+            );
+        } else {
+            panic!("kind must be BulkRename");
+        }
+    }
 }
