@@ -321,6 +321,11 @@ pub enum Command {
     /// Feature 049 — compare both panels' visible listings and additively
     /// mark all differing entries (name-only, size-differ, or hash-differ).
     CompareDirectories,
+    /// Feature 050 — apply the validated rename pairs produced by the editor
+    /// temp-file round-trip (called by the TUI after editor exits).
+    BulkRenameApply(Vec<(String, String)>),
+    /// Feature 050 — undo the most recent reversible file operation.
+    UndoLastOp,
 }
 
 /// FR-022 — the global listing/preview view mode.
@@ -517,6 +522,38 @@ pub enum AppError {
 }
 
 // =====================================================================
+// UndoEntry
+// =====================================================================
+
+/// Feature 050 — a single reversible file-operation recorded by the App.
+/// The undo log holds at most one entry; it is overwritten on each new
+/// operation that supports undo. Session-scoped and non-persistent.
+#[derive(Debug, Clone)]
+pub enum UndoEntry {
+    /// One or more `std::fs::rename` calls: `(old_name, new_name)` pairs.
+    /// The undo reverses each pair (`new_name → old_name`), all in the
+    /// same directory as the active pane at the time of the rename.
+    Rename {
+        /// Directory the renames live in (absolute `file://` path).
+        dir: VfsPath,
+        /// `(new_name, old_name)` — already reversed so undo just iterates.
+        pairs: Vec<(String, String)>,
+    },
+    /// Copies submitted to the transfer engine: destination paths to delete.
+    Copy {
+        /// Absolute `file://` paths of the copies to remove on undo.
+        copies: Vec<VfsPath>,
+    },
+    /// Move operations (scaffold — not yet populated in Feature 050).
+    Move {
+        /// `(destination, source)` — reversed pairs for undo.
+        pairs: Vec<(VfsPath, VfsPath)>,
+    },
+    /// Delete operations — cannot be undone.
+    Delete,
+}
+
+// =====================================================================
 // App
 // =====================================================================
 
@@ -547,6 +584,9 @@ pub struct App {
     /// Feature 042 — where the hotlist is persisted (resolved at construction;
     /// overridable in tests).
     hotlist_path: std::path::PathBuf,
+    /// Feature 050 — the most recent reversible file operation, or `None`
+    /// if nothing is undoable (session start, after undo, or after Delete).
+    undo_log: Option<UndoEntry>,
 }
 
 impl App {
@@ -616,6 +656,7 @@ impl App {
             view_mode: ViewMode::Full,
             hotlist,
             hotlist_path,
+            undo_log: None,
         })
     }
 
@@ -972,6 +1013,8 @@ impl App {
             ChmodRecursive(spec) => self.chmod_recursive(&spec).await,
             ChownRecursive(owner) => self.chown_recursive(&owner).await,
             CompareDirectories => self.compare_directories(),
+            BulkRenameApply(_) => Ok(vec![]),
+            UndoLastOp => Ok(vec![]),
             Quit => Ok(vec![Event::QuitRequested]),
         }
     }

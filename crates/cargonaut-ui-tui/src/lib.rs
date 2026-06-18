@@ -181,7 +181,22 @@ enum InputKind {
     ChownRecursive,
 }
 
-/// An external program to run (F3/F4), suspending the TUI around it.
+/// Feature 050 — discriminates what the TUI should do after the external
+/// program exits.
+#[derive(Debug, Clone)]
+enum PendingExternalKind {
+    /// F3/F4: just refresh the active pane and show a "returned from" status.
+    FileOpen,
+    /// C-x r: read back the temp file, validate edits, apply renames.
+    BulkRename {
+        /// Path to the temp file that was written and opened in `$EDITOR`.
+        temp_path: std::path::PathBuf,
+        /// Basenames in listing order, written one-per-line to the temp file.
+        original_names: Vec<String>,
+    },
+}
+
+/// An external program to run (F3/F4 or bulk-rename), suspending the TUI around it.
 #[derive(Debug, Clone)]
 struct PendingExternal {
     /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks, or split from diff tool string).
@@ -189,6 +204,8 @@ struct PendingExternal {
     /// Additional arguments passed after `program`. For F3/F4 this is `vec![path]`;
     /// for diff (US2) this is `argv[1..] + [left_path, right_path]`.
     args: Vec<String>,
+    /// What to do after the program exits.
+    kind: PendingExternalKind,
 }
 
 async fn run_loop<B: ratatui::backend::Backend>(
@@ -350,15 +367,27 @@ async fn run_loop<B: ratatui::backend::Backend>(
             }
         }
 
-        // US5 (FR-030/031): an F3/F4 request suspends the TUI, runs the
-        // external pager/editor, then restores the terminal + refreshes.
+        // US5 (FR-030/031): an F3/F4 or bulk-rename request suspends the TUI,
+        // runs the external program, then restores the terminal and dispatches
+        // post-action handling based on `ext.kind`.
         if let Some(ext) = ui.pending_external.take() {
             run_external(term, &ext, ui.mouse_enabled)?;
-            let _ = app
-                .refresh_active_pane()
-                .await
-                .map_err(|e| Error::Other(e.to_string()))?;
-            status = format!("Returned from {}", ext.program);
+            match ext.kind {
+                PendingExternalKind::FileOpen => {
+                    let _ = app
+                        .refresh_active_pane()
+                        .await
+                        .map_err(|e| Error::Other(e.to_string()))?;
+                    status = format!("Returned from {}", ext.program);
+                }
+                PendingExternalKind::BulkRename {
+                    ref temp_path,
+                    ref original_names,
+                } => {
+                    apply_bulk_rename_from_temp(app, temp_path, original_names, &mut status)
+                        .await;
+                }
+            }
         }
     }
 }
@@ -1178,6 +1207,7 @@ fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: Extern
     ui.pending_external = Some(PendingExternal {
         program,
         args: vec![local],
+        kind: PendingExternalKind::FileOpen,
     });
 }
 
@@ -1262,7 +1292,23 @@ fn queue_diff(app: &App, ui: &mut UiState, status: &mut String, tool_str: Option
     ui.pending_external = Some(PendingExternal {
         program,
         args: argv,
+        kind: PendingExternalKind::FileOpen,
     });
+}
+
+/// Feature 050 US1 — after `$EDITOR` exits in bulk-rename mode: read the temp
+/// file, validate edits, clean up the temp file unconditionally (SC-005/FR-009),
+/// then dispatch renames into the App. Fully implemented in T013.
+async fn apply_bulk_rename_from_temp(
+    _app: &mut App,
+    temp_path: &std::path::Path,
+    _original_names: &[String],
+    status: &mut String,
+) {
+    // SC-005 / FR-009: delete unconditionally on both success and failure paths.
+    let _ = std::fs::remove_file(temp_path);
+    // T013 will implement the full read → validate → apply flow.
+    *status = "Bulk rename: not yet implemented".into();
 }
 
 /// Suspend the TUI, run an external program, then restore the terminal
