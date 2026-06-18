@@ -1028,6 +1028,11 @@ async fn dispatch_ui_command(
             queue_external(app, ui, status, ExternalTool::Editor);
             return Ok(());
         }
+        // Feature 049 US2 (FR-005 through FR-008): C-x C-d diff two tagged files.
+        Command::DiffTwoTaggedFiles => {
+            queue_diff(app, ui, status, app.config().diff.tool.as_deref());
+            return Ok(());
+        }
         // Feature 047 US2 (FR-006): F2 opens the user action menu.
         // Guard: if another dialog is already open, ignore.
         Command::ShowUserMenu => {
