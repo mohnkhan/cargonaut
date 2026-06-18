@@ -1176,6 +1176,90 @@ fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: Extern
     });
 }
 
+/// Feature 049 US2 — validate tagged-file selection and queue the configured
+/// diff tool as a `PendingExternal` (FR-005 through FR-008).
+///
+/// Collects all tagged files from both panes (files and symlinks only, not dirs).
+/// Requires exactly 2 total. Splits `tool_str` on whitespace using `shell_words`
+/// to build `argv`; appends left-pane path as `args[-2]` and right-pane path as
+/// `args[-1]`.
+fn queue_diff(app: &App, ui: &mut UiState, status: &mut String, tool_str: Option<&str>) {
+    // Validate tool config first (FR-006).
+    let Some(tool_str) = tool_str else {
+        *status = "No diff tool configured — set [diff] tool = \"<program>\" in config".into();
+        return;
+    };
+    let tool_str = tool_str.trim();
+    if tool_str.is_empty() {
+        *status = "Diff tool string is empty — set [diff] tool = \"<program>\" in config".into();
+        return;
+    }
+
+    // Collect tagged file paths per pane (left then right; files/symlinks only).
+    let mut tagged: Vec<(PaneId, String)> = Vec::new();
+    for id in [PaneId::Left, PaneId::Right] {
+        let p = app.pane(id);
+        for &idx in &p.selected {
+            if let Some(e) = p.listing.entries.get(idx) {
+                let is_file = matches!(
+                    e.meta.kind,
+                    cargonaut_vfs::VfsKind::File | cargonaut_vfs::VfsKind::Symlink { .. }
+                );
+                if !is_file {
+                    continue;
+                }
+                let disp = p.cwd.join(e.name.as_str()).display();
+                let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+                tagged.push((id, local));
+            }
+        }
+    }
+
+    // FR-007: exactly 2 tagged files required.
+    if tagged.len() != 2 {
+        *status = format!(
+            "Diff requires exactly 2 tagged files ({} tagged)",
+            tagged.len()
+        );
+        return;
+    }
+
+    // Split tool string into argv (shell_words::split handles quoted tokens).
+    let mut argv = match shell_words::split(tool_str) {
+        Ok(v) if !v.is_empty() => v,
+        Ok(_) => {
+            *status = "Diff tool string is empty after parsing".into();
+            return;
+        }
+        Err(e) => {
+            *status = format!("Diff tool parse error: {e}");
+            return;
+        }
+    };
+
+    // Append left-pane path then right-pane path (contract: args[-2]=left, args[-1]=right).
+    let (_, left_path) = tagged
+        .iter()
+        .find(|(id, _)| *id == PaneId::Left)
+        .cloned()
+        .unwrap_or_else(|| tagged[0].clone());
+    let (_, right_path) = tagged
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == PaneId::Right)
+        .cloned()
+        .unwrap_or_else(|| tagged[1].clone());
+
+    let program = argv.remove(0);
+    argv.push(left_path);
+    argv.push(right_path);
+
+    ui.pending_external = Some(PendingExternal {
+        program,
+        args: argv,
+    });
+}
+
 /// Suspend the TUI, run an external program, then restore the terminal
 /// (FR-030/031/FR-008). Uses `Command::new(program).args(args)` — no shell.
 fn run_external<B: ratatui::backend::Backend>(
