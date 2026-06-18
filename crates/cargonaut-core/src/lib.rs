@@ -4638,6 +4638,144 @@ mod tests {
         }
     }
 
+    // ===== Feature 050 T007 (red): apply_bulk_rename — 7 failing tests =====
+
+    #[tokio::test]
+    async fn apply_bulk_rename_empty_pairs_returns_no_changes() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app.apply_bulk_rename(vec![]).await.unwrap();
+        let has_no_changes = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("No changes")));
+        assert!(has_no_changes, "empty pairs must emit 'No changes' status; got {events:?}");
+    }
+
+    #[tokio::test]
+    async fn apply_bulk_rename_two_of_three_renamed_on_disk() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        std::fs::write(td_l.path().join("b.txt"), b"2").unwrap();
+        std::fs::write(td_l.path().join("c.txt"), b"3").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let pairs = vec![
+            ("a.txt".to_string(), "A.txt".to_string()),
+            ("c.txt".to_string(), "C.txt".to_string()),
+        ];
+        app.apply_bulk_rename(pairs).await.unwrap();
+        assert!(td_l.path().join("A.txt").exists(), "a.txt must be renamed to A.txt");
+        assert!(td_l.path().join("b.txt").exists(), "b.txt must be unchanged");
+        assert!(td_l.path().join("C.txt").exists(), "c.txt must be renamed to C.txt");
+        assert!(!td_l.path().join("a.txt").exists());
+        assert!(!td_l.path().join("c.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn apply_bulk_rename_collision_no_renames_applied() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        std::fs::write(td_l.path().join("existing.txt"), b"x").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Try to rename a.txt → existing.txt (collision)
+        let pairs = vec![("a.txt".to_string(), "existing.txt".to_string())];
+        let result = app.apply_bulk_rename(pairs).await;
+        // Must fail and a.txt must still exist
+        assert!(result.is_err() || {
+            // OR: returns Ok but with error status, and a.txt unchanged
+            td_l.path().join("a.txt").exists()
+        }, "collision must not rename a.txt");
+        assert!(td_l.path().join("a.txt").exists(), "a.txt must be unchanged on collision");
+    }
+
+    #[tokio::test]
+    async fn apply_bulk_rename_returns_pane_updated_and_status_events() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        std::fs::write(td_l.path().join("b.txt"), b"2").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let pairs = vec![
+            ("a.txt".to_string(), "A.txt".to_string()),
+            ("b.txt".to_string(), "B.txt".to_string()),
+        ];
+        let events = app.apply_bulk_rename(pairs).await.unwrap();
+        let has_pane = events.iter().any(|e| matches!(e, Event::PaneUpdated(_)));
+        let has_status = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("2")));
+        assert!(has_pane, "must emit PaneUpdated; events={events:?}");
+        assert!(has_status, "must emit Status with count 2; events={events:?}");
+    }
+
+    #[tokio::test]
+    async fn apply_bulk_rename_records_undo_entry_reversed() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let pairs = vec![("a.txt".to_string(), "A.txt".to_string())];
+        app.apply_bulk_rename(pairs).await.unwrap();
+        let undo = app.undo_log.as_ref().expect("undo_log must be set after rename");
+        match undo {
+            UndoEntry::Rename { pairs, .. } => {
+                assert_eq!(pairs.len(), 1);
+                assert_eq!(pairs[0], ("A.txt".to_string(), "a.txt".to_string()),
+                    "undo pairs must be reversed (new→old)");
+            }
+            other => panic!("expected UndoEntry::Rename, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_bulk_rename_partial_failure_records_partial_undo() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Only a.txt exists; b.txt does not (collision check passes since B.txt doesn't exist,
+        // but rename will fail because b.txt source doesn't exist).
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let pairs = vec![
+            ("a.txt".to_string(), "A.txt".to_string()),
+            ("b.txt".to_string(), "B.txt".to_string()),
+        ];
+        let _ = app.apply_bulk_rename(pairs).await;
+        // a.txt was renamed; undo log should contain at least the completed rename
+        if td_l.path().join("A.txt").exists() {
+            let undo = app.undo_log.as_ref().expect("undo_log must be set after partial rename");
+            match undo {
+                UndoEntry::Rename { pairs, .. } => {
+                    assert!(pairs.iter().any(|(new, old)| new == "A.txt" && old == "a.txt"),
+                        "partial undo must include completed rename A.txt→a.txt; pairs={pairs:?}");
+                }
+                other => panic!("expected UndoEntry::Rename, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_bulk_rename_second_call_overwrites_undo_log() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        std::fs::write(td_l.path().join("b.txt"), b"2").unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.apply_bulk_rename(vec![("a.txt".to_string(), "A.txt".to_string())])
+            .await
+            .unwrap();
+        // Second rename — must refresh listing first
+        let _ = app.refresh_active_pane().await;
+        app.apply_bulk_rename(vec![("b.txt".to_string(), "B.txt".to_string())])
+            .await
+            .unwrap();
+        let undo = app.undo_log.as_ref().expect("undo_log must be set");
+        match undo {
+            UndoEntry::Rename { pairs, .. } => {
+                assert_eq!(pairs.len(), 1);
+                assert_eq!(pairs[0].0, "B.txt", "second call must overwrite undo log");
+            }
+            other => panic!("expected UndoEntry::Rename, got {other:?}"),
+        }
+    }
+
     // ===== Feature 050 T005 (red): validate_rename_proposals — 7 failing tests =====
 
     #[test]
