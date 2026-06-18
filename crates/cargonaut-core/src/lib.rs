@@ -2057,6 +2057,31 @@ fn job_status_from(raw: TransferState, paused: bool) -> JobStatus {
 }
 
 // =====================================================================
+// Feature 049: Compare Directories helpers
+// =====================================================================
+
+/// CRC32 hash of a file's content for directory comparison (FR-002 / R-001 / R-002).
+///
+/// Strategy: for files ≤ 4 MiB, hashes the full content. For larger files,
+/// hashes only the first 512 KiB (head-only), trading accuracy for speed.
+/// Returns `None` on any I/O error so the caller can classify as "unreadable".
+fn crc32_partial(path: &std::path::Path, size: u64) -> Option<u32> {
+    const FULL_THRESHOLD: u64 = 4 * 1024 * 1024;
+    const HEAD_BYTES: usize = 512 * 1024;
+
+    if size <= FULL_THRESHOLD {
+        let data = std::fs::read(path).ok()?;
+        Some(crc32fast::hash(&data))
+    } else {
+        use std::io::Read;
+        let mut f = std::fs::File::open(path).ok()?;
+        let mut buf = vec![0u8; HEAD_BYTES];
+        let n = f.read(&mut buf).ok()?;
+        Some(crc32fast::hash(&buf[..n]))
+    }
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
