@@ -187,6 +187,15 @@ pub enum Command {
     PreviewSearchNext,
     /// Previous match in the previewer (`N`).
     PreviewSearchPrev,
+    // Feature 051 — built-in file viewer (FR-031)
+    /// Open the goto prompt in the file viewer (`g`).
+    ViewerGoto,
+    /// Jump to the last line or hex row in the file viewer (`G`).
+    ViewerEnd,
+    /// Toggle word-wrap in text-mode viewer (`w`).
+    ViewerWrap,
+    /// Close the file viewer (`q`).
+    ViewerQuit,
     // FR-210 fuzzy filter
     /// Open the fuzzy filter prompt (`<`).
     OpenFuzzyFilter,

@@ -19,6 +19,7 @@ toml = { workspace = true }
 serde = { workspace = true }
 shell-words = { workspace = true }
 thiserror = { workspace = true }
+strip-ansi-escapes = "0.2"
 
 [dev-dependencies]
 smol_str = { workspace = true }
@@ -42,5 +43,10 @@ test = false
 
 [[bench]]
 name = "help_overlay_render_time"
+harness = false
+test = false
+
+[[bench]]
+name = "viewer_open"
 harness = false
 test = false

@@ -1102,27 +1102,55 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
         ],
     },
     HelpSection {
-        title: "Preview",
+        title: "File Viewer",
         rows: &[
             HelpRow {
                 key: "C-x X",
-                desc: "Toggle hex view in previewer (toggle-hex-view)",
+                desc: "Toggle hex/text mode (toggle-hex-view)",
             },
             HelpRow {
                 key: "/",
-                desc: "Search forward in preview (preview-search-forward)",
+                desc: "Search forward (preview-search-forward)",
             },
             HelpRow {
                 key: "?",
-                desc: "Search backward in preview (preview-search-backward)",
+                desc: "Search backward (preview-search-backward)",
             },
             HelpRow {
                 key: "n",
-                desc: "Jump to next search match in preview (preview-search-next)",
+                desc: "Next search match (preview-search-next)",
             },
             HelpRow {
                 key: "N",
-                desc: "Jump to previous search match in preview (preview-search-prev)",
+                desc: "Previous search match (preview-search-prev)",
+            },
+            HelpRow {
+                key: "g",
+                desc: "Go to line or byte offset (viewer-goto)",
+            },
+            HelpRow {
+                key: "G",
+                desc: "Jump to last line or hex row (viewer-end)",
+            },
+            HelpRow {
+                key: "w",
+                desc: "Toggle word-wrap in text mode (viewer-wrap)",
+            },
+            HelpRow {
+                key: "q / Esc",
+                desc: "Close the file viewer (viewer-quit)",
+            },
+            HelpRow {
+                key: "Up / Down",
+                desc: "Scroll one line / hex row",
+            },
+            HelpRow {
+                key: "PgUp / PgDn",
+                desc: "Scroll one page",
+            },
+            HelpRow {
+                key: "Home / End",
+                desc: "Jump to first / last line",
             },
         ],
     },
@@ -1485,6 +1513,823 @@ impl UserMenuDialog {
 
 // Re-export of crossterm's KeyCode so callers don't need a second use.
 pub use crossterm::event::KeyCode;
+
+// =====================================================================
+// Built-in File Viewer (Feature 051 — FR-001..FR-033)
+// =====================================================================
+
+/// Byte threshold above which the viewer streams from disk instead of pre-loading.
+pub const STREAMING_THRESHOLD_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+/// Maximum number of ANSI-stripped lines kept in the streaming window at one time.
+pub const WINDOW_MAX_LINES: usize = 2000;
+/// Chunk index interval: one `(line_number, byte_offset)` entry every N lines.
+pub const CHUNK_INDEX_INTERVAL: usize = 1000;
+/// Bytes per row in hex mode.
+pub const HEX_ROW_WIDTH: usize = 16;
+/// How many bytes to read when detecting binary vs. UTF-8 content.
+pub const BINARY_DETECT_BYTES: usize = 4096;
+
+/// Display mode for the built-in file viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    /// UTF-8 text with line numbers and optional word-wrap.
+    Text,
+    /// Classic 16-byte-per-row hex + ASCII dump.
+    Hex,
+}
+
+/// Direction of a viewer search operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchDirection {
+    /// `/` — search downward from the current position.
+    Forward,
+    /// `?` — search upward from the current position.
+    Backward,
+}
+
+/// Active search state inside the file viewer. `None` when no search is running.
+#[derive(Debug, Clone)]
+pub struct SearchState {
+    /// Literal search pattern (case-sensitive, no regex — FR-019).
+    pub pattern: String,
+    /// Direction of the most recent search action.
+    pub direction: SearchDirection,
+    /// Line index of the last found match within the current buffer window.
+    pub last_match_line: Option<usize>,
+    /// Byte offset within the matched line where the pattern starts.
+    pub last_match_col: Option<usize>,
+}
+
+/// Inline prompt shown at the bottom of the viewer overlay.
+/// `None` when the viewer is in normal navigation mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewerPrompt {
+    /// Active search input (`/` or `?`).
+    Search {
+        /// Characters typed so far.
+        buffer: String,
+        /// Direction this search will run.
+        direction: SearchDirection,
+    },
+    /// Active goto input (`g`).
+    Goto {
+        /// Decimal digits or `0x`-prefixed hex typed so far.
+        buffer: String,
+    },
+}
+
+/// Buffer holding the file content accessible to the viewer.
+#[derive(Debug)]
+pub enum ViewBuffer {
+    /// Files ≤ [`STREAMING_THRESHOLD_BYTES`] — fully pre-loaded into memory.
+    Loaded {
+        /// ANSI-stripped lines (text mode).
+        lines: Vec<String>,
+        /// Raw bytes (hex mode).
+        bytes: Vec<u8>,
+    },
+    /// Files > [`STREAMING_THRESHOLD_BYTES`] — streamed on demand.
+    Streaming {
+        /// Path used for re-opening the file on seek.
+        path: std::path::PathBuf,
+        /// Compact line index: `(line_number, byte_offset)` every [`CHUNK_INDEX_INTERVAL`] lines.
+        chunk_index: Vec<(usize, u64)>,
+        /// Sliding window of ANSI-stripped lines (max [`WINDOW_MAX_LINES`]).
+        lines: std::collections::VecDeque<String>,
+        /// File line number of `lines[0]`.
+        window_start_line: usize,
+        /// Approximate total line count (set at open time).
+        total_lines: usize,
+        /// Total file size in bytes.
+        total_bytes: u64,
+        /// Byte offset of the next line not yet in `lines`.
+        reader_offset: u64,
+    },
+}
+
+/// Return value from [`FileViewerDialog::handle_key`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileViewerAction {
+    /// The viewer should close; lib.rs sets `active_dialog = None` and restores `Mode::Pane`.
+    Close,
+    /// Key was consumed; viewer stays open.
+    Swallow,
+    /// Viewer needs more file data (streaming scroll forward or backward).
+    /// lib.rs spawns a blocking read and calls [`FileViewerDialog::append_lines`] when done.
+    NeedsData {
+        /// Byte offset in the file to start reading from.
+        offset: u64,
+        /// Number of lines to load into the window.
+        line_count: usize,
+    },
+}
+
+/// The top-level widget stored in `ActiveDialog::FileViewer`.
+#[derive(Debug)]
+pub struct FileViewerDialog {
+    /// Resolved path of the open file (used for streaming re-open).
+    pub path: std::path::PathBuf,
+    /// Display name shown in the title bar — the symlink name when following a link (T013).
+    pub display_name: String,
+    /// Current display mode.
+    pub mode: ViewMode,
+    /// Content buffer (pre-loaded or streaming).
+    pub buffer: ViewBuffer,
+    /// Top-of-view position: line index in text mode, 16-byte row index in hex mode.
+    pub scroll_offset: usize,
+    /// Active search state; `None` when no search is active.
+    pub search: Option<SearchState>,
+    /// Active inline prompt; `None` in normal navigation mode.
+    pub prompt: Option<ViewerPrompt>,
+    /// Word-wrap enabled (text mode only; no effect in hex).
+    pub word_wrap: bool,
+    /// Status text shown at the bottom of the overlay (e.g., `"Line 42/350  wrap: off"`).
+    pub status: String,
+    /// Viewport height cached from the last render call; used for page-scroll sizing.
+    pub viewport_height: usize,
+}
+
+impl FileViewerDialog {
+    // --- Construction ---
+
+    /// Construct a text-mode viewer for a pre-loaded file.
+    ///
+    /// `display_name` appears in the title bar; it is the symlink's *display*
+    /// name when the underlying path was resolved via `canonicalize`.
+    pub fn new_text(
+        path: std::path::PathBuf,
+        display_name: String,
+        lines: Vec<String>,
+        wrap: bool,
+    ) -> Self {
+        let total = lines.len();
+        let wrap_str = if wrap { "on" } else { "off" };
+        let status = if total == 0 {
+            "(empty file)".into()
+        } else {
+            format!("Line 1/{total}  wrap: {wrap_str}")
+        };
+        Self {
+            path,
+            display_name,
+            mode: ViewMode::Text,
+            buffer: ViewBuffer::Loaded {
+                lines,
+                bytes: Vec::new(),
+            },
+            scroll_offset: 0,
+            search: None,
+            prompt: None,
+            word_wrap: wrap,
+            status,
+            viewport_height: 20,
+        }
+    }
+
+    /// Construct a hex-mode viewer for a pre-loaded file.
+    pub fn new_hex(path: std::path::PathBuf, display_name: String, bytes: Vec<u8>) -> Self {
+        let total_bytes = bytes.len();
+        let status = format!("Offset 0x00000000 / {total_bytes} bytes");
+        Self {
+            path,
+            display_name,
+            mode: ViewMode::Hex,
+            buffer: ViewBuffer::Loaded {
+                lines: Vec::new(),
+                bytes,
+            },
+            scroll_offset: 0,
+            search: None,
+            prompt: None,
+            word_wrap: false,
+            status,
+            viewport_height: 20,
+        }
+    }
+
+    // --- Internal line access ---
+
+    fn text_lines_as_vec(&self) -> Vec<&String> {
+        match &self.buffer {
+            ViewBuffer::Loaded { lines, .. } => lines.iter().collect(),
+            ViewBuffer::Streaming { lines, .. } => lines.iter().collect(),
+        }
+    }
+
+    // --- Informational accessors ---
+
+    /// Total content lines (text mode) or 16-byte rows (hex mode) in the buffer.
+    pub fn total_lines(&self) -> usize {
+        match &self.buffer {
+            ViewBuffer::Loaded { lines, bytes } => match self.mode {
+                ViewMode::Text => lines.len(),
+                ViewMode::Hex => bytes.len().div_ceil(HEX_ROW_WIDTH),
+            },
+            ViewBuffer::Streaming {
+                total_lines,
+                total_bytes,
+                ..
+            } => match self.mode {
+                ViewMode::Text => *total_lines,
+                ViewMode::Hex => (*total_bytes as usize).div_ceil(HEX_ROW_WIDTH),
+            },
+        }
+    }
+
+    /// Current top-of-view position (line index or hex row index).
+    pub fn current_scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    /// Status text currently shown at the bottom of the overlay.
+    pub fn current_status_text(&self) -> &str {
+        &self.status
+    }
+
+    /// Override the status string (e.g., `"File no longer readable"` — T042 error path).
+    pub fn set_status(&mut self, s: impl Into<String>) {
+        self.status = s.into();
+    }
+
+    fn update_status(&mut self) {
+        let total = self.total_lines();
+        self.status = match self.mode {
+            ViewMode::Text => {
+                if total == 0 {
+                    "(empty file)".into()
+                } else {
+                    let line = (self.scroll_offset + 1).min(total);
+                    let wrap_str = if self.word_wrap { "on" } else { "off" };
+                    format!("Line {line}/{total}  wrap: {wrap_str}")
+                }
+            }
+            ViewMode::Hex => {
+                let byte_offset = self.scroll_offset * HEX_ROW_WIDTH;
+                let total_bytes = match &self.buffer {
+                    ViewBuffer::Loaded { bytes, .. } => bytes.len(),
+                    ViewBuffer::Streaming { total_bytes, .. } => *total_bytes as usize,
+                };
+                format!("Offset 0x{byte_offset:08X} / {total_bytes} bytes")
+            }
+        };
+    }
+
+    // --- Navigation ---
+
+    /// Scroll down by one line/row.
+    pub fn scroll_down(&mut self) -> FileViewerAction {
+        let max = self.total_lines().saturating_sub(1);
+        if self.scroll_offset < max {
+            self.scroll_offset += 1;
+            self.update_status();
+        }
+        FileViewerAction::Swallow
+    }
+
+    /// Scroll up by one line/row.
+    pub fn scroll_up(&mut self) -> FileViewerAction {
+        if self.scroll_offset > 0 {
+            self.scroll_offset -= 1;
+            self.update_status();
+        }
+        FileViewerAction::Swallow
+    }
+
+    /// Scroll down by `height` lines.
+    pub fn page_down(&mut self, height: usize) -> FileViewerAction {
+        let max = self.total_lines().saturating_sub(1);
+        self.scroll_offset = (self.scroll_offset + height).min(max);
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Scroll up by `height` lines.
+    pub fn page_up(&mut self, height: usize) -> FileViewerAction {
+        self.scroll_offset = self.scroll_offset.saturating_sub(height);
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Jump to the first line/row.
+    pub fn home_key(&mut self) -> FileViewerAction {
+        self.scroll_offset = 0;
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Jump to the last line/row.
+    pub fn end_key(&mut self) -> FileViewerAction {
+        self.scroll_offset = self.total_lines().saturating_sub(1);
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Jump to the last line (named command for `G` / `viewer-end`).
+    pub fn goto_end(&mut self) -> FileViewerAction {
+        self.end_key()
+    }
+
+    // --- Goto ---
+
+    /// Jump to line `n` (1-based, clamped to `[1, last_line]`).
+    pub fn goto_line(&mut self, n: usize) -> FileViewerAction {
+        let total = self.total_lines();
+        if total == 0 {
+            return FileViewerAction::Swallow;
+        }
+        self.scroll_offset = n.clamp(1, total) - 1;
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Jump to the hex row containing byte `offset` (hex mode, clamped to valid range).
+    pub fn goto_offset(&mut self, offset: u64) -> FileViewerAction {
+        let total_rows = self.total_lines();
+        let row = (offset / HEX_ROW_WIDTH as u64) as usize;
+        self.scroll_offset = row.min(total_rows.saturating_sub(1));
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Parse a goto input string: plain decimal or `0x`/`0X`-prefixed hex.
+    pub fn parse_goto_input(s: &str) -> Option<u64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+            u64::from_str_radix(hex, 16).ok()
+        } else {
+            s.parse::<u64>().ok()
+        }
+    }
+
+    /// Open the goto prompt (`g` key via keymap; direct method for test coverage).
+    pub fn open_goto_prompt(&mut self) -> FileViewerAction {
+        self.prompt = Some(ViewerPrompt::Goto {
+            buffer: String::new(),
+        });
+        FileViewerAction::Swallow
+    }
+
+    // --- Mode and settings ---
+
+    /// Toggle word-wrap (text mode only; hex mode ignores this).
+    pub fn toggle_wrap(&mut self) -> FileViewerAction {
+        self.word_wrap = !self.word_wrap;
+        self.update_status();
+        FileViewerAction::Swallow
+    }
+
+    /// Toggle between text and hex mode. Resets scroll position and clears search.
+    pub fn toggle_mode(&mut self) {
+        self.mode = match self.mode {
+            ViewMode::Text => ViewMode::Hex,
+            ViewMode::Hex => ViewMode::Text,
+        };
+        self.scroll_offset = 0;
+        self.search = None;
+        self.prompt = None;
+        self.update_status();
+    }
+
+    // --- Search ---
+
+    /// Open the search prompt (direct method, also called from keymap dispatch).
+    pub fn open_search_prompt(&mut self, direction: SearchDirection) -> FileViewerAction {
+        self.prompt = Some(ViewerPrompt::Search {
+            buffer: String::new(),
+            direction,
+        });
+        FileViewerAction::Swallow
+    }
+
+    /// Search forward from the current scroll offset for `pattern`.
+    /// Returns `(line_index, col_byte_offset)` of the first match found, or `None`.
+    pub fn search_forward(&self, pattern: &str) -> Option<(usize, usize)> {
+        let lines = self.text_lines_as_vec();
+        if lines.is_empty() || pattern.is_empty() {
+            return None;
+        }
+        let start = (self.scroll_offset + 1).min(lines.len());
+        for (offset, line) in lines[start..].iter().enumerate() {
+            if let Some(col) = line.find(pattern) {
+                return Some((start + offset, col));
+            }
+        }
+        // Wrap-around search from beginning.
+        for (i, line) in lines[..start].iter().enumerate() {
+            if let Some(col) = line.find(pattern) {
+                return Some((i, col));
+            }
+        }
+        None
+    }
+
+    /// Search backward from the current scroll offset for `pattern`.
+    /// Returns `(line_index, col_byte_offset)` of the match found, or `None`.
+    pub fn search_backward(&self, pattern: &str) -> Option<(usize, usize)> {
+        let lines = self.text_lines_as_vec();
+        if lines.is_empty() || pattern.is_empty() {
+            return None;
+        }
+        let end = self.scroll_offset.min(lines.len());
+        for i in (0..end).rev() {
+            if let Some(col) = lines[i].find(pattern) {
+                return Some((i, col));
+            }
+        }
+        // Wrap-around from end.
+        for i in (end..lines.len()).rev() {
+            if let Some(col) = lines[i].find(pattern) {
+                return Some((i, col));
+            }
+        }
+        None
+    }
+
+    fn apply_search_result(
+        &mut self,
+        result: Option<(usize, usize)>,
+        pattern: &str,
+        dir: SearchDirection,
+    ) {
+        match result {
+            Some((line, col)) => {
+                self.scroll_offset = line;
+                self.search = Some(SearchState {
+                    pattern: pattern.into(),
+                    direction: dir,
+                    last_match_line: Some(line),
+                    last_match_col: Some(col),
+                });
+                self.update_status();
+                let base = self.status.clone();
+                self.status = format!("/{pattern}  {base}");
+            }
+            None => {
+                self.status = format!("Pattern not found: {pattern}");
+            }
+        }
+    }
+
+    /// Advance to the next (`Forward`) or previous (`Backward`) search match.
+    pub fn advance_search(&mut self, dir: SearchDirection) -> FileViewerAction {
+        let pattern = match &self.search {
+            Some(s) => s.pattern.clone(),
+            None => return FileViewerAction::Swallow,
+        };
+        let result = match dir {
+            SearchDirection::Forward => self.search_forward(&pattern),
+            SearchDirection::Backward => self.search_backward(&pattern),
+        };
+        self.apply_search_result(result, &pattern, dir);
+        FileViewerAction::Swallow
+    }
+
+    // --- Key handling ---
+
+    /// Handle a raw navigation key (Up/Down/PgUp/PgDn/Home/End/Esc and prompt input).
+    /// Called from lib.rs when `SeqLookup::NoMatch` — i.e., for keys not in the keymap.
+    pub fn handle_key(&mut self, code: crossterm::event::KeyCode) -> FileViewerAction {
+        use crossterm::event::KeyCode;
+
+        // If a prompt is active, route input to it.
+        if let Some(prompt) = self.prompt.take() {
+            return self.handle_prompt_key(prompt, code);
+        }
+
+        match code {
+            KeyCode::Up => self.scroll_up(),
+            KeyCode::Down => self.scroll_down(),
+            KeyCode::PageUp => {
+                let h = self.viewport_height.saturating_sub(1).max(1);
+                self.page_up(h)
+            }
+            KeyCode::PageDown => {
+                let h = self.viewport_height.saturating_sub(1).max(1);
+                self.page_down(h)
+            }
+            KeyCode::Home => self.home_key(),
+            KeyCode::End => self.end_key(),
+            KeyCode::Esc => FileViewerAction::Close,
+            // `/` and `?` handled here as raw fallback (keymap takes priority in lib.rs).
+            KeyCode::Char('/') => self.open_search_prompt(SearchDirection::Forward),
+            KeyCode::Char('?') => self.open_search_prompt(SearchDirection::Backward),
+            _ => FileViewerAction::Swallow,
+        }
+    }
+
+    fn handle_prompt_key(
+        &mut self,
+        mut prompt: ViewerPrompt,
+        code: crossterm::event::KeyCode,
+    ) -> FileViewerAction {
+        use crossterm::event::KeyCode;
+        match &mut prompt {
+            ViewerPrompt::Search { buffer, direction } => match code {
+                KeyCode::Esc => {
+                    self.search = None;
+                    self.update_status();
+                    FileViewerAction::Swallow
+                }
+                KeyCode::Enter => {
+                    if buffer.is_empty() {
+                        self.search = None;
+                        self.update_status();
+                    } else {
+                        let pattern = buffer.clone();
+                        let dir = *direction;
+                        let result = match dir {
+                            SearchDirection::Forward => self.search_forward(&pattern),
+                            SearchDirection::Backward => self.search_backward(&pattern),
+                        };
+                        self.apply_search_result(result, &pattern, dir);
+                    }
+                    FileViewerAction::Swallow
+                }
+                KeyCode::Backspace => {
+                    buffer.pop();
+                    self.prompt = Some(prompt);
+                    FileViewerAction::Swallow
+                }
+                KeyCode::Char(c) => {
+                    buffer.push(c);
+                    self.prompt = Some(prompt);
+                    FileViewerAction::Swallow
+                }
+                _ => {
+                    self.prompt = Some(prompt);
+                    FileViewerAction::Swallow
+                }
+            },
+            ViewerPrompt::Goto { buffer } => match code {
+                KeyCode::Esc => {
+                    self.update_status();
+                    FileViewerAction::Swallow
+                }
+                KeyCode::Enter => {
+                    if !buffer.is_empty() {
+                        let s = buffer.clone();
+                        if let Some(n) = Self::parse_goto_input(&s) {
+                            match self.mode {
+                                ViewMode::Text => {
+                                    self.goto_line(n as usize);
+                                }
+                                ViewMode::Hex => {
+                                    self.goto_offset(n);
+                                }
+                            }
+                        }
+                    }
+                    FileViewerAction::Swallow
+                }
+                KeyCode::Backspace => {
+                    buffer.pop();
+                    self.prompt = Some(prompt);
+                    FileViewerAction::Swallow
+                }
+                KeyCode::Char(c)
+                    if c.is_ascii_digit()
+                        || c == 'x'
+                        || c == 'X'
+                        || ('a'..='f').contains(&c)
+                        || ('A'..='F').contains(&c) =>
+                {
+                    buffer.push(c);
+                    self.prompt = Some(prompt);
+                    FileViewerAction::Swallow
+                }
+                _ => {
+                    self.prompt = Some(prompt);
+                    FileViewerAction::Swallow
+                }
+            },
+        }
+    }
+
+    // --- Streaming ---
+
+    /// Append lines to a streaming buffer window (called from lib.rs after `NeedsData`).
+    pub fn append_lines(&mut self, new_lines: Vec<String>) {
+        if let ViewBuffer::Streaming { lines, .. } = &mut self.buffer {
+            for l in new_lines {
+                lines.push_back(l);
+                while lines.len() > WINDOW_MAX_LINES {
+                    lines.pop_front();
+                }
+            }
+        }
+    }
+
+    // --- Hex rendering ---
+
+    /// Format one 16-byte hex dump row.
+    ///
+    /// Output: `{offset:08x}  {hex_part}  |{ascii_part}|`
+    /// where the hex part has an extra space between byte groups 0–7 and 8–15.
+    pub fn render_hex_row(offset: usize, data: &[u8]) -> String {
+        let mut hex_part = String::with_capacity(49);
+        let mut ascii_part = String::with_capacity(HEX_ROW_WIDTH);
+
+        for i in 0..HEX_ROW_WIDTH {
+            if i > 0 {
+                hex_part.push(' ');
+            }
+            if i == 8 {
+                hex_part.push(' '); // extra gap between the two 8-byte groups
+            }
+            if let Some(&b) = data.get(i) {
+                hex_part.push_str(&format!("{b:02x}"));
+                if (0x20..=0x7e).contains(&b) {
+                    ascii_part.push(b as char);
+                } else {
+                    ascii_part.push('.');
+                }
+            } else {
+                hex_part.push_str("  "); // two-space pad for a missing byte
+                ascii_part.push(' ');
+            }
+        }
+
+        format!("{offset:08x}  {hex_part}  |{ascii_part}|")
+    }
+
+    // --- Close ---
+
+    /// Signal that the viewer should close (called from lib.rs for `ViewerQuit`).
+    pub fn close(&mut self) -> FileViewerAction {
+        FileViewerAction::Close
+    }
+
+    // --- Rendering ---
+
+    /// Render the viewer as a full-screen overlay into `area`.
+    ///
+    /// Updates `self.viewport_height` as a side effect so that `PageUp`/`PageDown`
+    /// in the subsequent `handle_key` call uses the correct page size.
+    pub fn render(
+        &mut self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        theme: &crate::theme::Theme,
+    ) {
+        use ratatui::layout::{Constraint, Direction, Layout};
+        use ratatui::style::Style;
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+        let mode_label = match self.mode {
+            ViewMode::Text => "text",
+            ViewMode::Hex => "hex",
+        };
+        let title = format!(" F3 View — {}  [{}] ", self.display_name, mode_label);
+
+        // Full-screen overlay: paint over everything.
+        f.render_widget(Clear, area);
+
+        let block = Block::default()
+            .title(title.as_str())
+            .borders(Borders::ALL)
+            .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if inner.height < 2 {
+            return;
+        }
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(inner);
+        let content_area = chunks[0];
+        let status_area = chunks[1];
+
+        // Cache viewport height for page-scroll sizing.
+        self.viewport_height = content_area.height as usize;
+        let viewport_h = self.viewport_height;
+
+        match self.mode {
+            ViewMode::Text => self.render_text(f, content_area, viewport_h, theme),
+            ViewMode::Hex => self.render_hex(f, content_area, viewport_h, theme),
+        }
+
+        // Status bar row — replaced by active prompt text when a prompt is open (L3 fix).
+        let status_line = match &self.prompt {
+            Some(ViewerPrompt::Search { buffer, .. }) => format!("/{buffer}_"),
+            Some(ViewerPrompt::Goto { buffer }) => match self.mode {
+                ViewMode::Text => format!("Go to line: {buffer}_"),
+                ViewMode::Hex => format!("Go to offset: {buffer}_"),
+            },
+            None => self.status.clone(),
+        };
+        let status_para = Paragraph::new(status_line)
+            .style(Style::default().fg(theme.status_fg).bg(theme.status_bg));
+        f.render_widget(status_para, status_area);
+    }
+
+    fn render_text(
+        &self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        viewport_h: usize,
+        theme: &crate::theme::Theme,
+    ) {
+        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::Paragraph;
+
+        let lines_vec = self.text_lines_as_vec();
+        let total = lines_vec.len();
+
+        if total == 0 {
+            let para = Paragraph::new("(empty file)")
+                .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg));
+            f.render_widget(para, area);
+            return;
+        }
+
+        let gutter_w = format!("{total}").len();
+        let search_pat = self.search.as_ref().map(|s| s.pattern.as_str());
+        let end = (self.scroll_offset + viewport_h).min(total);
+
+        let mut rendered: Vec<Line> = Vec::with_capacity(viewport_h);
+        for (line_offset, line_str) in lines_vec[self.scroll_offset..end].iter().enumerate() {
+            let line_num = self.scroll_offset + line_offset + 1;
+            let text: &str = line_str.as_str();
+            let num = format!("{:>width$} ", line_num, width = gutter_w);
+            let mut spans = vec![Span::styled(num, Style::default().fg(Color::DarkGray))];
+
+            // Highlight ALL visible occurrences of the search pattern (FR-018 / H3 fix).
+            if let Some(pat) = search_pat {
+                if !pat.is_empty() {
+                    let mut last = 0;
+                    for (start, matched) in text.match_indices(pat) {
+                        if last < start {
+                            spans.push(Span::raw(text[last..start].to_string()));
+                        }
+                        spans.push(Span::styled(
+                            matched.to_string(),
+                            Style::default().add_modifier(Modifier::REVERSED),
+                        ));
+                        last = start + matched.len();
+                    }
+                    if last < text.len() {
+                        spans.push(Span::raw(text[last..].to_string()));
+                    }
+                } else {
+                    spans.push(Span::raw(text.to_string()));
+                }
+            } else {
+                spans.push(Span::raw(text.to_string()));
+            }
+
+            rendered.push(Line::from(spans));
+        }
+
+        let para = if self.word_wrap {
+            Paragraph::new(rendered)
+                .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg))
+                .wrap(ratatui::widgets::Wrap { trim: false })
+        } else {
+            Paragraph::new(rendered).style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg))
+        };
+        f.render_widget(para, area);
+    }
+
+    fn render_hex(
+        &self,
+        f: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        viewport_h: usize,
+        theme: &crate::theme::Theme,
+    ) {
+        use ratatui::style::Style;
+        use ratatui::widgets::Paragraph;
+
+        let bytes = match &self.buffer {
+            ViewBuffer::Loaded { bytes, .. } => bytes.as_slice(),
+            ViewBuffer::Streaming { .. } => &[], // hex streaming: Phase 7
+        };
+
+        let total_rows = bytes.len().div_ceil(HEX_ROW_WIDTH);
+        let end = (self.scroll_offset + viewport_h).min(total_rows);
+        let mut rows: Vec<String> = Vec::with_capacity(viewport_h);
+        for row in self.scroll_offset..end {
+            let byte_offset = row * HEX_ROW_WIDTH;
+            let row_end = (byte_offset + HEX_ROW_WIDTH).min(bytes.len());
+            rows.push(Self::render_hex_row(
+                byte_offset,
+                &bytes[byte_offset..row_end],
+            ));
+        }
+
+        let para = Paragraph::new(rows.join("\n"))
+            .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg));
+        f.render_widget(para, area);
+    }
+}
 
 // =====================================================================
 // Tests
@@ -2151,5 +2996,565 @@ mod tests {
         let d = UserMenuDialog::new_error("parse error: line 5");
         assert!(d.error.is_some());
         assert!(d.error.as_deref().unwrap().contains("parse error"));
+    }
+
+    // ---------- FileViewerDialog — Phase 2 data types (T004) ----------
+
+    #[test]
+    fn view_mode_equality() {
+        assert_eq!(ViewMode::Text, ViewMode::Text);
+        assert_ne!(ViewMode::Text, ViewMode::Hex);
+    }
+
+    #[test]
+    fn search_state_construction() {
+        let s = SearchState {
+            pattern: "hello".into(),
+            direction: SearchDirection::Forward,
+            last_match_line: Some(3),
+            last_match_col: Some(5),
+        };
+        assert_eq!(s.pattern, "hello");
+        assert_eq!(s.last_match_line, Some(3));
+    }
+
+    #[test]
+    fn viewer_prompt_search_equality() {
+        let p1 = ViewerPrompt::Search {
+            buffer: "foo".into(),
+            direction: SearchDirection::Forward,
+        };
+        let p2 = ViewerPrompt::Search {
+            buffer: "foo".into(),
+            direction: SearchDirection::Forward,
+        };
+        assert_eq!(p1, p2);
+    }
+
+    #[test]
+    fn viewer_prompt_goto_equality() {
+        let p = ViewerPrompt::Goto {
+            buffer: "42".into(),
+        };
+        assert_eq!(
+            p,
+            ViewerPrompt::Goto {
+                buffer: "42".into()
+            }
+        );
+        assert_ne!(p, ViewerPrompt::Goto { buffer: "0".into() });
+    }
+
+    #[test]
+    fn file_viewer_action_close_ne_swallow() {
+        assert_ne!(FileViewerAction::Close, FileViewerAction::Swallow);
+    }
+
+    // ---------- FileViewerDialog — Phase 3 US1 (T007) ----------
+
+    fn make_viewer(lines: &[&str]) -> FileViewerDialog {
+        let ls: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        FileViewerDialog::new_text(
+            std::path::PathBuf::from("/tmp/test.txt"),
+            "test.txt".into(),
+            ls,
+            false,
+        )
+    }
+
+    #[test]
+    fn viewer_new_text_total_lines() {
+        let d = make_viewer(&["a", "b", "c"]);
+        assert_eq!(d.total_lines(), 3);
+        assert_eq!(d.current_scroll_offset(), 0);
+    }
+
+    #[test]
+    fn viewer_new_text_status_contains_line_fraction() {
+        let d = make_viewer(&["a", "b", "c", "d", "e"]);
+        let s = d.current_status_text();
+        assert!(s.contains("Line 1/5"), "status was: {s}");
+    }
+
+    #[test]
+    fn viewer_empty_file_status() {
+        let d = make_viewer(&[]);
+        assert_eq!(d.current_status_text(), "(empty file)");
+        assert_eq!(d.total_lines(), 0);
+    }
+
+    #[test]
+    fn viewer_scroll_down_and_up() {
+        let mut d = make_viewer(&["a", "b", "c"]);
+        assert_eq!(d.scroll_down(), FileViewerAction::Swallow);
+        assert_eq!(d.current_scroll_offset(), 1);
+        assert_eq!(d.scroll_up(), FileViewerAction::Swallow);
+        assert_eq!(d.current_scroll_offset(), 0);
+    }
+
+    #[test]
+    fn viewer_scroll_clamped_at_ends() {
+        let mut d = make_viewer(&["a", "b", "c"]);
+        // Can't go above 0.
+        d.scroll_up();
+        assert_eq!(d.current_scroll_offset(), 0);
+        // Can't go past last line.
+        d.scroll_down();
+        d.scroll_down();
+        d.scroll_down();
+        d.scroll_down();
+        assert_eq!(d.current_scroll_offset(), 2);
+    }
+
+    #[test]
+    fn viewer_page_down_and_up() {
+        let lines: Vec<&str> = (0..50).map(|_| "x").collect();
+        let mut d = make_viewer(&lines);
+        d.page_down(10);
+        assert_eq!(d.current_scroll_offset(), 10);
+        d.page_up(5);
+        assert_eq!(d.current_scroll_offset(), 5);
+    }
+
+    #[test]
+    fn viewer_home_and_end() {
+        let lines: Vec<&str> = (0..10).map(|_| "x").collect();
+        let mut d = make_viewer(&lines);
+        d.page_down(8);
+        d.home_key();
+        assert_eq!(d.current_scroll_offset(), 0);
+        d.end_key();
+        assert_eq!(d.current_scroll_offset(), 9);
+    }
+
+    #[test]
+    fn viewer_status_updates_on_scroll() {
+        let lines: Vec<&str> = (0..10).map(|_| "x").collect();
+        let mut d = make_viewer(&lines);
+        d.scroll_down();
+        let s = d.current_status_text();
+        assert!(s.contains("Line 2/10"), "status was: {s}");
+    }
+
+    // ---------- FileViewerDialog — render test (T008) ----------
+
+    #[test]
+    fn viewer_render_shows_title_and_line_numbers() {
+        let mut d = make_viewer(&["hello", "world", "foo", "bar", "baz"]);
+        let backend = TestBackend::new(80, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        term.draw(|f| {
+            let area = f.size();
+            d.render(f, area, &theme);
+        })
+        .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(s.contains("F3 View"), "title missing: {s}");
+        assert!(s.contains("[text]"), "mode label missing: {s}");
+        assert!(s.contains("hello"), "content missing: {s}");
+        // Line 1 should appear in the gutter.
+        assert!(s.contains('1'), "line number missing: {s}");
+    }
+
+    #[test]
+    fn viewer_render_empty_file_shows_message() {
+        let mut d = make_viewer(&[]);
+        let backend = TestBackend::new(60, 10);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        term.draw(|f| {
+            let area = f.size();
+            d.render(f, area, &theme);
+        })
+        .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(s.contains("empty file"), "empty-file message missing: {s}");
+    }
+
+    // ---------- FileViewerDialog — Phase 4 US2 hex (T017) ----------
+
+    #[test]
+    fn render_hex_row_format_matches_contract() {
+        // FR-021 format: `{offset:08x}  {hex}  |{ascii}|`
+        let data: Vec<u8> = (0u8..16).collect();
+        let row = FileViewerDialog::render_hex_row(0, &data);
+        assert!(row.starts_with("00000000  "), "offset field: {row}");
+        assert!(row.contains("|"), "ascii fence missing: {row}");
+        // Must be 78 chars wide for a full 16-byte row.
+        assert_eq!(row.len(), 78, "row width: {row}");
+    }
+
+    #[test]
+    fn render_hex_row_partial_last_row() {
+        let data = b"Hello";
+        let row = FileViewerDialog::render_hex_row(0, data);
+        assert!(row.contains("|Hello"), "ascii region: {row}");
+        // Still 78 chars (padded).
+        assert_eq!(row.len(), 78, "padded row width: {row}");
+    }
+
+    #[test]
+    fn render_hex_row_non_printable_shows_dot() {
+        let data = &[0x00u8, 0x01, 0x02];
+        let row = FileViewerDialog::render_hex_row(0, data);
+        assert!(row.contains("..."), "dots for non-printable: {row}");
+    }
+
+    #[test]
+    fn viewer_new_hex_total_lines_are_rows() {
+        let bytes: Vec<u8> = (0u8..=255).collect();
+        let d =
+            FileViewerDialog::new_hex(std::path::PathBuf::from("/tmp/bin"), "bin".into(), bytes);
+        // 256 bytes / 16 = 16 rows.
+        assert_eq!(d.total_lines(), 16);
+    }
+
+    #[test]
+    fn viewer_new_hex_status_shows_offset() {
+        let d = FileViewerDialog::new_hex(
+            std::path::PathBuf::from("/tmp/bin"),
+            "bin".into(),
+            vec![0u8; 32],
+        );
+        assert!(
+            d.current_status_text().starts_with("Offset 0x"),
+            "status: {}",
+            d.current_status_text()
+        );
+    }
+
+    // ---------- FileViewerDialog — toggle mode (T018) ----------
+
+    #[test]
+    fn viewer_toggle_mode_resets_scroll_and_search() {
+        let mut d = make_viewer(&["a", "b", "c"]);
+        d.scroll_down();
+        // Add fake search state.
+        d.search = Some(SearchState {
+            pattern: "a".into(),
+            direction: SearchDirection::Forward,
+            last_match_line: Some(0),
+            last_match_col: Some(0),
+        });
+        d.toggle_mode();
+        assert_eq!(d.mode, ViewMode::Hex);
+        assert_eq!(d.current_scroll_offset(), 0, "scroll not reset");
+        assert!(d.search.is_none(), "search not cleared");
+        // Toggle back.
+        d.toggle_mode();
+        assert_eq!(d.mode, ViewMode::Text);
+    }
+
+    // ---------- FileViewerDialog — Phase 5 US3 search (T024) ----------
+
+    #[test]
+    fn search_forward_finds_first_match_after_cursor() {
+        let mut d = make_viewer(&["aaa", "bbb", "ccc", "bbb", "ddd"]);
+        d.scroll_offset = 0;
+        // Search for "bbb" — first match after offset 0 is line 1.
+        let result = d.search_forward("bbb");
+        assert_eq!(result, Some((1, 0)));
+    }
+
+    #[test]
+    fn search_forward_wraps_around() {
+        let mut d = make_viewer(&["aaa", "bbb", "ccc"]);
+        d.scroll_offset = 2; // cursor at last line
+                             // Wrap around — "bbb" is at line 1, which is before cursor but found via wrap.
+        let result = d.search_forward("bbb");
+        assert_eq!(result, Some((1, 0)));
+    }
+
+    #[test]
+    fn search_forward_returns_none_when_no_match() {
+        let d = make_viewer(&["aaa", "bbb", "ccc"]);
+        assert_eq!(d.search_forward("zzz"), None);
+    }
+
+    #[test]
+    fn search_backward_finds_match_before_cursor() {
+        let mut d = make_viewer(&["aaa", "bbb", "ccc", "bbb", "ddd"]);
+        d.scroll_offset = 3;
+        // "bbb" occurs at line 1 before cursor (line 3).
+        let result = d.search_backward("bbb");
+        assert_eq!(result, Some((1, 0)));
+    }
+
+    #[test]
+    fn search_backward_wraps_around() {
+        let mut d = make_viewer(&["aaa", "bbb", "ccc"]);
+        d.scroll_offset = 0;
+        // Wrap: "bbb" is at line 1 which is after cursor; found via wrap-around.
+        let result = d.search_backward("bbb");
+        assert_eq!(result, Some((1, 0)));
+    }
+
+    #[test]
+    fn search_status_contains_pattern_after_match() {
+        let mut d = make_viewer(&["hello world", "foo", "hello again"]);
+        d.scroll_offset = 0;
+        let result = d.search_forward("hello");
+        assert!(result.is_some(), "expected a match");
+        let (line, _) = result.unwrap();
+        d.scroll_offset = line;
+        d.search = Some(SearchState {
+            pattern: "hello".into(),
+            direction: SearchDirection::Forward,
+            last_match_line: Some(line),
+            last_match_col: Some(0),
+        });
+        d.update_status();
+        let base = d.status.clone();
+        d.status = format!("/hello  {base}");
+        assert!(d.status.contains("/hello"), "status: {}", d.status);
+        assert!(d.status.contains("Line"), "status: {}", d.status);
+    }
+
+    #[test]
+    fn search_cleared_on_mode_toggle() {
+        let mut d = make_viewer(&["hello"]);
+        d.search = Some(SearchState {
+            pattern: "hello".into(),
+            direction: SearchDirection::Forward,
+            last_match_line: Some(0),
+            last_match_col: Some(0),
+        });
+        d.toggle_mode();
+        assert!(d.search.is_none());
+    }
+
+    // ---------- FileViewerDialog — prompt state machine (T025) ----------
+
+    #[test]
+    fn search_prompt_opened_by_slash() {
+        let mut d = make_viewer(&["a"]);
+        let action = d.handle_key(KeyCode::Char('/'));
+        assert_eq!(action, FileViewerAction::Swallow);
+        assert!(
+            matches!(d.prompt, Some(ViewerPrompt::Search { .. })),
+            "prompt not set"
+        );
+    }
+
+    #[test]
+    fn search_prompt_opened_by_question_mark() {
+        let mut d = make_viewer(&["a"]);
+        d.handle_key(KeyCode::Char('?'));
+        assert!(matches!(
+            d.prompt,
+            Some(ViewerPrompt::Search {
+                direction: SearchDirection::Backward,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn search_prompt_accumulates_chars_and_backspace() {
+        let mut d = make_viewer(&["hello"]);
+        d.handle_key(KeyCode::Char('/'));
+        d.handle_key(KeyCode::Char('h'));
+        d.handle_key(KeyCode::Char('i'));
+        d.handle_key(KeyCode::Backspace);
+        if let Some(ViewerPrompt::Search { buffer, .. }) = &d.prompt {
+            assert_eq!(buffer, "h", "buffer: {buffer}");
+        } else {
+            panic!("prompt not Search");
+        }
+    }
+
+    #[test]
+    fn search_prompt_esc_clears_prompt_and_search() {
+        let mut d = make_viewer(&["a"]);
+        d.handle_key(KeyCode::Char('/'));
+        d.handle_key(KeyCode::Char('a'));
+        d.handle_key(KeyCode::Esc);
+        assert!(d.prompt.is_none(), "prompt should be cleared");
+        assert!(d.search.is_none(), "search should be cleared");
+    }
+
+    #[test]
+    fn search_prompt_enter_with_empty_clears() {
+        let mut d = make_viewer(&["hello"]);
+        d.handle_key(KeyCode::Char('/'));
+        d.handle_key(KeyCode::Enter); // empty buffer
+        assert!(d.prompt.is_none());
+        assert!(d.search.is_none());
+    }
+
+    #[test]
+    fn search_prompt_enter_with_pattern_jumps_to_match() {
+        let mut d = make_viewer(&["aaa", "bbb", "ccc"]);
+        d.handle_key(KeyCode::Char('/'));
+        d.handle_key(KeyCode::Char('b'));
+        d.handle_key(KeyCode::Char('b'));
+        d.handle_key(KeyCode::Char('b'));
+        d.handle_key(KeyCode::Enter);
+        assert!(d.prompt.is_none());
+        assert_eq!(d.current_scroll_offset(), 1);
+    }
+
+    // ---------- FileViewerDialog — Phase 6 US4 goto (T031) ----------
+
+    #[test]
+    fn goto_line_clamps_and_sets_scroll() {
+        let lines: Vec<&str> = (0..10).map(|_| "x").collect();
+        let mut d = make_viewer(&lines);
+        d.goto_line(5);
+        assert_eq!(d.current_scroll_offset(), 4); // 1-based input → 0-based offset
+                                                  // Clamp above last line.
+        d.goto_line(999);
+        assert_eq!(d.current_scroll_offset(), 9);
+        // Clamp below 1.
+        d.goto_line(0);
+        assert_eq!(d.current_scroll_offset(), 0); // clamped to 1 → offset 0
+    }
+
+    #[test]
+    fn goto_line_status_reflects_new_position() {
+        let lines: Vec<&str> = (0..10).map(|_| "x").collect();
+        let mut d = make_viewer(&lines);
+        d.goto_line(5);
+        assert!(
+            d.current_status_text().contains("Line 5/10"),
+            "status: {}",
+            d.current_status_text()
+        );
+    }
+
+    #[test]
+    fn goto_offset_sets_hex_row() {
+        let bytes: Vec<u8> = vec![0u8; 64];
+        let mut d =
+            FileViewerDialog::new_hex(std::path::PathBuf::from("/tmp/bin"), "bin".into(), bytes);
+        // Offset 32 = row 2 (32 / 16 = 2).
+        d.goto_offset(32);
+        assert_eq!(d.current_scroll_offset(), 2);
+    }
+
+    #[test]
+    fn goto_offset_clamped_to_last_row() {
+        let bytes: Vec<u8> = vec![0u8; 32];
+        let mut d =
+            FileViewerDialog::new_hex(std::path::PathBuf::from("/tmp/bin"), "bin".into(), bytes);
+        d.goto_offset(9999);
+        assert_eq!(d.current_scroll_offset(), 1); // 2 rows, last = row 1
+    }
+
+    #[test]
+    fn parse_goto_input_decimal() {
+        assert_eq!(FileViewerDialog::parse_goto_input("42"), Some(42));
+        assert_eq!(FileViewerDialog::parse_goto_input("  10  "), Some(10));
+        assert_eq!(FileViewerDialog::parse_goto_input(""), None);
+        assert_eq!(FileViewerDialog::parse_goto_input("abc"), None);
+    }
+
+    #[test]
+    fn parse_goto_input_hex_prefix() {
+        assert_eq!(FileViewerDialog::parse_goto_input("0x1f"), Some(31));
+        assert_eq!(FileViewerDialog::parse_goto_input("0XFF"), Some(255));
+        assert_eq!(FileViewerDialog::parse_goto_input("0xgg"), None);
+    }
+
+    // ---------- FileViewerDialog — goto prompt state machine (T032) ----------
+
+    #[test]
+    fn goto_prompt_opened_by_open_goto_prompt() {
+        let mut d = make_viewer(&["a"]);
+        let action = d.open_goto_prompt();
+        assert_eq!(action, FileViewerAction::Swallow);
+        assert!(
+            matches!(d.prompt, Some(ViewerPrompt::Goto { .. })),
+            "prompt not Goto"
+        );
+    }
+
+    #[test]
+    fn goto_prompt_accumulates_digits() {
+        let mut d = make_viewer(&["a"]);
+        d.open_goto_prompt();
+        d.handle_key(KeyCode::Char('2'));
+        d.handle_key(KeyCode::Char('5'));
+        d.handle_key(KeyCode::Char('0'));
+        if let Some(ViewerPrompt::Goto { buffer }) = &d.prompt {
+            assert_eq!(buffer, "250");
+        } else {
+            panic!("prompt not Goto");
+        }
+    }
+
+    #[test]
+    fn goto_prompt_esc_clears_prompt() {
+        let mut d = make_viewer(&["a", "b", "c"]);
+        let prev = d.current_scroll_offset();
+        d.open_goto_prompt();
+        d.handle_key(KeyCode::Char('2'));
+        d.handle_key(KeyCode::Esc);
+        assert!(d.prompt.is_none());
+        assert_eq!(d.current_scroll_offset(), prev, "scroll changed on Esc");
+    }
+
+    #[test]
+    fn goto_prompt_enter_jumps_to_line() {
+        let lines: Vec<&str> = (0..20).map(|_| "x").collect();
+        let mut d = make_viewer(&lines);
+        d.open_goto_prompt();
+        d.handle_key(KeyCode::Char('1'));
+        d.handle_key(KeyCode::Char('0'));
+        d.handle_key(KeyCode::Enter);
+        assert!(d.prompt.is_none());
+        assert_eq!(d.current_scroll_offset(), 9); // line 10 → offset 9
+    }
+
+    // ---------- FileViewerDialog — wrap toggle (T038 subset) ----------
+
+    #[test]
+    fn toggle_wrap_flips_flag_and_updates_status() {
+        let mut d = make_viewer(&["hello world"]);
+        assert!(!d.word_wrap);
+        d.toggle_wrap();
+        assert!(d.word_wrap);
+        assert!(
+            d.current_status_text().contains("wrap: on"),
+            "status: {}",
+            d.current_status_text()
+        );
+        d.toggle_wrap();
+        assert!(!d.word_wrap);
+        assert!(
+            d.current_status_text().contains("wrap: off"),
+            "status: {}",
+            d.current_status_text()
+        );
+    }
+
+    // ---------- FileViewerDialog — close via Esc (T012 subset) ----------
+
+    #[test]
+    fn handle_key_esc_returns_close() {
+        let mut d = make_viewer(&["a"]);
+        assert_eq!(d.handle_key(KeyCode::Esc), FileViewerAction::Close);
+    }
+
+    #[test]
+    fn handle_key_up_down_navigates() {
+        let mut d = make_viewer(&["a", "b", "c"]);
+        assert_eq!(d.handle_key(KeyCode::Down), FileViewerAction::Swallow);
+        assert_eq!(d.current_scroll_offset(), 1);
+        assert_eq!(d.handle_key(KeyCode::Up), FileViewerAction::Swallow);
+        assert_eq!(d.current_scroll_offset(), 0);
     }
 }
