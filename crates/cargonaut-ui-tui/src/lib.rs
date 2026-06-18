@@ -3352,4 +3352,156 @@ mod tests {
             "keymap actions missing from HELP_SECTIONS: {missing:?}"
         );
     }
+
+    // ===== Feature 049 US2: queue_diff tests (T012 red) =====
+
+    async fn app_with_tagged_files(
+        left_file: &str,
+        right_file: &str,
+    ) -> (App, TempDir, TempDir) {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join(left_file), b"left content").unwrap();
+        std::fs::write(td_r.path().join(right_file), b"right content").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag the file in the left pane (cursor starts at 0 or 1 after "..").
+        // Use dispatch to toggle selection on left pane.
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        // Switch focus to right pane and tag the file there.
+        app.dispatch(cargonaut_core::Command::FocusRight)
+            .await
+            .unwrap();
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        // Switch back to left.
+        app.dispatch(cargonaut_core::Command::FocusLeft)
+            .await
+            .unwrap();
+        (app, td_l, td_r)
+    }
+
+    #[tokio::test]
+    async fn queue_diff_two_tagged_files_sets_pending_external() {
+        let (mut app, _td_l, _td_r) = app_with_tagged_files("left.txt", "right.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        let tool = Some("diff -u");
+        queue_diff(&app, &mut ui, &mut status, tool);
+        assert!(
+            ui.pending_external.is_some(),
+            "two tagged files + configured tool must set pending_external; status={status:?}"
+        );
+        let ext = ui.pending_external.as_ref().unwrap();
+        assert_eq!(ext.program, "diff", "program should be 'diff'");
+        // args[-2] = left path, args[-1] = right path
+        let last_two: Vec<&str> = ext.args.iter().rev().take(2).rev().map(|s| s.as_str()).collect();
+        assert_eq!(last_two.len(), 2, "args must contain at least the two file paths");
+        // Both paths should exist on the filesystem
+        assert!(
+            std::path::Path::new(last_two[0]).exists(),
+            "left path must exist: {}",
+            last_two[0]
+        );
+        assert!(
+            std::path::Path::new(last_two[1]).exists(),
+            "right path must exist: {}",
+            last_two[1]
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_path_ordering_left_before_right() {
+        let (mut app, td_l, td_r) = app_with_tagged_files("lf.txt", "rf.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, Some("diff"));
+        let ext = ui.pending_external.as_ref().expect("pending_external must be set");
+        let n = ext.args.len();
+        assert!(n >= 2, "need at least 2 path args");
+        let left_path = &ext.args[n - 2];
+        let right_path = &ext.args[n - 1];
+        // The left-pane path must be in td_l and right-pane path in td_r
+        assert!(
+            left_path.contains(td_l.path().to_str().unwrap()),
+            "args[-2] must be the left-pane path; got {left_path:?} (expected prefix: {:?})",
+            td_l.path()
+        );
+        assert!(
+            right_path.contains(td_r.path().to_str().unwrap()),
+            "args[-1] must be the right-pane path; got {right_path:?} (expected prefix: {:?})",
+            td_r.path()
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_one_tagged_file_shows_error() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"x").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag only one file (left pane)
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, Some("diff -u"));
+        assert!(
+            ui.pending_external.is_none(),
+            "1 tagged file must not set pending_external"
+        );
+        assert!(
+            status.contains("exactly 2"),
+            "status must say 'exactly 2'; got {status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_no_tool_configured_shows_error() {
+        let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, None);
+        assert!(ui.pending_external.is_none());
+        assert!(
+            status.to_lowercase().contains("no diff tool"),
+            "status must mention missing tool; got {status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_empty_tool_string_shows_error() {
+        let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, Some(""));
+        assert!(ui.pending_external.is_none());
+        assert!(
+            status.to_lowercase().contains("empty"),
+            "status must mention empty tool string; got {status:?}"
+        );
+    }
 }
