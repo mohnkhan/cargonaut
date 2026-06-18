@@ -17,12 +17,12 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 globset = { workspace = true }
+crc32fast = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 sha2 = { workspace = true }
-crc32fast = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 
@@ -33,5 +33,10 @@ test = false
 
 [[bench]]
 name = "rss_headroom"
+harness = false
+test = false
+
+[[bench]]
+name = "compare_dirs"
 harness = false
 test = false

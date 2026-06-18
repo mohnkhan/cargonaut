@@ -41,6 +41,8 @@ pub struct Config {
     pub remote: RemoteConfig,
     /// Search settings.
     pub search: SearchConfig,
+    /// External diff tool settings (Feature 049).
+    pub diff: DiffConfig,
 }
 
 // =====================================================================
@@ -440,6 +442,24 @@ pub enum PatternType {
     Regex,
     /// Literal fixed-string search.
     Fixed,
+}
+
+// =====================================================================
+// Diff (Feature 049)
+// =====================================================================
+
+/// External diff tool settings (Feature 049 — compare directories + diff tagged files).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct DiffConfig {
+    /// Argv string for the external diff tool.
+    ///
+    /// Split on whitespace; the two tagged file paths are appended as the
+    /// final two positional arguments. No shell is invoked. Examples:
+    /// `"diff -u"`, `"vimdiff"`, `"meld"`.
+    ///
+    /// Defaults to `None` — the feature is disabled until configured.
+    pub tool: Option<String>,
 }
 
 // =====================================================================
@@ -1174,5 +1194,44 @@ only_if = "test -d {path}"
         // Error message should contain the file path
         let path_str = f.path().to_str().unwrap();
         assert!(msg.contains(path_str), "expected path in error: {msg}");
+    }
+
+    // ===== Feature 049: DiffConfig round-trip tests =====
+
+    #[test]
+    fn diff_config_default_tool_is_none() {
+        let cfg = DiffConfig::default();
+        assert_eq!(cfg.tool, None);
+    }
+
+    #[test]
+    fn diff_config_round_trip_default_through_toml() {
+        let toml = toml::to_string(&DiffConfig::default()).unwrap();
+        let back: DiffConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(back.tool, None);
+    }
+
+    #[test]
+    fn diff_config_round_trip_vimdiff_through_toml() {
+        let src = r#"tool = "vimdiff""#;
+        let cfg: DiffConfig = toml::from_str(src).unwrap();
+        assert_eq!(cfg.tool.as_deref(), Some("vimdiff"));
+        let back = toml::to_string(&cfg).unwrap();
+        let cfg2: DiffConfig = toml::from_str(&back).unwrap();
+        assert_eq!(cfg2.tool.as_deref(), Some("vimdiff"));
+    }
+
+    #[test]
+    fn diff_config_round_trip_argv_string_through_toml() {
+        let src = r#"tool = "diff -u""#;
+        let cfg: DiffConfig = toml::from_str(src).unwrap();
+        assert_eq!(cfg.tool.as_deref(), Some("diff -u"));
+    }
+
+    #[test]
+    fn diff_config_unknown_key_rejected() {
+        let src = r#"tool = "diff"\nunknown_key = true"#;
+        let result = toml::from_str::<DiffConfig>(src);
+        assert!(result.is_err(), "unknown keys should be rejected by deny_unknown_fields");
     }
 }

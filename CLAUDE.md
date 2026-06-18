@@ -117,5 +117,5 @@ When editing this file or adding project-wide conventions, follow the discipline
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/048-f2-mouse-click/plan.md
+at specs/049-compare-dirs/plan.md
 <!-- SPECKIT END -->

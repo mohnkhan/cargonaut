@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 14 features since (031–048) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 390 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 15 features since (031–049) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 424 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.8 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -154,8 +154,14 @@ for the local filesystem:
   left-click of the on-screen F2 button; strengthens the existing T-MOUSE-5 assertion to
   use the same positive check. No production code changed — routing was already correct.
   (Feature 048, closes #70).
+- **Compare directories + diff tagged files** — `C-x d` compares both panels by name/size/CRC32
+  and additively tags all differing entries using the existing selection system; `C-x C-d` suspends
+  the TUI and launches a configured external diff tool (e.g., `diff -u`, `vimdiff`) with the two
+  tagged file paths as final args, resuming cleanly on exit. Head-only CRC32 hashing for files
+  >4 MiB keeps p95 latency under 9 ms for 1,000-file panels (SC-001 gate: ≤2 s).
+  (Feature 049, closes #43).
 
-The full per-feature history (Features 001 → 048) lives in
+The full per-feature history (Features 001 → 049) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap

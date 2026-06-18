@@ -184,10 +184,11 @@ enum InputKind {
 /// An external program to run (F3/F4), suspending the TUI around it.
 #[derive(Debug, Clone)]
 struct PendingExternal {
-    /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks).
+    /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks, or split from diff tool string).
     program: String,
-    /// Local filesystem path argument.
-    path: String,
+    /// Additional arguments passed after `program`. For F3/F4 this is `vec![path]`;
+    /// for diff (US2) this is `argv[1..] + [left_path, right_path]`.
+    args: Vec<String>,
 }
 
 async fn run_loop<B: ratatui::backend::Backend>(
@@ -1027,6 +1028,11 @@ async fn dispatch_ui_command(
             queue_external(app, ui, status, ExternalTool::Editor);
             return Ok(());
         }
+        // Feature 049 US2 (FR-005 through FR-008): C-x C-d diff two tagged files.
+        Command::DiffTwoTaggedFiles => {
+            queue_diff(app, ui, status, app.config().diff.tool.as_deref());
+            return Ok(());
+        }
         // Feature 047 US2 (FR-006): F2 opens the user action menu.
         // Guard: if another dialog is already open, ignore.
         Command::ShowUserMenu => {
@@ -1171,13 +1177,96 @@ fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: Extern
     };
     ui.pending_external = Some(PendingExternal {
         program,
-        path: local,
+        args: vec![local],
     });
 }
 
-/// Suspend the TUI, run an external program on a file, then restore the
-/// terminal (FR-030/031). Uses `Command::new(prog).arg(path)` — no shell —
-/// per the constitution's macro-safety rule.
+/// Feature 049 US2 — validate tagged-file selection and queue the configured
+/// diff tool as a `PendingExternal` (FR-005 through FR-008).
+///
+/// Collects all tagged files from both panes (files and symlinks only, not dirs).
+/// Requires exactly 2 total. Splits `tool_str` on whitespace using `shell_words`
+/// to build `argv`; appends left-pane path as `args[-2]` and right-pane path as
+/// `args[-1]`.
+fn queue_diff(app: &App, ui: &mut UiState, status: &mut String, tool_str: Option<&str>) {
+    // Validate tool config first (FR-006).
+    let Some(tool_str) = tool_str else {
+        *status = "No diff tool configured — set [diff] tool = \"<program>\" in config".into();
+        return;
+    };
+    let tool_str = tool_str.trim();
+    if tool_str.is_empty() {
+        *status = "Diff tool string is empty — set [diff] tool = \"<program>\" in config".into();
+        return;
+    }
+
+    // Collect tagged file paths per pane (left then right; files/symlinks only).
+    let mut tagged: Vec<(PaneId, String)> = Vec::new();
+    for id in [PaneId::Left, PaneId::Right] {
+        let p = app.pane(id);
+        for &idx in &p.selected {
+            if let Some(e) = p.listing.entries.get(idx) {
+                let is_file = matches!(
+                    e.meta.kind,
+                    cargonaut_vfs::VfsKind::File | cargonaut_vfs::VfsKind::Symlink { .. }
+                );
+                if !is_file {
+                    continue;
+                }
+                let disp = p.cwd.join(e.name.as_str()).display();
+                let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+                tagged.push((id, local));
+            }
+        }
+    }
+
+    // FR-007: exactly 2 tagged files required.
+    if tagged.len() != 2 {
+        *status = format!(
+            "Diff requires exactly 2 tagged files ({} tagged)",
+            tagged.len()
+        );
+        return;
+    }
+
+    // Split tool string into argv (shell_words::split handles quoted tokens).
+    let mut argv = match shell_words::split(tool_str) {
+        Ok(v) if !v.is_empty() => v,
+        Ok(_) => {
+            *status = "Diff tool string is empty after parsing".into();
+            return;
+        }
+        Err(e) => {
+            *status = format!("Diff tool parse error: {e}");
+            return;
+        }
+    };
+
+    // Append left-pane path then right-pane path (contract: args[-2]=left, args[-1]=right).
+    let (_, left_path) = tagged
+        .iter()
+        .find(|(id, _)| *id == PaneId::Left)
+        .cloned()
+        .unwrap_or_else(|| tagged[0].clone());
+    let (_, right_path) = tagged
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == PaneId::Right)
+        .cloned()
+        .unwrap_or_else(|| tagged[1].clone());
+
+    let program = argv.remove(0);
+    argv.push(left_path);
+    argv.push(right_path);
+
+    ui.pending_external = Some(PendingExternal {
+        program,
+        args: argv,
+    });
+}
+
+/// Suspend the TUI, run an external program, then restore the terminal
+/// (FR-030/031/FR-008). Uses `Command::new(program).args(args)` — no shell.
 fn run_external<B: ratatui::backend::Backend>(
     term: &mut Terminal<B>,
     ext: &PendingExternal,
@@ -1186,7 +1275,7 @@ fn run_external<B: ratatui::backend::Backend>(
     let _ = disable_raw_mode();
     let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
     let _ = std::process::Command::new(&ext.program)
-        .arg(&ext.path)
+        .args(&ext.args)
         .status();
     enable_raw_mode().map_err(Error::Terminal)?;
     execute!(stdout(), EnterAlternateScreen).map_err(Error::Terminal)?;
@@ -1578,6 +1667,7 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::CycleSortKey => AppCommand::CycleSortKey,
         U::CycleListingMode => AppCommand::CycleListingMode,
         U::RecursiveDirSize => AppCommand::RecursiveDirSize,
+        U::CompareDirectories => AppCommand::CompareDirectories,
         _ => return None,
     })
 }
@@ -3349,6 +3439,158 @@ mod tests {
         assert!(
             missing.is_empty(),
             "keymap actions missing from HELP_SECTIONS: {missing:?}"
+        );
+    }
+
+    // ===== Feature 049 US2: queue_diff tests (T012 red) =====
+
+    async fn app_with_tagged_files(
+        left_file: &str,
+        right_file: &str,
+    ) -> (App, TempDir, TempDir) {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join(left_file), b"left content").unwrap();
+        std::fs::write(td_r.path().join(right_file), b"right content").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag the file in the left pane (cursor starts at 0 or 1 after "..").
+        // Use dispatch to toggle selection on left pane.
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        // Switch focus to right pane and tag the file there.
+        app.dispatch(cargonaut_core::Command::FocusRight)
+            .await
+            .unwrap();
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        // Switch back to left.
+        app.dispatch(cargonaut_core::Command::FocusLeft)
+            .await
+            .unwrap();
+        (app, td_l, td_r)
+    }
+
+    #[tokio::test]
+    async fn queue_diff_two_tagged_files_sets_pending_external() {
+        let (app, _td_l, _td_r) = app_with_tagged_files("left.txt", "right.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        let tool = Some("diff -u");
+        queue_diff(&app, &mut ui, &mut status, tool);
+        assert!(
+            ui.pending_external.is_some(),
+            "two tagged files + configured tool must set pending_external; status={status:?}"
+        );
+        let ext = ui.pending_external.as_ref().unwrap();
+        assert_eq!(ext.program, "diff", "program should be 'diff'");
+        // args[-2] = left path, args[-1] = right path
+        let last_two: Vec<&str> = ext.args.iter().rev().take(2).rev().map(|s| s.as_str()).collect();
+        assert_eq!(last_two.len(), 2, "args must contain at least the two file paths");
+        // Both paths should exist on the filesystem
+        assert!(
+            std::path::Path::new(last_two[0]).exists(),
+            "left path must exist: {}",
+            last_two[0]
+        );
+        assert!(
+            std::path::Path::new(last_two[1]).exists(),
+            "right path must exist: {}",
+            last_two[1]
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_path_ordering_left_before_right() {
+        let (app, td_l, td_r) = app_with_tagged_files("lf.txt", "rf.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, Some("diff"));
+        let ext = ui.pending_external.as_ref().expect("pending_external must be set");
+        let n = ext.args.len();
+        assert!(n >= 2, "need at least 2 path args");
+        let left_path = &ext.args[n - 2];
+        let right_path = &ext.args[n - 1];
+        // The left-pane path must be in td_l and right-pane path in td_r
+        assert!(
+            left_path.contains(td_l.path().to_str().unwrap()),
+            "args[-2] must be the left-pane path; got {left_path:?} (expected prefix: {:?})",
+            td_l.path()
+        );
+        assert!(
+            right_path.contains(td_r.path().to_str().unwrap()),
+            "args[-1] must be the right-pane path; got {right_path:?} (expected prefix: {:?})",
+            td_r.path()
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_one_tagged_file_shows_error() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"x").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag only one file (left pane)
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, Some("diff -u"));
+        assert!(
+            ui.pending_external.is_none(),
+            "1 tagged file must not set pending_external"
+        );
+        assert!(
+            status.contains("exactly 2"),
+            "status must say 'exactly 2'; got {status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_no_tool_configured_shows_error() {
+        let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, None);
+        assert!(ui.pending_external.is_none());
+        assert!(
+            status.to_lowercase().contains("no diff tool"),
+            "status must mention missing tool; got {status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_diff_empty_tool_string_shows_error() {
+        let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
+        let mut ui = fresh_ui(
+            Rect { x: 0, y: 1, width: 40, height: 22 },
+            Rect { x: 40, y: 1, width: 40, height: 22 },
+            false,
+        );
+        let mut status = String::new();
+        queue_diff(&app, &mut ui, &mut status, Some(""));
+        assert!(ui.pending_external.is_none());
+        assert!(
+            status.to_lowercase().contains("empty"),
+            "status must mention empty tool string; got {status:?}"
         );
     }
 }
