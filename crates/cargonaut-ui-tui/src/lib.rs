@@ -384,8 +384,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
                     ref temp_path,
                     ref original_names,
                 } => {
-                    apply_bulk_rename_from_temp(app, temp_path, original_names, &mut status)
-                        .await;
+                    apply_bulk_rename_from_temp(app, temp_path, original_names, &mut status).await;
                 }
             }
         }
@@ -1376,10 +1375,7 @@ async fn apply_bulk_rename_from_temp(
     // SC-005 / FR-009: delete unconditionally before any early return.
     let _ = std::fs::remove_file(temp_path);
 
-    let edited: Vec<String> = edited_content
-        .lines()
-        .map(|l| l.to_string())
-        .collect();
+    let edited: Vec<String> = edited_content.lines().map(|l| l.to_string()).collect();
 
     let pairs = match cargonaut_core::validate_rename_proposals(original_names, &edited) {
         Ok(p) => p,
@@ -1395,9 +1391,8 @@ async fn apply_bulk_rename_from_temp(
     {
         Ok(events) => {
             for ev in events {
-                match ev {
-                    cargonaut_core::Event::Status(s) => *status = s,
-                    _ => {}
+                if let cargonaut_core::Event::Status(s) = ev {
+                    *status = s;
                 }
             }
         }
@@ -3585,10 +3580,7 @@ mod tests {
 
     // ===== Feature 049 US2: queue_diff tests (T012 red) =====
 
-    async fn app_with_tagged_files(
-        left_file: &str,
-        right_file: &str,
-    ) -> (App, TempDir, TempDir) {
+    async fn app_with_tagged_files(left_file: &str, right_file: &str) -> (App, TempDir, TempDir) {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         std::fs::write(td_l.path().join(left_file), b"left content").unwrap();
@@ -3617,8 +3609,18 @@ mod tests {
     async fn queue_diff_two_tagged_files_sets_pending_external() {
         let (app, _td_l, _td_r) = app_with_tagged_files("left.txt", "right.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3631,8 +3633,19 @@ mod tests {
         let ext = ui.pending_external.as_ref().unwrap();
         assert_eq!(ext.program, "diff", "program should be 'diff'");
         // args[-2] = left path, args[-1] = right path
-        let last_two: Vec<&str> = ext.args.iter().rev().take(2).rev().map(|s| s.as_str()).collect();
-        assert_eq!(last_two.len(), 2, "args must contain at least the two file paths");
+        let last_two: Vec<&str> = ext
+            .args
+            .iter()
+            .rev()
+            .take(2)
+            .rev()
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            last_two.len(),
+            2,
+            "args must contain at least the two file paths"
+        );
         // Both paths should exist on the filesystem
         assert!(
             std::path::Path::new(last_two[0]).exists(),
@@ -3650,13 +3663,26 @@ mod tests {
     async fn queue_diff_path_ordering_left_before_right() {
         let (app, td_l, td_r) = app_with_tagged_files("lf.txt", "rf.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
         queue_diff(&app, &mut ui, &mut status, Some("diff"));
-        let ext = ui.pending_external.as_ref().expect("pending_external must be set");
+        let ext = ui
+            .pending_external
+            .as_ref()
+            .expect("pending_external must be set");
         let n = ext.args.len();
         assert!(n >= 2, "need at least 2 path args");
         let left_path = &ext.args[n - 2];
@@ -3685,8 +3711,18 @@ mod tests {
             .await
             .unwrap();
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3705,8 +3741,18 @@ mod tests {
     async fn queue_diff_no_tool_configured_shows_error() {
         let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3722,8 +3768,18 @@ mod tests {
     async fn queue_diff_empty_tool_string_shows_error() {
         let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3745,8 +3801,18 @@ mod tests {
         let app = app_with(&td_l, &td_r).await;
         // No entries tagged
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3772,8 +3838,18 @@ mod tests {
             .await
             .unwrap();
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3794,8 +3870,18 @@ mod tests {
             .await
             .unwrap();
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3803,7 +3889,8 @@ mod tests {
         let ext = ui.pending_external.as_ref().expect("must be set");
         assert!(
             matches!(ext.kind, PendingExternalKind::BulkRename { .. }),
-            "kind must be BulkRename; got {:?}", ext.kind
+            "kind must be BulkRename; got {:?}",
+            ext.kind
         );
     }
 
@@ -3815,12 +3902,28 @@ mod tests {
         std::fs::write(td_l.path().join("beta.txt"), b"2").unwrap();
         let mut app = app_with(&td_l, &td_r).await;
         // Tag both files
-        app.dispatch(cargonaut_core::Command::SelectionToggle).await.unwrap();
-        app.dispatch(cargonaut_core::Command::CursorDown).await.unwrap();
-        app.dispatch(cargonaut_core::Command::SelectionToggle).await.unwrap();
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        app.dispatch(cargonaut_core::Command::CursorDown)
+            .await
+            .unwrap();
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();

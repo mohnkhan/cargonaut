@@ -40,3 +40,8 @@ test = false
 name = "compare_dirs"
 harness = false
 test = false
+
+[[bench]]
+name = "bulk_rename"
+harness = false
+test = false

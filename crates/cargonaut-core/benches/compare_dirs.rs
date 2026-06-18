@@ -69,9 +69,7 @@ async fn main() {
         .unwrap_or(2000.0);
 
     if p95_ms > gate_ms {
-        eprintln!(
-            "SC-001 FAIL: p95={p95_ms:.1} ms > {gate_ms:.0} ms gate"
-        );
+        eprintln!("SC-001 FAIL: p95={p95_ms:.1} ms > {gate_ms:.0} ms gate");
         std::process::exit(1);
     }
     println!("SC-001 OK: p95={p95_ms:.1} ms ≤ {gate_ms:.0} ms");

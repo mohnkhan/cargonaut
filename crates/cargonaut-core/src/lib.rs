@@ -534,8 +534,9 @@ pub enum UndoEntry {
     /// The undo reverses each pair (`new_name → old_name`), all in the
     /// same directory as the active pane at the time of the rename.
     Rename {
-        /// Directory the renames live in (absolute `file://` path).
-        dir: VfsPath,
+        /// Local filesystem path for the rename directory (e.g. `/tmp/foo`).
+        /// Stored as a plain String (not VfsPath) to keep the variant small.
+        dir: String,
         /// `(new_name, old_name)` — already reversed so undo just iterates.
         pairs: Vec<(String, String)>,
     },
@@ -2039,8 +2040,14 @@ impl App {
                     // Same size — check content hash.
                     let l_path_str = self.pane(PaneId::Left).cwd.join(name).display();
                     let r_path_str = self.pane(PaneId::Right).cwd.join(name).display();
-                    let l_local = l_path_str.strip_prefix("file://").unwrap_or(&l_path_str).to_string();
-                    let r_local = r_path_str.strip_prefix("file://").unwrap_or(&r_path_str).to_string();
+                    let l_local = l_path_str
+                        .strip_prefix("file://")
+                        .unwrap_or(&l_path_str)
+                        .to_string();
+                    let r_local = r_path_str
+                        .strip_prefix("file://")
+                        .unwrap_or(&r_path_str)
+                        .to_string();
                     let lh = crc32_partial(std::path::Path::new(&l_local), *l_size);
                     let rh = crc32_partial(std::path::Path::new(&r_local), *r_size);
                     if lh != rh {
@@ -2105,12 +2112,7 @@ impl App {
         let mut events: Vec<Event> = Vec::new();
         match entry {
             UndoEntry::Rename { dir, pairs } => {
-                let dir_display = dir.display();
-                let dir_local = dir_display
-                    .strip_prefix("file://")
-                    .unwrap_or(&dir_display)
-                    .to_string();
-                let dir_path = std::path::Path::new(&dir_local);
+                let dir_path = std::path::Path::new(&dir);
                 let mut count = 0usize;
                 for (new_name, old_name) in &pairs {
                     let src = dir_path.join(new_name);
@@ -2128,8 +2130,8 @@ impl App {
                 for path in &copies {
                     let disp = path.display();
                     let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
-                    let _ = std::fs::remove_file(&local)
-                        .or_else(|_| std::fs::remove_dir_all(&local));
+                    let _ =
+                        std::fs::remove_file(&local).or_else(|_| std::fs::remove_dir_all(&local));
                 }
                 events.push(Event::Status(format!(
                     "{} cop{} removed (undo copy)",
@@ -2143,10 +2145,14 @@ impl App {
                 for (dst, src) in &pairs {
                     let dst_disp = dst.display();
                     let src_disp = src.display();
-                    let dst_local =
-                        dst_disp.strip_prefix("file://").unwrap_or(&dst_disp).to_string();
-                    let src_local =
-                        src_disp.strip_prefix("file://").unwrap_or(&src_disp).to_string();
+                    let dst_local = dst_disp
+                        .strip_prefix("file://")
+                        .unwrap_or(&dst_disp)
+                        .to_string();
+                    let src_local = src_disp
+                        .strip_prefix("file://")
+                        .unwrap_or(&src_disp)
+                        .to_string();
                     let _ = std::fs::rename(&dst_local, &src_local);
                 }
                 events.push(Event::Status("Move undone".into()));
@@ -2240,9 +2246,8 @@ impl App {
 
         // Always record what was completed (may be partial).
         if !completed.is_empty() {
-            let active_pane_cwd = self.active_pane_state().cwd.clone();
             self.undo_log = Some(UndoEntry::Rename {
-                dir: active_pane_cwd,
+                dir: cwd_local.clone(),
                 pairs: completed.clone(),
             });
         }
@@ -4671,7 +4676,10 @@ mod tests {
         let ha = crc32_partial(&a, five_mib as u64);
         let hb = crc32_partial(&b, five_mib as u64);
         assert!(ha.is_some());
-        assert_eq!(ha, hb, "large files: same head 512 KiB => same hash (head-only strategy)");
+        assert_eq!(
+            ha, hb,
+            "large files: same head 512 KiB => same hash (head-only strategy)"
+        );
     }
 
     #[test]
@@ -4706,13 +4714,30 @@ mod tests {
         std::fs::write(td_l.path().join("only_left.txt"), b"x").unwrap();
         let mut app = make_compare_app(&td_l, &td_r).await;
         let events = app.dispatch(Command::CompareDirectories).await.unwrap();
-        let statuses: Vec<_> = events.iter().filter_map(|e| if let Event::Status(s) = e { Some(s.clone()) } else { None }).collect();
-        let has_status = statuses.iter().any(|s| s.contains("differ") || s.contains("differ") || s.contains("1"));
+        let statuses: Vec<_> = events
+            .iter()
+            .filter_map(|e| {
+                if let Event::Status(s) = e {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let has_status = statuses
+            .iter()
+            .any(|s| s.contains("differ") || s.contains("differ") || s.contains("1"));
         assert!(has_status, "expected status message; got: {statuses:?}");
         let left_sel = &app.pane(PaneId::Left).selected;
-        assert!(!left_sel.is_empty(), "left-only file must be tagged in left pane");
+        assert!(
+            !left_sel.is_empty(),
+            "left-only file must be tagged in left pane"
+        );
         let right_sel = &app.pane(PaneId::Right).selected;
-        assert!(right_sel.is_empty(), "right pane should have no tags for a left-only file");
+        assert!(
+            right_sel.is_empty(),
+            "right pane should have no tags for a left-only file"
+        );
     }
 
     #[tokio::test]
@@ -4734,8 +4759,14 @@ mod tests {
         std::fs::write(td_r.path().join("f.txt"), b"bb").unwrap();
         let mut app = make_compare_app(&td_l, &td_r).await;
         app.dispatch(Command::CompareDirectories).await.unwrap();
-        assert!(!app.pane(PaneId::Left).selected.is_empty(), "left pane must be tagged for size-differ");
-        assert!(!app.pane(PaneId::Right).selected.is_empty(), "right pane must be tagged for size-differ");
+        assert!(
+            !app.pane(PaneId::Left).selected.is_empty(),
+            "left pane must be tagged for size-differ"
+        );
+        assert!(
+            !app.pane(PaneId::Right).selected.is_empty(),
+            "right pane must be tagged for size-differ"
+        );
     }
 
     #[tokio::test]
@@ -4747,8 +4778,14 @@ mod tests {
         std::fs::write(td_r.path().join("f.txt"), b"bbb").unwrap();
         let mut app = make_compare_app(&td_l, &td_r).await;
         app.dispatch(Command::CompareDirectories).await.unwrap();
-        assert!(!app.pane(PaneId::Left).selected.is_empty(), "left pane must be tagged for hash-differ");
-        assert!(!app.pane(PaneId::Right).selected.is_empty(), "right pane must be tagged for hash-differ");
+        assert!(
+            !app.pane(PaneId::Left).selected.is_empty(),
+            "left pane must be tagged for hash-differ"
+        );
+        assert!(
+            !app.pane(PaneId::Right).selected.is_empty(),
+            "right pane must be tagged for hash-differ"
+        );
     }
 
     #[tokio::test]
@@ -4759,8 +4796,14 @@ mod tests {
         std::fs::write(td_r.path().join("same.txt"), b"identical content").unwrap();
         let mut app = make_compare_app(&td_l, &td_r).await;
         app.dispatch(Command::CompareDirectories).await.unwrap();
-        assert!(app.pane(PaneId::Left).selected.is_empty(), "identical file must NOT be tagged in left");
-        assert!(app.pane(PaneId::Right).selected.is_empty(), "identical file must NOT be tagged in right");
+        assert!(
+            app.pane(PaneId::Left).selected.is_empty(),
+            "identical file must NOT be tagged in left"
+        );
+        assert!(
+            app.pane(PaneId::Right).selected.is_empty(),
+            "identical file must NOT be tagged in right"
+        );
     }
 
     #[tokio::test]
@@ -4776,9 +4819,18 @@ mod tests {
         .unwrap();
         let events = app.dispatch(Command::CompareDirectories).await.unwrap();
         let has_same_dir_status = events.iter().any(|e| {
-            if let Event::Status(s) = e { s.contains("same directory") || s.contains("same path") || s.contains("mark nothing") } else { false }
+            if let Event::Status(s) = e {
+                s.contains("same directory")
+                    || s.contains("same path")
+                    || s.contains("mark nothing")
+            } else {
+                false
+            }
         });
-        assert!(has_same_dir_status, "must return a status warning when both panes are the same dir; got {events:?}");
+        assert!(
+            has_same_dir_status,
+            "must return a status warning when both panes are the same dir; got {events:?}"
+        );
         assert!(app.pane(PaneId::Left).selected.is_empty());
         assert!(app.pane(PaneId::Right).selected.is_empty());
     }
@@ -4797,7 +4849,10 @@ mod tests {
         };
         // Use SelectionToggle to pre-tag it
         app.dispatch(Command::SelectionToggle).await.unwrap();
-        assert!(!app.pane(PaneId::Left).selected.is_empty(), "pre-condition: left pane has a tagged entry");
+        assert!(
+            !app.pane(PaneId::Left).selected.is_empty(),
+            "pre-condition: left pane has a tagged entry"
+        );
         let pre_selected = app.pane(PaneId::Left).selected.clone();
         // Now compare — should be additive, not clear existing tags
         app.dispatch(Command::CompareDirectories).await.unwrap();
@@ -4825,7 +4880,10 @@ mod tests {
         let events = app.dispatch(Command::CompareDirectories).await.unwrap();
         // First event should be Status("Comparing…")
         if let Some(Event::Status(s)) = events.first() {
-            assert!(s.contains("Comparing"), "first event for >1000 entries must be Status(\"Comparing…\"); got {s:?}");
+            assert!(
+                s.contains("Comparing"),
+                "first event for >1000 entries must be Status(\"Comparing…\"); got {s:?}"
+            );
         } else {
             panic!("expected first event to be Status(\"Comparing…\") for >1000 visible entries; got {:?}", events.first());
         }
@@ -4839,8 +4897,13 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let events = app.apply_bulk_rename(vec![]).await.unwrap();
-        let has_no_changes = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("No changes")));
-        assert!(has_no_changes, "empty pairs must emit 'No changes' status; got {events:?}");
+        let has_no_changes = events
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("No changes")));
+        assert!(
+            has_no_changes,
+            "empty pairs must emit 'No changes' status; got {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -4856,9 +4919,18 @@ mod tests {
             ("c.txt".to_string(), "C.txt".to_string()),
         ];
         app.apply_bulk_rename(pairs).await.unwrap();
-        assert!(td_l.path().join("A.txt").exists(), "a.txt must be renamed to A.txt");
-        assert!(td_l.path().join("b.txt").exists(), "b.txt must be unchanged");
-        assert!(td_l.path().join("C.txt").exists(), "c.txt must be renamed to C.txt");
+        assert!(
+            td_l.path().join("A.txt").exists(),
+            "a.txt must be renamed to A.txt"
+        );
+        assert!(
+            td_l.path().join("b.txt").exists(),
+            "b.txt must be unchanged"
+        );
+        assert!(
+            td_l.path().join("C.txt").exists(),
+            "c.txt must be renamed to C.txt"
+        );
         assert!(!td_l.path().join("a.txt").exists());
         assert!(!td_l.path().join("c.txt").exists());
     }
@@ -4874,11 +4946,17 @@ mod tests {
         let pairs = vec![("a.txt".to_string(), "existing.txt".to_string())];
         let result = app.apply_bulk_rename(pairs).await;
         // Must fail and a.txt must still exist
-        assert!(result.is_err() || {
-            // OR: returns Ok but with error status, and a.txt unchanged
-            td_l.path().join("a.txt").exists()
-        }, "collision must not rename a.txt");
-        assert!(td_l.path().join("a.txt").exists(), "a.txt must be unchanged on collision");
+        assert!(
+            result.is_err() || {
+                // OR: returns Ok but with error status, and a.txt unchanged
+                td_l.path().join("a.txt").exists()
+            },
+            "collision must not rename a.txt"
+        );
+        assert!(
+            td_l.path().join("a.txt").exists(),
+            "a.txt must be unchanged on collision"
+        );
     }
 
     #[tokio::test]
@@ -4894,9 +4972,14 @@ mod tests {
         ];
         let events = app.apply_bulk_rename(pairs).await.unwrap();
         let has_pane = events.iter().any(|e| matches!(e, Event::PaneUpdated(_)));
-        let has_status = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("2")));
+        let has_status = events
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("2")));
         assert!(has_pane, "must emit PaneUpdated; events={events:?}");
-        assert!(has_status, "must emit Status with count 2; events={events:?}");
+        assert!(
+            has_status,
+            "must emit Status with count 2; events={events:?}"
+        );
     }
 
     #[tokio::test]
@@ -4907,12 +4990,18 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         let pairs = vec![("a.txt".to_string(), "A.txt".to_string())];
         app.apply_bulk_rename(pairs).await.unwrap();
-        let undo = app.undo_log.as_ref().expect("undo_log must be set after rename");
+        let undo = app
+            .undo_log
+            .as_ref()
+            .expect("undo_log must be set after rename");
         match undo {
             UndoEntry::Rename { pairs, .. } => {
                 assert_eq!(pairs.len(), 1);
-                assert_eq!(pairs[0], ("A.txt".to_string(), "a.txt".to_string()),
-                    "undo pairs must be reversed (new→old)");
+                assert_eq!(
+                    pairs[0],
+                    ("A.txt".to_string(), "a.txt".to_string()),
+                    "undo pairs must be reversed (new→old)"
+                );
             }
             other => panic!("expected UndoEntry::Rename, got {other:?}"),
         }
@@ -4933,11 +5022,18 @@ mod tests {
         let _ = app.apply_bulk_rename(pairs).await;
         // a.txt was renamed; undo log should contain at least the completed rename
         if td_l.path().join("A.txt").exists() {
-            let undo = app.undo_log.as_ref().expect("undo_log must be set after partial rename");
+            let undo = app
+                .undo_log
+                .as_ref()
+                .expect("undo_log must be set after partial rename");
             match undo {
                 UndoEntry::Rename { pairs, .. } => {
-                    assert!(pairs.iter().any(|(new, old)| new == "A.txt" && old == "a.txt"),
-                        "partial undo must include completed rename A.txt→a.txt; pairs={pairs:?}");
+                    assert!(
+                        pairs
+                            .iter()
+                            .any(|(new, old)| new == "A.txt" && old == "a.txt"),
+                        "partial undo must include completed rename A.txt→a.txt; pairs={pairs:?}"
+                    );
                 }
                 other => panic!("expected UndoEntry::Rename, got {other:?}"),
             }
@@ -4977,8 +5073,13 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let events = app.undo_last_operation().await.unwrap();
-        let has_nothing = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Nothing")));
-        assert!(has_nothing, "None log must return 'Nothing to undo'; got {events:?}");
+        let has_nothing = events
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Nothing")));
+        assert!(
+            has_nothing,
+            "None log must return 'Nothing to undo'; got {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -4988,9 +5089,12 @@ mod tests {
         std::fs::write(td_l.path().join("original.txt"), b"x").unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         // Rename original.txt → renamed.txt
-        app.apply_bulk_rename(vec![("original.txt".to_string(), "renamed.txt".to_string())])
-            .await
-            .unwrap();
+        app.apply_bulk_rename(vec![(
+            "original.txt".to_string(),
+            "renamed.txt".to_string(),
+        )])
+        .await
+        .unwrap();
         assert!(td_l.path().join("renamed.txt").exists());
         // Undo: should restore original.txt
         app.undo_last_operation().await.unwrap();
@@ -5027,7 +5131,10 @@ mod tests {
         app.undo_log = Some(UndoEntry::Delete);
         let events = app.undo_last_operation().await.unwrap();
         let has_warning = events.iter().any(|e| matches!(e, Event::Status(s) if s.to_lowercase().contains("cannot") || s.to_lowercase().contains("undo")));
-        assert!(has_warning, "Delete undo must emit cannot-be-undone status; got {events:?}");
+        assert!(
+            has_warning,
+            "Delete undo must emit cannot-be-undone status; got {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -5042,8 +5149,13 @@ mod tests {
         app.undo_last_operation().await.unwrap();
         // Second undo — log is now None
         let events = app.undo_last_operation().await.unwrap();
-        let has_nothing = events.iter().any(|e| matches!(e, Event::Status(s) if s.contains("Nothing")));
-        assert!(has_nothing, "second undo must return 'Nothing to undo'; got {events:?}");
+        let has_nothing = events
+            .iter()
+            .any(|e| matches!(e, Event::Status(s) if s.contains("Nothing")));
+        assert!(
+            has_nothing,
+            "second undo must return 'Nothing to undo'; got {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -5057,8 +5169,14 @@ mod tests {
             .await
             .unwrap();
         app.undo_last_operation().await.unwrap();
-        assert!(app.pane(PaneId::Left).selected.is_empty(), "undo must clear left selection");
-        assert!(app.pane(PaneId::Right).selected.is_empty(), "undo must clear right selection");
+        assert!(
+            app.pane(PaneId::Left).selected.is_empty(),
+            "undo must clear left selection"
+        );
+        assert!(
+            app.pane(PaneId::Right).selected.is_empty(),
+            "undo must clear right selection"
+        );
     }
 
     #[tokio::test]
@@ -5066,30 +5184,50 @@ mod tests {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
-        let dummy_src = VfsPath::parse(&format!("file://{}/src.txt", td_l.path().display())).unwrap();
-        let dummy_dst = VfsPath::parse(&format!("file://{}/dst.txt", td_l.path().display())).unwrap();
+        let dummy_src =
+            VfsPath::parse(&format!("file://{}/src.txt", td_l.path().display())).unwrap();
+        let dummy_dst =
+            VfsPath::parse(&format!("file://{}/dst.txt", td_l.path().display())).unwrap();
         app.undo_log = Some(UndoEntry::Move {
             pairs: vec![(dummy_dst, dummy_src)],
         });
         // Must return Ok (not panic) — Move undo is a scaffold in Feature 050
         let result = app.undo_last_operation().await;
-        assert!(result.is_ok(), "Move undo scaffold must not panic; got {result:?}");
+        assert!(
+            result.is_ok(),
+            "Move undo scaffold must not panic; got {result:?}"
+        );
     }
 
     // ===== Feature 050 T005 (red): validate_rename_proposals — 7 failing tests =====
 
     #[test]
     fn validate_rename_all_unchanged_returns_empty() {
-        let orig = vec!["a.txt".to_string(), "b.txt".to_string(), "c.txt".to_string()];
+        let orig = vec![
+            "a.txt".to_string(),
+            "b.txt".to_string(),
+            "c.txt".to_string(),
+        ];
         let edited = orig.clone();
         let result = validate_rename_proposals(&orig, &edited).unwrap();
-        assert!(result.is_empty(), "all-unchanged must return empty vec; got {result:?}");
+        assert!(
+            result.is_empty(),
+            "all-unchanged must return empty vec; got {result:?}"
+        );
     }
 
     #[test]
     fn validate_rename_two_of_three_changed_correct_pairs() {
-        let orig = vec!["a.txt".to_string(), "b.txt".to_string(), "c.txt".to_string()];
-        let edited = vec!["a.txt".to_string(), "B.txt".to_string(), "C.txt".to_string()];
+        let orig = vec![
+            "a.txt".to_string(),
+            "b.txt".to_string(),
+            "c.txt".to_string(),
+        ];
+        let edited = vec![
+            "a.txt".to_string(),
+            "B.txt".to_string(),
+            "C.txt".to_string(),
+        ];
         let result = validate_rename_proposals(&orig, &edited).unwrap();
         assert_eq!(result.len(), 2);
         assert!(result.contains(&("b.txt".to_string(), "B.txt".to_string())));
@@ -5130,8 +5268,16 @@ mod tests {
 
     #[test]
     fn validate_rename_correct_output_pairs_ordering() {
-        let orig = vec!["first.txt".to_string(), "second.txt".to_string(), "third.txt".to_string()];
-        let edited = vec!["1st.txt".to_string(), "second.txt".to_string(), "3rd.txt".to_string()];
+        let orig = vec![
+            "first.txt".to_string(),
+            "second.txt".to_string(),
+            "third.txt".to_string(),
+        ];
+        let edited = vec![
+            "1st.txt".to_string(),
+            "second.txt".to_string(),
+            "3rd.txt".to_string(),
+        ];
         let result = validate_rename_proposals(&orig, &edited).unwrap();
         assert_eq!(result.len(), 2);
         // pairs must be in listing order

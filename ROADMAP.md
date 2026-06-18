@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-18 (Feature 048 closed #70 — F2 mouse-click integration test; Tier 3 now clear — #49 and #30 were already closed; no open Tier 3 issues remain).
+**Last updated**: 2026-06-18 (Feature 050 closed #47 — bulk rename via editor + undo; #47 was the last open Tier 2 item in this batch).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -58,7 +58,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 | ~~[#43](https://github.com/mohnkhan/cargonaut/issues/43)~~ | ~~Compare directories + diff two tagged files~~ | ~~M~~ | **Closed — Feature 049** |
 | [#44](https://github.com/mohnkhan/cargonaut/issues/44) | Persistent subshell integration (Ctrl-o) | L | Feature 031 §Out of Scope |
 | [#45](https://github.com/mohnkhan/cargonaut/issues/45) | Tabs: multiple panels per side | L | Feature 031 §Out of Scope |
-| [#47](https://github.com/mohnkhan/cargonaut/issues/47) | Bulk rename via editor + undo of file ops | M | Feature 031 §Out of Scope |
+| ~~[#47](https://github.com/mohnkhan/cargonaut/issues/47)~~ | ~~Bulk rename via editor + undo of file ops~~ | ~~M~~ | **Closed — Feature 050** |
 | [#48](https://github.com/mohnkhan/cargonaut/issues/48) | VFS backends: archives + remote (SFTP/FTP/sh) | XL | Feature 031 §Out of Scope — already Phase 2+ roadmapped |
 | [#50](https://github.com/mohnkhan/cargonaut/issues/50) | User menu (F2) + hypertext help content | M | Feature 031 — minimal F1 overlay + F2 placeholder ship |
 
