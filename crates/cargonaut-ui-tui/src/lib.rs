@@ -1808,6 +1808,7 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::CycleListingMode => AppCommand::CycleListingMode,
         U::RecursiveDirSize => AppCommand::RecursiveDirSize,
         U::CompareDirectories => AppCommand::CompareDirectories,
+        U::UndoLastOp => AppCommand::UndoLastOp,
         _ => return None,
     })
 }

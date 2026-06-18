@@ -1014,7 +1014,7 @@ impl App {
             ChownRecursive(owner) => self.chown_recursive(&owner).await,
             CompareDirectories => self.compare_directories(),
             BulkRenameApply(pairs) => self.apply_bulk_rename(pairs).await,
-            UndoLastOp => Ok(vec![]),
+            UndoLastOp => self.undo_last_operation().await,
             Quit => Ok(vec![Event::QuitRequested]),
         }
     }
@@ -1134,6 +1134,9 @@ impl App {
     /// Actually start a copy from the active pane's selection (or focused
     /// entry) to the opposite pane's cwd. Caller invokes this *after* the
     /// user confirms the dialog.
+    ///
+    /// Feature 050 T017: records `UndoEntry::Copy` with the destination paths
+    /// so the user can undo the copy via `C-z`.
     pub async fn confirm_copy(&mut self) -> Result<Vec<Event>, AppError> {
         let src_pane = self.active;
         let dst_pane = src_pane.other();
@@ -1144,9 +1147,11 @@ impl App {
         let dst_cwd = self.pane(dst_pane).cwd.clone();
         let opts = self.transfer_opts();
         let mut events = Vec::new();
+        let mut copy_paths: Vec<VfsPath> = Vec::new();
         for entry_name in entries {
             let src_path = self.pane(src_pane).cwd.join(&entry_name);
             let dst_path = dst_cwd.join(&entry_name);
+            copy_paths.push(dst_path.clone());
             let job = submit_transfer(
                 Arc::clone(&self.local_fs),
                 src_path,
@@ -1159,6 +1164,10 @@ impl App {
             self.transfers.insert(id, job);
             self.transfer_order.push(id);
             events.push(Event::TransferProgressed(id));
+        }
+        // Feature 050 T017: record copy destinations for undo.
+        if !copy_paths.is_empty() {
+            self.undo_log = Some(UndoEntry::Copy { copies: copy_paths });
         }
         Ok(events)
     }
@@ -2075,6 +2084,96 @@ impl App {
 }
 
 impl App {
+    /// Feature 050 — undo the most recent reversible file operation.
+    ///
+    /// Consumes and clears `undo_log` regardless of outcome (`take()`).
+    /// - `None` → "Nothing to undo"
+    /// - `Rename` → reverse-rename each pair in the recorded directory
+    /// - `Copy` → delete each copy destination path
+    /// - `Move` → reverse-move scaffold (Move is not yet fully implemented in Feature 050)
+    /// - `Delete` → emits "cannot be undone" warning
+    ///
+    /// On success, clears selection on both panes and re-lists both.
+    pub async fn undo_last_operation(&mut self) -> Result<Vec<Event>, AppError> {
+        let entry = match self.undo_log.take() {
+            None => {
+                return Ok(vec![Event::Status("Nothing to undo".into())]);
+            }
+            Some(e) => e,
+        };
+
+        let mut events: Vec<Event> = Vec::new();
+        match entry {
+            UndoEntry::Rename { dir, pairs } => {
+                let dir_display = dir.display();
+                let dir_local = dir_display
+                    .strip_prefix("file://")
+                    .unwrap_or(&dir_display)
+                    .to_string();
+                let dir_path = std::path::Path::new(&dir_local);
+                let mut count = 0usize;
+                for (new_name, old_name) in &pairs {
+                    let src = dir_path.join(new_name);
+                    let dst = dir_path.join(old_name);
+                    if std::fs::rename(&src, &dst).is_ok() {
+                        count += 1;
+                    }
+                }
+                events.push(Event::Status(format!(
+                    "{count} entr{} restored",
+                    if count == 1 { "y" } else { "ies" }
+                )));
+            }
+            UndoEntry::Copy { copies } => {
+                for path in &copies {
+                    let disp = path.display();
+                    let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
+                    let _ = std::fs::remove_file(&local)
+                        .or_else(|_| std::fs::remove_dir_all(&local));
+                }
+                events.push(Event::Status(format!(
+                    "{} cop{} removed (undo copy)",
+                    copies.len(),
+                    if copies.len() == 1 { "y" } else { "ies" }
+                )));
+            }
+            UndoEntry::Move { pairs } => {
+                // Move undo scaffold — Move is not fully implemented in Feature 050.
+                // Attempt reverse-moves best-effort; errors are swallowed.
+                for (dst, src) in &pairs {
+                    let dst_disp = dst.display();
+                    let src_disp = src.display();
+                    let dst_local =
+                        dst_disp.strip_prefix("file://").unwrap_or(&dst_disp).to_string();
+                    let src_local =
+                        src_disp.strip_prefix("file://").unwrap_or(&src_disp).to_string();
+                    let _ = std::fs::rename(&dst_local, &src_local);
+                }
+                events.push(Event::Status("Move undone".into()));
+            }
+            UndoEntry::Delete => {
+                events.push(Event::Status(
+                    "Delete cannot be undone — files are permanently removed".into(),
+                ));
+            }
+        }
+
+        // Clear selection on both panes and re-list both.
+        for id in [PaneId::Left, PaneId::Right] {
+            let cwd = self.pane(id).cwd.clone();
+            let sort = self.pane(id).sort;
+            let listing = self.local_fs.list(&cwd, sort).await?;
+            let p = self.pane_mut(id);
+            p.listing = listing;
+            p.selected.clear();
+            let rows = p.row_count();
+            p.cursor = if rows == 0 { 0 } else { p.cursor.min(rows - 1) };
+            events.push(Event::PaneUpdated(id));
+        }
+
+        Ok(events)
+    }
+
     /// Feature 050 — apply validated rename pairs to the active pane's directory.
     ///
     /// `pairs` is a list of `(old_name, new_name)` basenames to rename within the
