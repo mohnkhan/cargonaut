@@ -94,7 +94,7 @@
 - [X] T017 [P] Update `README.md`: increment test count in "At a Glance" metrics table; add one-line entry to "Feature History" for Feature 049
 - [X] T018 [P] Append Feature 049 section to `Learnings.md` (minimum 3 bullets: what was hard, root causes, non-obvious decisions — e.g., CRC32 vs SHA-2 choice, additive tagging semantics, PendingExternal.args refactor)
 - [X] T019 [P] Update `ROADMAP.md`: remove or move to `## Closed` the #43 row
-- [ ] T020 Close GitHub issue #43 with a comment referencing the merged PR
+- [X] T020 Close GitHub issue #43 with a comment referencing the merged PR
 
 ---
 
