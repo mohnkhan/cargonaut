@@ -184,10 +184,11 @@ enum InputKind {
 /// An external program to run (F3/F4), suspending the TUI around it.
 #[derive(Debug, Clone)]
 struct PendingExternal {
-    /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks).
+    /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks, or split from diff tool string).
     program: String,
-    /// Local filesystem path argument.
-    path: String,
+    /// Additional arguments passed after `program`. For F3/F4 this is `vec![path]`;
+    /// for diff (US2) this is `argv[1..] + [left_path, right_path]`.
+    args: Vec<String>,
 }
 
 async fn run_loop<B: ratatui::backend::Backend>(
@@ -1171,13 +1172,12 @@ fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: Extern
     };
     ui.pending_external = Some(PendingExternal {
         program,
-        path: local,
+        args: vec![local],
     });
 }
 
-/// Suspend the TUI, run an external program on a file, then restore the
-/// terminal (FR-030/031). Uses `Command::new(prog).arg(path)` — no shell —
-/// per the constitution's macro-safety rule.
+/// Suspend the TUI, run an external program, then restore the terminal
+/// (FR-030/031/FR-008). Uses `Command::new(program).args(args)` — no shell.
 fn run_external<B: ratatui::backend::Backend>(
     term: &mut Terminal<B>,
     ext: &PendingExternal,
@@ -1186,7 +1186,7 @@ fn run_external<B: ratatui::backend::Backend>(
     let _ = disable_raw_mode();
     let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
     let _ = std::process::Command::new(&ext.program)
-        .arg(&ext.path)
+        .args(&ext.args)
         .status();
     enable_raw_mode().map_err(Error::Terminal)?;
     execute!(stdout(), EnterAlternateScreen).map_err(Error::Terminal)?;
