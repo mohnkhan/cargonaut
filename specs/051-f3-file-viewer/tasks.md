@@ -178,8 +178,8 @@
 - [ ] T049 [P] Extend `benches/keypress_latency.rs` with a viewer scenario: open viewer dialog, send a `Down` key event, time render — assert ≤ 16 ms (SC-002) in `crates/cargonaut-ui-tui/benches/keypress_latency.rs`
 - [ ] T050 [P] Extend `benches/rss_headroom.rs` with a large-file streaming viewer scenario: create a **1 GiB sparse file** via `File::seek(SeekFrom::End(1_073_741_823))` + `file.write_all(&[0u8])` (zero disk writes, instant creation, exercises the streaming path at the SC-003 mandated size); open the viewer on it, scroll through ≥ 5 page-downs, assert RSS ≤ 64 MiB (SC-003 requires "1 GiB file open" — not just > 10 MiB) in `crates/cargonaut-ui-tui/benches/rss_headroom.rs`
 - [ ] T051 Update `HELP_SECTIONS` in `crates/cargonaut-ui-tui/src/dialog.rs`: **rename the existing "Preview" section to "File Viewer"** (the prior section had only 5 rows; adding g/G/w/q/Up/Down/PgUp/PgDn/Home/End doubles the content and warrants a more descriptive label); add rows for all viewer keys: `g` (goto line/offset), `G` (jump to end), `w` (toggle word-wrap), `q` / `Esc` (close), Up/Down (scroll 1 line), PgUp/PgDn (scroll page), Home/End (first/last line), `Ctrl-x X` (toggle hex mode), `/` (search forward), `?` (search backward), `n`/`N` (next/prev match)
-- [ ] T052 Update `README.md`: increment test count in "At a Glance" metrics table (≥479 tests); add one-line entry to "Feature History" for feature 051
-- [ ] T053 Update `Learnings.md`: append a "Feature 051 — F3 Built-in File Viewer" section with ≥ 3 bullet points covering what was hard, root causes, and non-obvious decisions
+- [X] T052 Update `README.md`: increment test count in "At a Glance" metrics table (≥479 tests); add one-line entry to "Feature History" for feature 051
+- [X] T053 Update `Learnings.md`: append a "Feature 051 — F3 Built-in File Viewer" section with ≥ 3 bullet points covering what was hard, root causes, and non-obvious decisions
 
 **Checkpoint**: `make ci-local` fully green; all 3 bench targets run; binary size still ≤ 8 MiB; test count ≥ 479.
 
