@@ -1013,7 +1013,7 @@ impl App {
             ChmodRecursive(spec) => self.chmod_recursive(&spec).await,
             ChownRecursive(owner) => self.chown_recursive(&owner).await,
             CompareDirectories => self.compare_directories(),
-            BulkRenameApply(_) => Ok(vec![]),
+            BulkRenameApply(pairs) => self.apply_bulk_rename(pairs).await,
             UndoLastOp => Ok(vec![]),
             Quit => Ok(vec![Event::QuitRequested]),
         }
@@ -2070,6 +2070,100 @@ impl App {
         } else {
             events.push(Event::Status(format!("{differ_count} entries differ")));
         }
+        Ok(events)
+    }
+}
+
+impl App {
+    /// Feature 050 — apply validated rename pairs to the active pane's directory.
+    ///
+    /// `pairs` is a list of `(old_name, new_name)` basenames to rename within the
+    /// active pane's cwd. The collision check (does `new_name` already exist in
+    /// the listing and is NOT being renamed away?) is done here before any rename
+    /// is attempted. On success, records `UndoEntry::Rename` (reversed pairs) and
+    /// re-lists the pane. On partial failure the undo entry covers completed renames.
+    pub async fn apply_bulk_rename(
+        &mut self,
+        pairs: Vec<(String, String)>,
+    ) -> Result<Vec<Event>, AppError> {
+        if pairs.is_empty() {
+            return Ok(vec![Event::Status("No changes — nothing renamed".into())]);
+        }
+
+        // Require a local filesystem pane (file:// scheme).
+        let pane = self.active_pane_state();
+        if pane.cwd.scheme != "file" {
+            return Ok(vec![Event::Status(
+                "Bulk rename only supported for local (file://) panes".into(),
+            )]);
+        }
+
+        // Build a local path for the active pane's directory.
+        let cwd_display = pane.cwd.display();
+        // `file:///foo/bar` → `/foo/bar`
+        let cwd_local = cwd_display
+            .strip_prefix("file://")
+            .unwrap_or(&cwd_display)
+            .to_string();
+        let cwd_path = std::path::Path::new(&cwd_local);
+
+        // Collision check: for each proposed new name, it must not exist on disk
+        // UNLESS it is itself a source (i.e. it's being renamed away).
+        let sources: std::collections::HashSet<&str> =
+            pairs.iter().map(|(old, _)| old.as_str()).collect();
+        let existing_names: std::collections::HashSet<String> = pane
+            .listing
+            .entries
+            .iter()
+            .map(|e| e.name.to_string())
+            .collect();
+        for (_, new_name) in &pairs {
+            if existing_names.contains(new_name) && !sources.contains(new_name.as_str()) {
+                return Ok(vec![Event::Status(format!(
+                    "Rename aborted: '{new_name}' already exists in the directory"
+                ))]);
+            }
+        }
+
+        // Apply renames one by one; record completed ones for undo.
+        let mut completed: Vec<(String, String)> = Vec::new();
+        let mut rename_error: Option<String> = None;
+        for (old_name, new_name) in &pairs {
+            let src = cwd_path.join(old_name);
+            let dst = cwd_path.join(new_name);
+            if let Err(e) = std::fs::rename(&src, &dst) {
+                rename_error = Some(format!("Rename '{old_name}' → '{new_name}' failed: {e}"));
+                break;
+            }
+            // Record reversed pair for undo: (new_name, old_name).
+            completed.push((new_name.clone(), old_name.clone()));
+        }
+
+        // Always record what was completed (may be partial).
+        if !completed.is_empty() {
+            let active_pane_cwd = self.active_pane_state().cwd.clone();
+            self.undo_log = Some(UndoEntry::Rename {
+                dir: active_pane_cwd,
+                pairs: completed.clone(),
+            });
+        }
+
+        // Re-list active pane.
+        let relist_events = self.relist_active().await?;
+
+        if let Some(err_msg) = rename_error {
+            let completed_count = completed.len();
+            return Ok(vec![Event::Status(format!(
+                "{completed_count} entries renamed (partial); {err_msg}"
+            ))]);
+        }
+
+        let count = pairs.len();
+        let mut events = relist_events;
+        events.push(Event::Status(format!(
+            "{count} entr{} renamed",
+            if count == 1 { "y" } else { "ies" }
+        )));
         Ok(events)
     }
 }
