@@ -4592,4 +4592,67 @@ mod tests {
             panic!("expected first event to be Status(\"Comparing…\") for >1000 visible entries; got {:?}", events.first());
         }
     }
+
+    // ===== Feature 050 T005 (red): validate_rename_proposals — 7 failing tests =====
+
+    #[test]
+    fn validate_rename_all_unchanged_returns_empty() {
+        let orig = vec!["a.txt".to_string(), "b.txt".to_string(), "c.txt".to_string()];
+        let edited = orig.clone();
+        let result = validate_rename_proposals(&orig, &edited).unwrap();
+        assert!(result.is_empty(), "all-unchanged must return empty vec; got {result:?}");
+    }
+
+    #[test]
+    fn validate_rename_two_of_three_changed_correct_pairs() {
+        let orig = vec!["a.txt".to_string(), "b.txt".to_string(), "c.txt".to_string()];
+        let edited = vec!["a.txt".to_string(), "B.txt".to_string(), "C.txt".to_string()];
+        let result = validate_rename_proposals(&orig, &edited).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&("b.txt".to_string(), "B.txt".to_string())));
+        assert!(result.contains(&("c.txt".to_string(), "C.txt".to_string())));
+    }
+
+    #[test]
+    fn validate_rename_line_count_mismatch_returns_err() {
+        let orig = vec!["a.txt".to_string(), "b.txt".to_string()];
+        let edited = vec!["a.txt".to_string()];
+        let result = validate_rename_proposals(&orig, &edited);
+        assert!(result.is_err(), "line count mismatch must return Err");
+    }
+
+    #[test]
+    fn validate_rename_empty_name_returns_err() {
+        let orig = vec!["a.txt".to_string(), "b.txt".to_string()];
+        let edited = vec!["a.txt".to_string(), "".to_string()];
+        let result = validate_rename_proposals(&orig, &edited);
+        assert!(result.is_err(), "empty name must return Err");
+    }
+
+    #[test]
+    fn validate_rename_slash_in_name_returns_err() {
+        let orig = vec!["a.txt".to_string()];
+        let edited = vec!["sub/a.txt".to_string()];
+        let result = validate_rename_proposals(&orig, &edited);
+        assert!(result.is_err(), "name containing '/' must return Err");
+    }
+
+    #[test]
+    fn validate_rename_duplicate_proposed_names_returns_err() {
+        let orig = vec!["a.txt".to_string(), "b.txt".to_string()];
+        let edited = vec!["same.txt".to_string(), "same.txt".to_string()];
+        let result = validate_rename_proposals(&orig, &edited);
+        assert!(result.is_err(), "duplicate proposed names must return Err");
+    }
+
+    #[test]
+    fn validate_rename_correct_output_pairs_ordering() {
+        let orig = vec!["first.txt".to_string(), "second.txt".to_string(), "third.txt".to_string()];
+        let edited = vec!["1st.txt".to_string(), "second.txt".to_string(), "3rd.txt".to_string()];
+        let result = validate_rename_proposals(&orig, &edited).unwrap();
+        assert_eq!(result.len(), 2);
+        // pairs must be in listing order
+        assert_eq!(result[0], ("first.txt".to_string(), "1st.txt".to_string()));
+        assert_eq!(result[1], ("third.txt".to_string(), "3rd.txt".to_string()));
+    }
 }
