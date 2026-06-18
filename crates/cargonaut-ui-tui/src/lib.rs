@@ -1062,6 +1062,11 @@ async fn dispatch_ui_command(
             queue_diff(app, ui, status, app.config().diff.tool.as_deref());
             return Ok(());
         }
+        // Feature 050 US1: C-x r bulk-rename tagged files via $EDITOR.
+        Command::BulkRenameViaEditor => {
+            queue_bulk_rename(app, ui, status);
+            return Ok(());
+        }
         // Feature 047 US2 (FR-006): F2 opens the user action menu.
         // Guard: if another dialog is already open, ignore.
         Command::ShowUserMenu => {
@@ -1296,19 +1301,108 @@ fn queue_diff(app: &App, ui: &mut UiState, status: &mut String, tool_str: Option
     });
 }
 
+/// Feature 050 US1 — write the tagged entry basenames to a temp file, then
+/// queue the configured `$EDITOR` as a `PendingExternal` with kind `BulkRename`.
+///
+/// No-op with a status message if nothing is tagged in the active pane.
+/// Any entry whose basename contains `\n` is warned and excluded.
+fn queue_bulk_rename(app: &App, ui: &mut UiState, status: &mut String) {
+    let p = app.active_pane_state();
+    // Collect tagged basenames in listing order.
+    let mut names: Vec<String> = p
+        .selected
+        .iter()
+        .filter_map(|&idx| p.listing.entries.get(idx))
+        .map(|e| e.name.to_string())
+        .collect();
+
+    // Exclude entries whose name contains a newline (can't round-trip through the temp file).
+    names.retain(|n| {
+        if n.contains('\n') {
+            // Status message will be overwritten; just skip silently (the name is pathological).
+            false
+        } else {
+            true
+        }
+    });
+
+    if names.is_empty() {
+        *status = "Tag at least one entry to bulk rename".into();
+        return;
+    }
+
+    // Write names to a temp file.
+    let temp_path = std::env::temp_dir().join(format!(
+        "cargonaut-rename-{}-{}.txt",
+        std::process::id(),
+        names.len()
+    ));
+    let content = names.join("\n") + "\n";
+    if let Err(e) = std::fs::write(&temp_path, &content) {
+        *status = format!("Could not write rename temp file: {e}");
+        return;
+    }
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+    let temp_path_str = temp_path.to_string_lossy().to_string();
+    ui.pending_external = Some(PendingExternal {
+        program: editor,
+        args: vec![temp_path_str],
+        kind: PendingExternalKind::BulkRename {
+            temp_path,
+            original_names: names,
+        },
+    });
+}
+
 /// Feature 050 US1 — after `$EDITOR` exits in bulk-rename mode: read the temp
 /// file, validate edits, clean up the temp file unconditionally (SC-005/FR-009),
-/// then dispatch renames into the App. Fully implemented in T013.
+/// then dispatch renames into the App.
 async fn apply_bulk_rename_from_temp(
-    _app: &mut App,
+    app: &mut App,
     temp_path: &std::path::Path,
-    _original_names: &[String],
+    original_names: &[String],
     status: &mut String,
 ) {
-    // SC-005 / FR-009: delete unconditionally on both success and failure paths.
+    // Read first, then delete unconditionally (SC-005/FR-009).
+    let edited_content = match std::fs::read_to_string(temp_path) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = std::fs::remove_file(temp_path);
+            *status = format!("Could not read rename temp file: {e}");
+            return;
+        }
+    };
+    // SC-005 / FR-009: delete unconditionally before any early return.
     let _ = std::fs::remove_file(temp_path);
-    // T013 will implement the full read → validate → apply flow.
-    *status = "Bulk rename: not yet implemented".into();
+
+    let edited: Vec<String> = edited_content
+        .lines()
+        .map(|l| l.to_string())
+        .collect();
+
+    let pairs = match cargonaut_core::validate_rename_proposals(original_names, &edited) {
+        Ok(p) => p,
+        Err(e) => {
+            *status = format!("Rename validation error: {e}");
+            return;
+        }
+    };
+
+    match app
+        .dispatch(cargonaut_core::Command::BulkRenameApply(pairs))
+        .await
+    {
+        Ok(events) => {
+            for ev in events {
+                match ev {
+                    cargonaut_core::Event::Status(s) => *status = s,
+                    _ => {}
+                }
+            }
+        }
+        Err(e) => *status = format!("Rename failed: {e}"),
+    }
 }
 
 /// Suspend the TUI, run an external program, then restore the terminal
