@@ -1578,6 +1578,7 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::CycleSortKey => AppCommand::CycleSortKey,
         U::CycleListingMode => AppCommand::CycleListingMode,
         U::RecursiveDirSize => AppCommand::RecursiveDirSize,
+        U::CompareDirectories => AppCommand::CompareDirectories,
         _ => return None,
     })
 }
