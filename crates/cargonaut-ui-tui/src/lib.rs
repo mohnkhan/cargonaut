@@ -2466,6 +2466,73 @@ mod tests {
         status
     }
 
+    /// Drive `handle_mouse` with a live dialog slot; return `(status, active_dialog)`.
+    async fn mouse_with_dlg(
+        m: MouseEvent,
+        app: &mut App,
+        ui: &mut UiState,
+        l: &PaneView,
+        r: &PaneView,
+    ) -> (String, Option<ActiveDialog>) {
+        let mut status = String::new();
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut quit = false;
+        handle_mouse(
+            m,
+            app,
+            ui,
+            l,
+            r,
+            &mut status,
+            &mut mode,
+            &mut dlg,
+            &mut quit,
+        )
+        .await
+        .unwrap();
+        (status, dlg)
+    }
+
+    // T-MOUSE-5b (issue #70 / FR-001/FR-004): left-click on the on-screen F2
+    // button opens ActiveDialog::UserMenu — proving the mouse path is
+    // equivalent to the keyboard F2 path.
+    #[tokio::test]
+    async fn f2_mouse_click_opens_user_menu() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
+        // 100-wide fkey bar, 10 buttons → each slot is 10px wide.
+        // F2 is button index 1 (0-indexed) → x in [10, 20). Click x=15.
+        ui.layout.fkeys = Rect {
+            x: 0,
+            y: 23,
+            width: 100,
+            height: 1,
+        };
+        let (l, r) = synced_views(&app);
+        let (_status, dlg) = mouse_with_dlg(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(dlg, Some(ActiveDialog::UserMenu { .. })),
+            "left-click on F2 button must open UserMenu dialog; got {dlg:?}"
+        );
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]
@@ -2644,12 +2711,12 @@ mod tests {
         };
         let (l, r) = synced_views(&app);
         // Button 2 (F2 = ShowUserMenu) ≈ 2nd of 10 slots (x 10..20).
-        // ShowUserMenu is now wired (Feature 047): it opens the user menu
-        // dialog without writing to the status line.
-        let status = mouse(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
+        // ShowUserMenu wired in Feature 047; mouse-click assertion added by
+        // Feature 048 (issue #70) — use mouse_with_dlg to assert dialog state.
+        let (_status, dlg) = mouse_with_dlg(left_click(15, 23), &mut app, &mut ui, &l, &r).await;
         assert!(
-            !status.contains("not yet available"),
-            "F2 must not show deferred-action notice after Feature 047: {status:?}"
+            matches!(dlg, Some(ActiveDialog::UserMenu { .. })),
+            "F2 click must open UserMenu dialog (not the old deferred-action stub): {dlg:?}"
         );
     }
 

@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-17 (Feature 044 shipped recursive chmod/chown into subtrees, resolving #65; Tier 3 now: external themes #49, PTY nav test #30).
+**Last updated**: 2026-06-18 (Feature 048 closed #70 — F2 mouse-click integration test; Tier 3 now clear — #49 and #30 were already closed; no open Tier 3 issues remain).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,9 +42,7 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#49](https://github.com/mohnkhan/cargonaut/issues/49) | External / user-authored theme (skin) files | S–M | Feature 031 — built-in themes ship; external loader deferred (clarified) |
-| [#30](https://github.com/mohnkhan/cargonaut/issues/30) | T1.07 — PTY end-to-end navigation smoke test | 0.5 ew | Feature 028 — behavior covered by 154 lower-level tests; only the bin-level driver is `#[ignore]`d. |
-| [#70](https://github.com/mohnkhan/cargonaut/issues/70) | Feature 047 follow-up: F2 user-menu mouse-click support | XS | Feature 047 US2 — keyboard F2 fully wired; fkey-bar mouse click not integration-tested |
+| _(none — Tier 3 is clear; #49 closed by Feature 046, #30 closed by Feature 045, #70 closed by Feature 048)_ | | | |
 
 ---
 
