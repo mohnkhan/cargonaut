@@ -13,9 +13,10 @@ pub mod pane;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
-    ConfirmDialog, ConfirmOutcome, HotlistAction, HotlistDialog, HotlistRow, InputOutcome, JobRow,
-    PathInputAction, PathInputDialog, ResumableSummary, ResumeChoice, ResumePromptDialog,
-    TasksAction, TasksPanelDialog, TextInputDialog,
+    ConfirmDialog, ConfirmOutcome, FileViewerAction, FileViewerDialog, HotlistAction,
+    HotlistDialog, HotlistRow, InputOutcome, JobRow, PathInputAction, PathInputDialog,
+    ResumableSummary, ResumeChoice, ResumePromptDialog, TasksAction, TasksPanelDialog,
+    TextInputDialog, ViewMode,
 };
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
@@ -156,6 +157,11 @@ enum ActiveDialog {
         widget: dialog::UserMenuDialog,
         /// The path of the focused entry at the time the menu was opened.
         entry_path: std::path::PathBuf,
+    },
+    /// Feature 051 — built-in file viewer (FR-001..FR-033) replacing the external `$PAGER` shell-out.
+    FileViewer {
+        /// The file viewer widget.
+        widget: dialog::FileViewerDialog,
     },
 }
 
@@ -829,6 +835,68 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 051: built-in file viewer (C1+C2+C3 fix — T015/T036).
+            // Chord accumulation and keymap lookup happen INSIDE this arm because the
+            // dialog block returns Ok(true) before the normal chord accumulation at line ~836.
+            ActiveDialog::FileViewer { widget } => {
+                // (a) Chord accumulation.
+                chord_buf.push(KeyChord {
+                    code: key.code,
+                    modifiers: key.modifiers,
+                });
+                // (b) Keymap lookup against Mode::Preview.
+                let action = match keymap.lookup_sequence(Mode::Preview, chord_buf) {
+                    SeqLookup::Command(cmd) => {
+                        chord_buf.clear();
+                        // Dispatch viewer commands (T036).
+                        match cmd {
+                            Command::ViewerQuit => widget.close(),
+                            Command::ViewerEnd => widget.goto_end(),
+                            Command::ViewerWrap => widget.toggle_wrap(),
+                            Command::ViewerGoto => widget.open_goto_prompt(),
+                            Command::ToggleHexView => {
+                                widget.toggle_mode();
+                                dialog::FileViewerAction::Swallow
+                            }
+                            Command::PreviewSearchForward => {
+                                widget.open_search_prompt(dialog::SearchDirection::Forward)
+                            }
+                            Command::PreviewSearchBackward => {
+                                widget.open_search_prompt(dialog::SearchDirection::Backward)
+                            }
+                            Command::PreviewSearchNext => {
+                                widget.advance_search(dialog::SearchDirection::Forward)
+                            }
+                            Command::PreviewSearchPrev => {
+                                widget.advance_search(dialog::SearchDirection::Backward)
+                            }
+                            _ => dialog::FileViewerAction::Swallow,
+                        }
+                    }
+                    SeqLookup::Pending => {
+                        *status = format!("Chord: {chord_buf:?}");
+                        return Ok(true);
+                    }
+                    SeqLookup::NoMatch => {
+                        chord_buf.clear();
+                        // (c) Fall through to raw navigation key handling.
+                        widget.handle_key(key.code)
+                    }
+                };
+                // (d) FileViewerAction dispatch (exhaustive — C3 fix includes NeedsData stub).
+                match action {
+                    dialog::FileViewerAction::Close => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        chord_buf.clear();
+                    }
+                    dialog::FileViewerAction::Swallow => {}
+                    dialog::FileViewerAction::NeedsData { .. } => {
+                        // Streaming I/O wired in T042 (Phase 7 — stub keeps CI green).
+                    }
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -1047,9 +1115,40 @@ async fn dispatch_ui_command(
             *mode = Mode::Dialog;
             return Ok(());
         }
-        // US5 (FR-030/031): F3/F4 shell out to $PAGER / $EDITOR.
+        // Feature 051 (FR-001): F3 opens the built-in file viewer (replaces $PAGER shell-out).
         Command::Preview => {
-            queue_external(app, ui, status, ExternalTool::Pager);
+            // FR-004: if a dialog is already open, swallow the keypress.
+            if active_dialog.is_some() {
+                return Ok(());
+            }
+            let p = app.active_pane_state();
+            let Some(idx) = p.focused_entry_index() else {
+                *status = "Nothing to open".into();
+                return Ok(());
+            };
+            let Some(entry) = p.listing.entries.get(idx) else {
+                return Ok(());
+            };
+            if matches!(entry.meta.kind, cargonaut_vfs::VfsKind::Dir) {
+                *status = "Not a file".into();
+                return Ok(());
+            }
+            let display_name = entry.name.to_string();
+            let raw_path: std::path::PathBuf = {
+                let cwd = p.cwd.display().to_string();
+                let local = cwd.strip_prefix("file://").unwrap_or(&cwd);
+                std::path::PathBuf::from(local).join(&display_name)
+            };
+            let _ = p; // release borrow on app before await
+            match open_file_viewer(raw_path, display_name).await {
+                Ok(widget) => {
+                    *active_dialog = Some(ActiveDialog::FileViewer { widget });
+                    *mode = Mode::Preview;
+                }
+                Err(e) => {
+                    *status = format!("Cannot open: {e}");
+                }
+            }
             return Ok(());
         }
         Command::Edit => {
@@ -1178,17 +1277,15 @@ fn plan_mouse_toggle(supported: bool, currently: bool) -> MouseToggleOutcome {
     }
 }
 
-/// Which external tool F3/F4 launch.
+/// Which external tool F4 (editor) launches. F3 uses the built-in viewer (Feature 051).
 #[derive(Debug, Clone, Copy)]
 enum ExternalTool {
-    Pager,
     Editor,
 }
 
-/// US5 (FR-030/031): resolve the external tool + focused file and queue
-/// it for run_loop to execute (suspending the TUI). No-op with a status
-/// message if nothing suitable is focused.
-fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: ExternalTool) {
+/// Resolve the external editor tool + focused file and queue it for run_loop to execute
+/// (suspending the TUI). No-op with a status message if nothing suitable is focused.
+fn queue_external(app: &App, ui: &mut UiState, status: &mut String, _tool: ExternalTool) {
     let p = app.active_pane_state();
     let Some(idx) = p.focused_entry_index() else {
         *status = "Nothing to open".into();
@@ -1204,10 +1301,7 @@ fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: Extern
     let path = p.cwd.join(e.name.as_str());
     let disp = path.display();
     let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
-    let program = match tool {
-        ExternalTool::Pager => std::env::var("PAGER").unwrap_or_else(|_| "less".into()),
-        ExternalTool::Editor => std::env::var("EDITOR").unwrap_or_else(|_| "vi".into()),
-    };
+    let program = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
     ui.pending_external = Some(PendingExternal {
         program,
         args: vec![local],
@@ -1694,6 +1788,61 @@ fn focused_entry_name(app: &App) -> String {
         .unwrap_or_default()
 }
 
+/// Feature 051 (FR-031): return `true` if `bytes` look like valid UTF-8 content.
+/// Samples up to [`dialog::BINARY_DETECT_BYTES`] bytes; any UTF-8 decode error → binary.
+fn is_valid_utf8_sample(bytes: &[u8]) -> bool {
+    let sample = &bytes[..bytes.len().min(dialog::BINARY_DETECT_BYTES)];
+    std::str::from_utf8(sample).is_ok()
+}
+
+/// Feature 051 (T013): asynchronous helper that opens a file for the built-in viewer.
+///
+/// Steps:
+/// 1. Resolve symlinks via `canonicalize`, keeping `display_name` for the title bar.
+/// 2. Read a sample to determine `ViewMode` (binary → hex, UTF-8 → text).
+/// 3. For files ≤ `STREAMING_THRESHOLD_BYTES`, pre-load all lines with ANSI stripping.
+/// 4. Construct and return the `FileViewerDialog`.
+async fn open_file_viewer(
+    raw_path: std::path::PathBuf,
+    display_name: String,
+) -> std::io::Result<dialog::FileViewerDialog> {
+    // Resolve symlinks; keep display_name as-is for the title bar.
+    let resolved = tokio::task::spawn_blocking({
+        let p = raw_path.clone();
+        move || std::fs::canonicalize(&p)
+    })
+    .await
+    .map_err(|e| std::io::Error::other(e.to_string()))??;
+
+    // Read the entire file (or threshold bytes for binary detection).
+    let bytes = tokio::task::spawn_blocking({
+        let p = resolved.clone();
+        move || std::fs::read(&p)
+    })
+    .await
+    .map_err(|e| std::io::Error::other(e.to_string()))??;
+
+    if !is_valid_utf8_sample(&bytes) || bytes.len() > dialog::STREAMING_THRESHOLD_BYTES {
+        // Binary or large file: hex mode with pre-loaded bytes (streaming in Phase 7).
+        return Ok(dialog::FileViewerDialog::new_hex(
+            resolved,
+            display_name,
+            bytes,
+        ));
+    }
+
+    // Text mode: ANSI-strip each line.
+    let content = String::from_utf8_lossy(&bytes);
+    let lines: Vec<String> = content.lines().map(strip_ansi_escapes::strip_str).collect();
+
+    Ok(dialog::FileViewerDialog::new_text(
+        resolved,
+        display_name,
+        lines,
+        false,
+    ))
+}
+
 /// Feature 042 — parse a bookmark-add prompt into `(group, name)`. Text of the
 /// form `group/name` splits on the first `/` (both sides trimmed); text with no
 /// `/` is the name with no group.
@@ -1952,6 +2101,8 @@ fn draw_frame(
             ActiveDialog::Hotlist { widget } => widget.render(darea, f.buffer_mut(), theme),
             // Feature 047 US2: UserMenuDialog::render manages its own centering.
             ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
+            // Feature 051: full-screen overlay — use `area`, not the centred `darea`.
+            ActiveDialog::FileViewer { widget } => widget.render(f, area, theme),
         }
     }
 

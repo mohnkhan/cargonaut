@@ -364,6 +364,27 @@ mode = "preview"
 key = "N"
 action = "preview-search-prev"  # FR-209
 
+# ── File viewer navigation (Feature 051 — FR-031) ────────────────────────────
+[[binding]]
+mode = "preview"
+key = "g"
+action = "viewer-goto"  # FR-031: open goto prompt (line # in text, byte offset in hex)
+
+[[binding]]
+mode = "preview"
+key = "G"
+action = "viewer-end"  # FR-031: jump to last line (text) or last 16-byte row (hex)
+
+[[binding]]
+mode = "preview"
+key = "w"
+action = "viewer-wrap"  # FR-031: toggle word-wrap (text mode only; no-op in hex)
+
+[[binding]]
+mode = "preview"
+key = "q"
+action = "viewer-quit"  # FR-031: close the viewer
+
 # ── Compare directories + diff (Phase 4 — FR-305) ─────────────────────────────
 [[binding]]
 mode = "pane"

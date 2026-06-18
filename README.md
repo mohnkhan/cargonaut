@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 16 features since (031–050) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 449 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 17 features since (031–051) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 496 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.8 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -166,8 +166,15 @@ for the local filesystem:
   move (single-level, session-scoped; delete is non-reversible). Temp file deleted on both
   success and failure paths (SC-005). p95 ≤ 500 ms for 50 files (SC-001/SC-004 bench gates).
   (Feature 050, closes #47).
+- **Built-in F3 file viewer** — `F3` opens a full-screen in-process overlay replacing the
+  `$PAGER` shell-out. Text mode shows ANSI-stripped, line-numbered content; hex mode
+  (`Ctrl-x X`) renders a classic 16-byte-per-row dump; `/` and `?` open forward/backward
+  search with ALL visible matches highlighted; `n`/`N` advance; `g`/`G` goto line or byte
+  offset; `w` toggles word-wrap; `q`/Esc closes. Files ≥ 10 MiB stream via a chunk index
+  + sliding VecDeque window (Phase 7). Symlinks are followed (display name preserved).
+  (Feature 051).
 
-The full per-feature history (Features 001 → 050) lives in
+The full per-feature history (Features 001 → 051) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
@@ -177,7 +184,6 @@ Cargonaut is alpha and honest about it. These are designed and issue-tracked but
 nothing):
 
 - Remote & archive VFS backends — SFTP / S3 / archives-as-directories (#48)
-- Internal file viewer with hex + search (`F3` today shells out to `$PAGER`) (#39)
 - Internal full-screen editor (`F4` today shells out to `$EDITOR`) (#40)
 - Find-file by name/content + external panelize (#41)
 - Tabs (#45), persistent subshell (#44)
