@@ -1232,6 +1232,9 @@ only_if = "test -d {path}"
     fn diff_config_unknown_key_rejected() {
         let src = r#"tool = "diff"\nunknown_key = true"#;
         let result = toml::from_str::<DiffConfig>(src);
-        assert!(result.is_err(), "unknown keys should be rejected by deny_unknown_fields");
+        assert!(
+            result.is_err(),
+            "unknown keys should be rejected by deny_unknown_fields"
+        );
     }
 }

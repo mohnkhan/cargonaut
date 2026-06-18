@@ -181,7 +181,22 @@ enum InputKind {
     ChownRecursive,
 }
 
-/// An external program to run (F3/F4), suspending the TUI around it.
+/// Feature 050 — discriminates what the TUI should do after the external
+/// program exits.
+#[derive(Debug, Clone)]
+enum PendingExternalKind {
+    /// F3/F4: just refresh the active pane and show a "returned from" status.
+    FileOpen,
+    /// C-x r: read back the temp file, validate edits, apply renames.
+    BulkRename {
+        /// Path to the temp file that was written and opened in `$EDITOR`.
+        temp_path: std::path::PathBuf,
+        /// Basenames in listing order, written one-per-line to the temp file.
+        original_names: Vec<String>,
+    },
+}
+
+/// An external program to run (F3/F4 or bulk-rename), suspending the TUI around it.
 #[derive(Debug, Clone)]
 struct PendingExternal {
     /// Resolved program (`$PAGER`/`$EDITOR` + fallbacks, or split from diff tool string).
@@ -189,6 +204,8 @@ struct PendingExternal {
     /// Additional arguments passed after `program`. For F3/F4 this is `vec![path]`;
     /// for diff (US2) this is `argv[1..] + [left_path, right_path]`.
     args: Vec<String>,
+    /// What to do after the program exits.
+    kind: PendingExternalKind,
 }
 
 async fn run_loop<B: ratatui::backend::Backend>(
@@ -350,15 +367,26 @@ async fn run_loop<B: ratatui::backend::Backend>(
             }
         }
 
-        // US5 (FR-030/031): an F3/F4 request suspends the TUI, runs the
-        // external pager/editor, then restores the terminal + refreshes.
+        // US5 (FR-030/031): an F3/F4 or bulk-rename request suspends the TUI,
+        // runs the external program, then restores the terminal and dispatches
+        // post-action handling based on `ext.kind`.
         if let Some(ext) = ui.pending_external.take() {
             run_external(term, &ext, ui.mouse_enabled)?;
-            let _ = app
-                .refresh_active_pane()
-                .await
-                .map_err(|e| Error::Other(e.to_string()))?;
-            status = format!("Returned from {}", ext.program);
+            match ext.kind {
+                PendingExternalKind::FileOpen => {
+                    let _ = app
+                        .refresh_active_pane()
+                        .await
+                        .map_err(|e| Error::Other(e.to_string()))?;
+                    status = format!("Returned from {}", ext.program);
+                }
+                PendingExternalKind::BulkRename {
+                    ref temp_path,
+                    ref original_names,
+                } => {
+                    apply_bulk_rename_from_temp(app, temp_path, original_names, &mut status).await;
+                }
+            }
         }
     }
 }
@@ -1033,6 +1061,11 @@ async fn dispatch_ui_command(
             queue_diff(app, ui, status, app.config().diff.tool.as_deref());
             return Ok(());
         }
+        // Feature 050 US1: C-x r bulk-rename tagged files via $EDITOR.
+        Command::BulkRenameViaEditor => {
+            queue_bulk_rename(app, ui, status);
+            return Ok(());
+        }
         // Feature 047 US2 (FR-006): F2 opens the user action menu.
         // Guard: if another dialog is already open, ignore.
         Command::ShowUserMenu => {
@@ -1178,6 +1211,7 @@ fn queue_external(app: &App, ui: &mut UiState, status: &mut String, tool: Extern
     ui.pending_external = Some(PendingExternal {
         program,
         args: vec![local],
+        kind: PendingExternalKind::FileOpen,
     });
 }
 
@@ -1262,7 +1296,108 @@ fn queue_diff(app: &App, ui: &mut UiState, status: &mut String, tool_str: Option
     ui.pending_external = Some(PendingExternal {
         program,
         args: argv,
+        kind: PendingExternalKind::FileOpen,
     });
+}
+
+/// Feature 050 US1 — write the tagged entry basenames to a temp file, then
+/// queue the configured `$EDITOR` as a `PendingExternal` with kind `BulkRename`.
+///
+/// No-op with a status message if nothing is tagged in the active pane.
+/// Any entry whose basename contains `\n` is warned and excluded.
+fn queue_bulk_rename(app: &App, ui: &mut UiState, status: &mut String) {
+    let p = app.active_pane_state();
+    // Collect tagged basenames in listing order.
+    let mut names: Vec<String> = p
+        .selected
+        .iter()
+        .filter_map(|&idx| p.listing.entries.get(idx))
+        .map(|e| e.name.to_string())
+        .collect();
+
+    // Exclude entries whose name contains a newline (can't round-trip through the temp file).
+    names.retain(|n| {
+        if n.contains('\n') {
+            // Status message will be overwritten; just skip silently (the name is pathological).
+            false
+        } else {
+            true
+        }
+    });
+
+    if names.is_empty() {
+        *status = "Tag at least one entry to bulk rename".into();
+        return;
+    }
+
+    // Write names to a temp file.
+    let temp_path = std::env::temp_dir().join(format!(
+        "cargonaut-rename-{}-{}.txt",
+        std::process::id(),
+        names.len()
+    ));
+    let content = names.join("\n") + "\n";
+    if let Err(e) = std::fs::write(&temp_path, &content) {
+        *status = format!("Could not write rename temp file: {e}");
+        return;
+    }
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+    let temp_path_str = temp_path.to_string_lossy().to_string();
+    ui.pending_external = Some(PendingExternal {
+        program: editor,
+        args: vec![temp_path_str],
+        kind: PendingExternalKind::BulkRename {
+            temp_path,
+            original_names: names,
+        },
+    });
+}
+
+/// Feature 050 US1 — after `$EDITOR` exits in bulk-rename mode: read the temp
+/// file, validate edits, clean up the temp file unconditionally (SC-005/FR-009),
+/// then dispatch renames into the App.
+async fn apply_bulk_rename_from_temp(
+    app: &mut App,
+    temp_path: &std::path::Path,
+    original_names: &[String],
+    status: &mut String,
+) {
+    // Read first, then delete unconditionally (SC-005/FR-009).
+    let edited_content = match std::fs::read_to_string(temp_path) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = std::fs::remove_file(temp_path);
+            *status = format!("Could not read rename temp file: {e}");
+            return;
+        }
+    };
+    // SC-005 / FR-009: delete unconditionally before any early return.
+    let _ = std::fs::remove_file(temp_path);
+
+    let edited: Vec<String> = edited_content.lines().map(|l| l.to_string()).collect();
+
+    let pairs = match cargonaut_core::validate_rename_proposals(original_names, &edited) {
+        Ok(p) => p,
+        Err(e) => {
+            *status = format!("Rename validation error: {e}");
+            return;
+        }
+    };
+
+    match app
+        .dispatch(cargonaut_core::Command::BulkRenameApply(pairs))
+        .await
+    {
+        Ok(events) => {
+            for ev in events {
+                if let cargonaut_core::Event::Status(s) = ev {
+                    *status = s;
+                }
+            }
+        }
+        Err(e) => *status = format!("Rename failed: {e}"),
+    }
 }
 
 /// Suspend the TUI, run an external program, then restore the terminal
@@ -1668,6 +1803,7 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::CycleListingMode => AppCommand::CycleListingMode,
         U::RecursiveDirSize => AppCommand::RecursiveDirSize,
         U::CompareDirectories => AppCommand::CompareDirectories,
+        U::UndoLastOp => AppCommand::UndoLastOp,
         _ => return None,
     })
 }
@@ -3444,10 +3580,7 @@ mod tests {
 
     // ===== Feature 049 US2: queue_diff tests (T012 red) =====
 
-    async fn app_with_tagged_files(
-        left_file: &str,
-        right_file: &str,
-    ) -> (App, TempDir, TempDir) {
+    async fn app_with_tagged_files(left_file: &str, right_file: &str) -> (App, TempDir, TempDir) {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         std::fs::write(td_l.path().join(left_file), b"left content").unwrap();
@@ -3476,8 +3609,18 @@ mod tests {
     async fn queue_diff_two_tagged_files_sets_pending_external() {
         let (app, _td_l, _td_r) = app_with_tagged_files("left.txt", "right.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3490,8 +3633,19 @@ mod tests {
         let ext = ui.pending_external.as_ref().unwrap();
         assert_eq!(ext.program, "diff", "program should be 'diff'");
         // args[-2] = left path, args[-1] = right path
-        let last_two: Vec<&str> = ext.args.iter().rev().take(2).rev().map(|s| s.as_str()).collect();
-        assert_eq!(last_two.len(), 2, "args must contain at least the two file paths");
+        let last_two: Vec<&str> = ext
+            .args
+            .iter()
+            .rev()
+            .take(2)
+            .rev()
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            last_two.len(),
+            2,
+            "args must contain at least the two file paths"
+        );
         // Both paths should exist on the filesystem
         assert!(
             std::path::Path::new(last_two[0]).exists(),
@@ -3509,13 +3663,26 @@ mod tests {
     async fn queue_diff_path_ordering_left_before_right() {
         let (app, td_l, td_r) = app_with_tagged_files("lf.txt", "rf.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
         queue_diff(&app, &mut ui, &mut status, Some("diff"));
-        let ext = ui.pending_external.as_ref().expect("pending_external must be set");
+        let ext = ui
+            .pending_external
+            .as_ref()
+            .expect("pending_external must be set");
         let n = ext.args.len();
         assert!(n >= 2, "need at least 2 path args");
         let left_path = &ext.args[n - 2];
@@ -3544,8 +3711,18 @@ mod tests {
             .await
             .unwrap();
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3564,8 +3741,18 @@ mod tests {
     async fn queue_diff_no_tool_configured_shows_error() {
         let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3581,8 +3768,18 @@ mod tests {
     async fn queue_diff_empty_tool_string_shows_error() {
         let (app, _td_l, _td_r) = app_with_tagged_files("l.txt", "r.txt").await;
         let mut ui = fresh_ui(
-            Rect { x: 0, y: 1, width: 40, height: 22 },
-            Rect { x: 40, y: 1, width: 40, height: 22 },
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
             false,
         );
         let mut status = String::new();
@@ -3592,5 +3789,157 @@ mod tests {
             status.to_lowercase().contains("empty"),
             "status must mention empty tool string; got {status:?}"
         );
+    }
+
+    // ===== Feature 050 T010 (red): queue_bulk_rename — 4 failing tests =====
+
+    #[tokio::test]
+    async fn queue_bulk_rename_no_tagged_entries_shows_status() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let app = app_with(&td_l, &td_r).await;
+        // No entries tagged
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        assert!(
+            ui.pending_external.is_none(),
+            "no tagged entries must not set pending_external"
+        );
+        assert!(
+            status.to_lowercase().contains("tag"),
+            "status must mention tagging; got {status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bulk_rename_tagged_entries_sets_pending_external() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag the first file
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        assert!(
+            ui.pending_external.is_some(),
+            "tagged entries must set pending_external; status={status:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bulk_rename_kind_is_bulk_rename() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.txt"), b"1").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        let ext = ui.pending_external.as_ref().expect("must be set");
+        assert!(
+            matches!(ext.kind, PendingExternalKind::BulkRename { .. }),
+            "kind must be BulkRename; got {:?}",
+            ext.kind
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_bulk_rename_original_names_match_tagged_basenames() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("alpha.txt"), b"1").unwrap();
+        std::fs::write(td_l.path().join("beta.txt"), b"2").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        // Tag both files
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        app.dispatch(cargonaut_core::Command::CursorDown)
+            .await
+            .unwrap();
+        app.dispatch(cargonaut_core::Command::SelectionToggle)
+            .await
+            .unwrap();
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            Rect {
+                x: 40,
+                y: 1,
+                width: 40,
+                height: 22,
+            },
+            false,
+        );
+        let mut status = String::new();
+        queue_bulk_rename(&app, &mut ui, &mut status);
+        let ext = ui.pending_external.as_ref().expect("must be set");
+        if let PendingExternalKind::BulkRename { original_names, .. } = &ext.kind {
+            assert!(
+                original_names.contains(&"alpha.txt".to_string()),
+                "original_names must contain alpha.txt; got {original_names:?}"
+            );
+            assert!(
+                original_names.contains(&"beta.txt".to_string()),
+                "original_names must contain beta.txt; got {original_names:?}"
+            );
+        } else {
+            panic!("kind must be BulkRename");
+        }
     }
 }
