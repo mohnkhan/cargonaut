@@ -891,8 +891,27 @@ async fn handle_key(
                         chord_buf.clear();
                     }
                     dialog::FileViewerAction::Swallow => {}
-                    dialog::FileViewerAction::NeedsData { .. } => {
-                        // Streaming I/O wired in T042 (Phase 7 — stub keeps CI green).
+                    dialog::FileViewerAction::NeedsData {
+                        offset,
+                        line_count,
+                        window_start,
+                    } => {
+                        let path = widget.path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            dialog::FileViewerDialog::load_window_from_chunk(
+                                &path, offset, line_count,
+                            )
+                        })
+                        .await
+                        .map_err(|e| std::io::Error::other(e.to_string()));
+                        match result {
+                            Ok(Ok((new_lines, new_reader_offset))) => {
+                                widget.append_lines(new_lines, window_start, new_reader_offset);
+                            }
+                            Ok(Err(_)) | Err(_) => {
+                                widget.set_status("File no longer readable");
+                            }
+                        }
                     }
                 }
                 return Ok(true);
@@ -1150,6 +1169,40 @@ async fn dispatch_ui_command(
                 }
             }
             return Ok(());
+        }
+        // Feature 051 US5 (FR-029): Enter on a file entry opens the built-in viewer.
+        // On a directory entry, fall through to AppCommand::Descend via ui_command_to_core.
+        Command::DescendOrOpen => {
+            if active_dialog.is_some() {
+                return Ok(());
+            }
+            let p = app.active_pane_state();
+            let entry = p
+                .focused_entry_index()
+                .and_then(|i| p.listing.entries.get(i));
+            let is_file =
+                entry.is_some_and(|e| !matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir));
+            if is_file {
+                let entry = entry.unwrap();
+                let display_name = entry.name.to_string();
+                let raw_path: std::path::PathBuf = {
+                    let cwd = p.cwd.display().to_string();
+                    let local = cwd.strip_prefix("file://").unwrap_or(&cwd);
+                    std::path::PathBuf::from(local).join(&display_name)
+                };
+                let _ = p;
+                match open_file_viewer(raw_path, display_name).await {
+                    Ok(widget) => {
+                        *active_dialog = Some(ActiveDialog::FileViewer { widget });
+                        *mode = Mode::Preview;
+                    }
+                    Err(e) => {
+                        *status = format!("Cannot open: {e}");
+                    }
+                }
+                return Ok(());
+            }
+            // Directory: fall through to core Descend.
         }
         Command::Edit => {
             queue_external(app, ui, status, ExternalTool::Editor);
@@ -1797,12 +1850,45 @@ fn is_valid_utf8_sample(bytes: &[u8]) -> bool {
 
 /// Feature 051 (T013): asynchronous helper that opens a file for the built-in viewer.
 ///
+/// Build a compact chunk index for a large file: `(line_number, byte_offset)` every
+/// `CHUNK_INDEX_INTERVAL` lines.  Returns `(index, total_lines, total_bytes)`.
+#[allow(clippy::type_complexity)]
+fn build_chunk_index(path: &std::path::Path) -> std::io::Result<(Vec<(usize, u64)>, usize, u64)> {
+    use std::io::{BufRead, BufReader, Seek};
+    let file = std::fs::File::open(path)?;
+    let total_bytes = file.metadata()?.len();
+    let mut reader = BufReader::with_capacity(65536, file);
+    let mut chunk_index: Vec<(usize, u64)> = Vec::new();
+    let mut line_count = 0usize;
+    let mut buf = String::new();
+    loop {
+        // Record entry before reading line `line_count`.
+        if line_count % dialog::CHUNK_INDEX_INTERVAL == 0 {
+            chunk_index.push((line_count, reader.stream_position()?));
+        }
+        buf.clear();
+        if reader.read_line(&mut buf)? == 0 {
+            break; // EOF
+        }
+        line_count += 1;
+    }
+    // Remove trailing entry pointing past the last line (avoids off-by-one in T037 test).
+    if let Some(&(last_line, _)) = chunk_index.last() {
+        if last_line >= line_count {
+            chunk_index.pop();
+        }
+    }
+    Ok((chunk_index, line_count, total_bytes))
+}
+
 /// Steps:
 /// 1. Resolve symlinks via `canonicalize`, keeping `display_name` for the title bar.
 /// 2. Read a sample to determine `ViewMode` (binary → hex, UTF-8 → text).
 /// 3. For files ≤ `STREAMING_THRESHOLD_BYTES`, pre-load all lines with ANSI stripping.
-/// 4. Construct and return the `FileViewerDialog`.
-async fn open_file_viewer(
+/// 4. For larger UTF-8 files, build a chunk index and stream the first window.
+/// 5. Construct and return the `FileViewerDialog`.
+#[doc(hidden)] // exposed only for benchmarks — not a stable public API
+pub async fn open_file_viewer(
     raw_path: std::path::PathBuf,
     display_name: String,
 ) -> std::io::Result<dialog::FileViewerDialog> {
@@ -1814,16 +1900,30 @@ async fn open_file_viewer(
     .await
     .map_err(|e| std::io::Error::other(e.to_string()))??;
 
-    // Read the entire file (or threshold bytes for binary detection).
-    let bytes = tokio::task::spawn_blocking({
+    // Read a sample for binary detection (up to BINARY_DETECT_BYTES or the full file).
+    let sample = tokio::task::spawn_blocking({
         let p = resolved.clone();
-        move || std::fs::read(&p)
+        move || -> std::io::Result<(Vec<u8>, u64)> {
+            use std::io::Read;
+            let mut f = std::fs::File::open(&p)?;
+            let size = f.metadata()?.len();
+            let mut buf = vec![0u8; dialog::BINARY_DETECT_BYTES.min(size as usize)];
+            f.read_exact(&mut buf)?;
+            Ok((buf, size))
+        }
     })
     .await
     .map_err(|e| std::io::Error::other(e.to_string()))??;
+    let (sample_bytes, file_size) = sample;
 
-    if !is_valid_utf8_sample(&bytes) || bytes.len() > dialog::STREAMING_THRESHOLD_BYTES {
-        // Binary or large file: hex mode with pre-loaded bytes (streaming in Phase 7).
+    if !is_valid_utf8_sample(&sample_bytes) {
+        // Binary file: read all bytes and open in hex mode.
+        let bytes = tokio::task::spawn_blocking({
+            let p = resolved.clone();
+            move || std::fs::read(&p)
+        })
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))??;
         return Ok(dialog::FileViewerDialog::new_hex(
             resolved,
             display_name,
@@ -1831,15 +1931,50 @@ async fn open_file_viewer(
         ));
     }
 
-    // Text mode: ANSI-strip each line.
-    let content = String::from_utf8_lossy(&bytes);
-    let lines: Vec<String> = content.lines().map(strip_ansi_escapes::strip_str).collect();
+    if file_size as usize <= dialog::STREAMING_THRESHOLD_BYTES {
+        // Small UTF-8 file: pre-load all lines.
+        let bytes = tokio::task::spawn_blocking({
+            let p = resolved.clone();
+            move || std::fs::read(&p)
+        })
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))??;
+        let content = String::from_utf8_lossy(&bytes);
+        let lines: Vec<String> = content.lines().map(strip_ansi_escapes::strip_str).collect();
+        return Ok(dialog::FileViewerDialog::new_text(
+            resolved,
+            display_name,
+            lines,
+            false,
+        ));
+    }
 
-    Ok(dialog::FileViewerDialog::new_text(
+    // Large UTF-8 file: build chunk index + load first window.
+    let (chunk_index, total_lines, total_bytes, initial_lines, reader_offset) =
+        tokio::task::spawn_blocking({
+            let p = resolved.clone();
+            move || -> std::io::Result<_> {
+                let (chunk_index, total_lines, total_bytes) = build_chunk_index(&p)?;
+                let (lines, reader_offset) = dialog::FileViewerDialog::load_window_from_chunk(
+                    &p,
+                    0,
+                    dialog::WINDOW_MAX_LINES / 2,
+                )?;
+                let deque: std::collections::VecDeque<String> = lines.into_iter().collect();
+                Ok((chunk_index, total_lines, total_bytes, deque, reader_offset))
+            }
+        })
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))??;
+
+    Ok(dialog::FileViewerDialog::new_streaming(
         resolved,
         display_name,
-        lines,
-        false,
+        chunk_index,
+        initial_lines,
+        total_lines,
+        total_bytes,
+        reader_offset,
     ))
 }
 

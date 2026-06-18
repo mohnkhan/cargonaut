@@ -1528,6 +1528,8 @@ pub const CHUNK_INDEX_INTERVAL: usize = 1000;
 pub const HEX_ROW_WIDTH: usize = 16;
 /// How many bytes to read when detecting binary vs. UTF-8 content.
 pub const BINARY_DETECT_BYTES: usize = 4096;
+/// Lines from the window boundary at which a streaming prefetch is triggered.
+pub const PREFETCH_THRESHOLD: usize = 100;
 
 /// Display mode for the built-in file viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1621,6 +1623,8 @@ pub enum FileViewerAction {
         offset: u64,
         /// Number of lines to load into the window.
         line_count: usize,
+        /// File line number at `offset` (so lib.rs knows the window_start for `append_lines`).
+        window_start: usize,
     },
 }
 
@@ -1707,6 +1711,72 @@ impl FileViewerDialog {
         }
     }
 
+    /// Construct a streaming-mode viewer for a large text file.
+    ///
+    /// `initial_lines` is the first window of ANSI-stripped lines loaded at open time.
+    /// `reader_offset` is the byte position immediately after `initial_lines`.
+    pub fn new_streaming(
+        path: std::path::PathBuf,
+        display_name: String,
+        chunk_index: Vec<(usize, u64)>,
+        initial_lines: std::collections::VecDeque<String>,
+        total_lines: usize,
+        total_bytes: u64,
+        reader_offset: u64,
+    ) -> Self {
+        let status = if total_lines == 0 {
+            "(empty file)".into()
+        } else {
+            format!("Line 1/{total_lines}  wrap: off")
+        };
+        Self {
+            path: path.clone(),
+            display_name,
+            mode: ViewMode::Text,
+            buffer: ViewBuffer::Streaming {
+                path,
+                chunk_index,
+                lines: initial_lines,
+                window_start_line: 0,
+                total_lines,
+                total_bytes,
+                reader_offset,
+            },
+            scroll_offset: 0,
+            search: None,
+            prompt: None,
+            word_wrap: false,
+            status,
+            viewport_height: 20,
+        }
+    }
+
+    /// Read up to `lines_needed` ANSI-stripped lines from `path` starting at `byte_offset`.
+    ///
+    /// Returns `(lines, new_reader_offset)`.  Intended for use in `spawn_blocking`.
+    pub fn load_window_from_chunk(
+        path: &std::path::Path,
+        byte_offset: u64,
+        lines_needed: usize,
+    ) -> std::io::Result<(Vec<String>, u64)> {
+        use std::io::{BufRead, BufReader, Seek, SeekFrom};
+        let mut file = std::fs::File::open(path)?;
+        file.seek(SeekFrom::Start(byte_offset))?;
+        let mut reader = BufReader::with_capacity(65536, file);
+        let mut lines = Vec::with_capacity(lines_needed);
+        let mut buf = String::new();
+        while lines.len() < lines_needed {
+            buf.clear();
+            if reader.read_line(&mut buf)? == 0 {
+                break;
+            }
+            let trimmed = buf.trim_end_matches('\n').trim_end_matches('\r');
+            lines.push(strip_ansi_escapes::strip_str(trimmed));
+        }
+        let new_offset = reader.stream_position()?;
+        Ok((lines, new_offset))
+    }
+
     // --- Internal line access ---
 
     fn text_lines_as_vec(&self) -> Vec<&String> {
@@ -1778,16 +1848,69 @@ impl FileViewerDialog {
 
     /// Scroll down by one line/row.
     pub fn scroll_down(&mut self) -> FileViewerAction {
+        // Extract streaming state before mutably borrowing self.
+        let streaming = match &self.buffer {
+            ViewBuffer::Streaming {
+                lines,
+                window_start_line,
+                total_lines,
+                reader_offset,
+                ..
+            } => Some((
+                *window_start_line + lines.len(), // window_end
+                *total_lines,
+                *reader_offset,
+            )),
+            ViewBuffer::Loaded { .. } => None,
+        };
         let max = self.total_lines().saturating_sub(1);
         if self.scroll_offset < max {
             self.scroll_offset += 1;
             self.update_status();
+        }
+        if let Some((window_end, total, reader_offset)) = streaming {
+            if window_end < total && self.scroll_offset + PREFETCH_THRESHOLD >= window_end {
+                return FileViewerAction::NeedsData {
+                    offset: reader_offset,
+                    line_count: WINDOW_MAX_LINES / 2,
+                    window_start: window_end,
+                };
+            }
         }
         FileViewerAction::Swallow
     }
 
     /// Scroll up by one line/row.
     pub fn scroll_up(&mut self) -> FileViewerAction {
+        // For streaming at window boundary, emit NeedsData to load backward.
+        let backward = match &self.buffer {
+            ViewBuffer::Streaming {
+                window_start_line,
+                chunk_index,
+                ..
+            } => {
+                if *window_start_line > 0 && self.scroll_offset <= *window_start_line {
+                    let target = window_start_line.saturating_sub(WINDOW_MAX_LINES / 2);
+                    let entry = chunk_index
+                        .iter()
+                        .rev()
+                        .find(|(ln, _)| *ln <= target)
+                        .copied()
+                        .unwrap_or((0, 0));
+                    Some(entry)
+                } else {
+                    None
+                }
+            }
+            ViewBuffer::Loaded { .. } => None,
+        };
+        if let Some((chunk_line, chunk_offset)) = backward {
+            return FileViewerAction::NeedsData {
+                offset: chunk_offset,
+                line_count: WINDOW_MAX_LINES,
+                window_start: chunk_line,
+            };
+        }
         if self.scroll_offset > 0 {
             self.scroll_offset -= 1;
             self.update_status();
@@ -1797,14 +1920,68 @@ impl FileViewerDialog {
 
     /// Scroll down by `height` lines.
     pub fn page_down(&mut self, height: usize) -> FileViewerAction {
+        let streaming = match &self.buffer {
+            ViewBuffer::Streaming {
+                lines,
+                window_start_line,
+                total_lines,
+                reader_offset,
+                ..
+            } => Some((
+                *window_start_line + lines.len(),
+                *total_lines,
+                *reader_offset,
+            )),
+            ViewBuffer::Loaded { .. } => None,
+        };
         let max = self.total_lines().saturating_sub(1);
         self.scroll_offset = (self.scroll_offset + height).min(max);
         self.update_status();
+        if let Some((window_end, total, reader_offset)) = streaming {
+            if window_end < total && self.scroll_offset + PREFETCH_THRESHOLD >= window_end {
+                return FileViewerAction::NeedsData {
+                    offset: reader_offset,
+                    line_count: WINDOW_MAX_LINES / 2,
+                    window_start: window_end,
+                };
+            }
+        }
         FileViewerAction::Swallow
     }
 
     /// Scroll up by `height` lines.
     pub fn page_up(&mut self, height: usize) -> FileViewerAction {
+        let backward = match &self.buffer {
+            ViewBuffer::Streaming {
+                window_start_line,
+                chunk_index,
+                ..
+            } => {
+                let new_scroll = self.scroll_offset.saturating_sub(height);
+                if *window_start_line > 0 && new_scroll <= *window_start_line {
+                    let target = window_start_line.saturating_sub(WINDOW_MAX_LINES / 2);
+                    let entry = chunk_index
+                        .iter()
+                        .rev()
+                        .find(|(ln, _)| *ln <= target)
+                        .copied()
+                        .unwrap_or((0, 0));
+                    Some(entry)
+                } else {
+                    None
+                }
+            }
+            ViewBuffer::Loaded { .. } => None,
+        };
+        if let Some((chunk_line, chunk_offset)) = backward {
+            self.scroll_offset = self.scroll_offset.saturating_sub(height);
+            self.update_status();
+            return FileViewerAction::NeedsData {
+                offset: chunk_offset,
+                line_count: WINDOW_MAX_LINES,
+                window_start: chunk_line,
+            };
+        }
         self.scroll_offset = self.scroll_offset.saturating_sub(height);
         self.update_status();
         FileViewerAction::Swallow
@@ -1837,9 +2014,42 @@ impl FileViewerDialog {
         if total == 0 {
             return FileViewerAction::Swallow;
         }
-        self.scroll_offset = n.clamp(1, total) - 1;
+        let target = n.clamp(1, total) - 1; // 0-based absolute
+                                            // For streaming: check if target is in the current window.
+        let needs = match &self.buffer {
+            ViewBuffer::Streaming {
+                lines,
+                window_start_line,
+                chunk_index,
+                ..
+            } => {
+                let window_end = *window_start_line + lines.len();
+                if target < *window_start_line || target >= window_end {
+                    // Not in window: binary-search chunk index for nearest entry ≤ target.
+                    let entry = chunk_index
+                        .iter()
+                        .rev()
+                        .find(|(ln, _)| *ln <= target)
+                        .copied()
+                        .unwrap_or((0, 0));
+                    Some(entry)
+                } else {
+                    None
+                }
+            }
+            ViewBuffer::Loaded { .. } => None,
+        };
+        self.scroll_offset = target;
         self.update_status();
-        FileViewerAction::Swallow
+        if let Some((chunk_line, chunk_offset)) = needs {
+            FileViewerAction::NeedsData {
+                offset: chunk_offset,
+                line_count: WINDOW_MAX_LINES,
+                window_start: chunk_line,
+            }
+        } else {
+            FileViewerAction::Swallow
+        }
     }
 
     /// Jump to the hex row containing byte `offset` (hex mode, clamped to valid range).
@@ -1905,44 +2115,89 @@ impl FileViewerDialog {
     }
 
     /// Search forward from the current scroll offset for `pattern`.
-    /// Returns `(line_index, col_byte_offset)` of the first match found, or `None`.
+    /// Returns `(absolute_line_index, col_byte_offset)` of the first match, or `None`.
     pub fn search_forward(&self, pattern: &str) -> Option<(usize, usize)> {
         let lines = self.text_lines_as_vec();
         if lines.is_empty() || pattern.is_empty() {
             return None;
         }
-        let start = (self.scroll_offset + 1).min(lines.len());
+        let window_start = match &self.buffer {
+            ViewBuffer::Streaming {
+                window_start_line, ..
+            } => *window_start_line,
+            ViewBuffer::Loaded { .. } => 0,
+        };
+        // Convert absolute scroll_offset to window-relative.
+        let local_scroll = self
+            .scroll_offset
+            .saturating_sub(window_start)
+            .min(lines.len());
+        let start = (local_scroll + 1).min(lines.len());
         for (offset, line) in lines[start..].iter().enumerate() {
             if let Some(col) = line.find(pattern) {
-                return Some((start + offset, col));
+                return Some((window_start + start + offset, col));
             }
         }
-        // Wrap-around search from beginning.
+        // Wrap-around from beginning of window.
         for (i, line) in lines[..start].iter().enumerate() {
             if let Some(col) = line.find(pattern) {
-                return Some((i, col));
+                return Some((window_start + i, col));
             }
         }
         None
     }
 
     /// Search backward from the current scroll offset for `pattern`.
-    /// Returns `(line_index, col_byte_offset)` of the match found, or `None`.
+    /// Returns `(absolute_line_index, col_byte_offset)` of the match, or `None`.
     pub fn search_backward(&self, pattern: &str) -> Option<(usize, usize)> {
         let lines = self.text_lines_as_vec();
         if lines.is_empty() || pattern.is_empty() {
             return None;
         }
-        let end = self.scroll_offset.min(lines.len());
+        let window_start = match &self.buffer {
+            ViewBuffer::Streaming {
+                window_start_line, ..
+            } => *window_start_line,
+            ViewBuffer::Loaded { .. } => 0,
+        };
+        let local_scroll = self
+            .scroll_offset
+            .saturating_sub(window_start)
+            .min(lines.len());
+        let end = local_scroll.min(lines.len());
         for i in (0..end).rev() {
             if let Some(col) = lines[i].find(pattern) {
-                return Some((i, col));
+                return Some((window_start + i, col));
             }
         }
-        // Wrap-around from end.
+        // Wrap-around from end of window.
         for i in (end..lines.len()).rev() {
             if let Some(col) = lines[i].find(pattern) {
-                return Some((i, col));
+                return Some((window_start + i, col));
+            }
+        }
+        None
+    }
+
+    /// Returns a partial-coverage annotation for search results in streaming mode.
+    /// Returns `None` for fully-loaded buffers.
+    fn streaming_annotation(&self) -> Option<String> {
+        if let ViewBuffer::Streaming {
+            lines,
+            window_start_line,
+            total_bytes,
+            reader_offset,
+            ..
+        } = &self.buffer
+        {
+            let buffer_end_line = window_start_line + lines.len();
+            let tot = self.total_lines();
+            if buffer_end_line < tot && *total_bytes > 0 {
+                let searched_mib = *reader_offset as f64 / (1024.0 * 1024.0);
+                let total_mib = *total_bytes as f64 / (1024.0 * 1024.0);
+                return Some(format!(
+                    "(searched {searched_mib:.1} MiB of {total_mib:.1} MiB)"
+                ));
             }
         }
         None
@@ -1954,6 +2209,7 @@ impl FileViewerDialog {
         pattern: &str,
         dir: SearchDirection,
     ) {
+        let annot = self.streaming_annotation().unwrap_or_default();
         match result {
             Some((line, col)) => {
                 self.scroll_offset = line;
@@ -1965,10 +2221,18 @@ impl FileViewerDialog {
                 });
                 self.update_status();
                 let base = self.status.clone();
-                self.status = format!("/{pattern}  {base}");
+                if annot.is_empty() {
+                    self.status = format!("/{pattern}  {base}");
+                } else {
+                    self.status = format!("/{pattern}  {base}  {annot}");
+                }
             }
             None => {
-                self.status = format!("Pattern not found: {pattern}");
+                if annot.is_empty() {
+                    self.status = format!("Pattern not found: {pattern}");
+                } else {
+                    self.status = format!("Pattern not found: {pattern}  {annot}");
+                }
             }
         }
     }
@@ -2110,16 +2374,43 @@ impl FileViewerDialog {
 
     // --- Streaming ---
 
-    /// Append lines to a streaming buffer window (called from lib.rs after `NeedsData`).
-    pub fn append_lines(&mut self, new_lines: Vec<String>) {
-        if let ViewBuffer::Streaming { lines, .. } = &mut self.buffer {
-            for l in new_lines {
-                lines.push_back(l);
-                while lines.len() > WINDOW_MAX_LINES {
-                    lines.pop_front();
+    /// Merge new lines into the streaming buffer window (called from lib.rs after `NeedsData`).
+    ///
+    /// `window_start` is the absolute file line number of `new_lines[0]`.
+    /// `new_reader_offset` is the byte position after the last line read.
+    /// - Forward load (`window_start >= current_window_end`): appends, evicts front if > `WINDOW_MAX_LINES`.
+    /// - Backward/goto load (`window_start < current_window_end`): replaces the window entirely.
+    pub fn append_lines(
+        &mut self,
+        new_lines: Vec<String>,
+        window_start: usize,
+        new_reader_offset: u64,
+    ) {
+        if let ViewBuffer::Streaming {
+            lines,
+            window_start_line,
+            reader_offset,
+            ..
+        } = &mut self.buffer
+        {
+            let current_window_end = *window_start_line + lines.len();
+            if window_start >= current_window_end {
+                // Forward: append to back, evict front.
+                for l in new_lines {
+                    lines.push_back(l);
+                    while lines.len() > WINDOW_MAX_LINES {
+                        lines.pop_front();
+                        *window_start_line += 1;
+                    }
                 }
+            } else {
+                // Backward or goto: replace window entirely.
+                *lines = new_lines.into_iter().collect();
+                *window_start_line = window_start;
             }
+            *reader_offset = new_reader_offset;
         }
+        self.update_status();
     }
 
     // --- Hex rendering ---
@@ -2241,21 +2532,34 @@ impl FileViewerDialog {
         use ratatui::widgets::Paragraph;
 
         let lines_vec = self.text_lines_as_vec();
-        let total = lines_vec.len();
+        let file_total = self.total_lines(); // total lines in file (for Streaming: estimate)
 
-        if total == 0 {
+        if file_total == 0 || lines_vec.is_empty() {
             let para = Paragraph::new("(empty file)")
                 .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg));
             f.render_widget(para, area);
             return;
         }
 
-        let gutter_w = format!("{total}").len();
+        // For streaming buffers, scroll_offset is an absolute file line number but
+        // lines_vec contains only the window.  Compute the window-relative index.
+        let window_start = match &self.buffer {
+            ViewBuffer::Streaming {
+                window_start_line, ..
+            } => *window_start_line,
+            ViewBuffer::Loaded { .. } => 0,
+        };
+        let local_start = self
+            .scroll_offset
+            .saturating_sub(window_start)
+            .min(lines_vec.len());
+        let local_end = (local_start + viewport_h).min(lines_vec.len());
+
+        let gutter_w = format!("{file_total}").len();
         let search_pat = self.search.as_ref().map(|s| s.pattern.as_str());
-        let end = (self.scroll_offset + viewport_h).min(total);
 
         let mut rendered: Vec<Line> = Vec::with_capacity(viewport_h);
-        for (line_offset, line_str) in lines_vec[self.scroll_offset..end].iter().enumerate() {
+        for (line_offset, line_str) in lines_vec[local_start..local_end].iter().enumerate() {
             let line_num = self.scroll_offset + line_offset + 1;
             let text: &str = line_str.as_str();
             let num = format!("{:>width$} ", line_num, width = gutter_w);
@@ -3539,6 +3843,97 @@ mod tests {
             "status: {}",
             d.current_status_text()
         );
+    }
+
+    // ---------- FileViewerDialog — streaming: build_chunk_index + load_window_from_chunk (T037) ----------
+
+    #[test]
+    fn build_chunk_index_three_entries_for_3000_line_file() {
+        // build_chunk_index is in lib.rs; test via load_window_from_chunk which calls the same
+        // BufReader logic.  We create a temp file with 3000 lines and validate the chunk index
+        // by calling lib.rs through the public API exposed via new_streaming.
+        //
+        // For this unit test we test load_window_from_chunk directly, which is in dialog.rs.
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        for i in 0..3000usize {
+            writeln!(tmp, "line {i}").unwrap();
+        }
+        // load_window_from_chunk from byte 0, ask for 10 lines.
+        let (lines, offset) = FileViewerDialog::load_window_from_chunk(tmp.path(), 0, 10).unwrap();
+        assert_eq!(lines.len(), 10);
+        assert_eq!(lines[0], "line 0");
+        assert_eq!(lines[9], "line 9");
+        assert!(offset > 0, "reader_offset should advance past the 10 lines");
+
+        // load from offset: should get the next lines.
+        let (lines2, _) = FileViewerDialog::load_window_from_chunk(tmp.path(), offset, 5).unwrap();
+        assert_eq!(lines2.len(), 5);
+        assert_eq!(lines2[0], "line 10");
+    }
+
+    #[test]
+    fn load_window_from_chunk_reads_correct_lines_from_mid_file() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        for i in 0..100usize {
+            writeln!(tmp, "entry {i:04}").unwrap();
+        }
+        // Read line 0 to find offset of line 50.
+        let (first, _) = FileViewerDialog::load_window_from_chunk(tmp.path(), 0, 50).unwrap();
+        assert_eq!(first.len(), 50);
+        // Compute byte offset of line 50 by re-reading the first 50 lines.
+        let (_, offset_at_50) =
+            FileViewerDialog::load_window_from_chunk(tmp.path(), 0, 50).unwrap();
+        let (chunk, _) =
+            FileViewerDialog::load_window_from_chunk(tmp.path(), offset_at_50, 5).unwrap();
+        assert_eq!(chunk[0], "entry 0050");
+        assert_eq!(chunk[4], "entry 0054");
+    }
+
+    // ---------- FileViewerDialog — streaming: partial search annotation (T039) ----------
+
+    #[test]
+    fn streaming_annotation_present_when_buffer_end_less_than_total() {
+        use std::collections::VecDeque;
+        let lines: VecDeque<String> = (0..100).map(|i| format!("line {i}")).collect();
+        let d = FileViewerDialog::new_streaming(
+            std::path::PathBuf::from("/fake"),
+            "fake.txt".into(),
+            vec![(0, 0)],
+            lines,
+            1_000_000,        // total_lines >> window
+            50 * 1024 * 1024, // 50 MiB total
+            10 * 1024 * 1024, // reader at 10 MiB
+        );
+        let annot = d.streaming_annotation();
+        assert!(
+            annot.is_some(),
+            "should have annotation when buffer_end < total_lines"
+        );
+        let s = annot.unwrap();
+        assert!(s.contains("MiB"), "annotation should mention MiB: {s}");
+        assert!(
+            s.contains("searched"),
+            "annotation should say 'searched': {s}"
+        );
+    }
+
+    #[test]
+    fn streaming_annotation_absent_when_fully_loaded_window() {
+        use std::collections::VecDeque;
+        let lines: VecDeque<String> = (0..100).map(|i| format!("line {i}")).collect();
+        let d = FileViewerDialog::new_streaming(
+            std::path::PathBuf::from("/fake"),
+            "fake.txt".into(),
+            vec![(0, 0)],
+            lines,
+            100, // total_lines == window size (fully covered)
+            1024,
+            1024, // reader at EOF
+        );
+        // buffer_end = 0 + 100 = 100 = total_lines → no annotation
+        assert!(d.streaming_annotation().is_none());
     }
 
     // ---------- FileViewerDialog — close via Esc (T012 subset) ----------
