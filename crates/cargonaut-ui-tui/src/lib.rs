@@ -130,6 +130,23 @@ struct UiState {
     last_ctrl_o_at: Option<std::time::Instant>,
 }
 
+impl UiState {
+    /// Returns `true` and updates the timestamp when Ctrl-o fires within
+    /// the 50 ms debounce window (spec.md edge case E1).
+    /// When `false`, the caller should update `last_ctrl_o_at` and proceed.
+    fn ctrl_o_should_skip(&mut self) -> bool {
+        const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(50);
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_ctrl_o_at {
+            if now.duration_since(last) < DEBOUNCE {
+                return true;
+            }
+        }
+        self.last_ctrl_o_at = Some(now);
+        false
+    }
+}
+
 #[derive(Debug)]
 enum ActiveDialog {
     Confirm {
@@ -353,11 +370,32 @@ async fn run_loop<B: ratatui::backend::Backend>(
         // so `app` isn't borrowed inside the closure.
         let tab_bar_left = app.tab_bar_view(PaneId::Left);
         let tab_bar_right = app.tab_bar_view(PaneId::Right);
+        // Feature 054 (T017): drain PTY output before rendering.
+        if let Some(s) = ui.subshell.as_mut() {
+            s.poll_output();
+        }
+
         let mut layout = FrameLayout::default();
         // Feature 041 US2 (FR-005): capture state for the persistent indicator,
         // read out before the partial borrow of `ui` below.
         let mouse_supported = app.config().ui.mouse;
         let mouse_captured = ui.mouse_enabled;
+        // Feature 054: compute all subshell parameters before splitting ui borrows.
+        let subshell_phase = ui.subshell_phase;
+        let subshell_dead = ui.subshell.as_ref().map_or(false, |s| s.dead);
+        let content_h = ui.layout.left.height;
+        let height_pct = app.config().ui.subshell_height_pct;
+        let subshell_rows: u16 = if content_h > 4 {
+            let r = (content_h as u32 * height_pct as u32 / 100)
+                .clamp(3, (content_h as u32).saturating_sub(4)) as u16;
+            r.max(3)
+        } else {
+            10
+        };
+        // Extract screen ref before split-borrows: NLL treats ui.subshell and
+        // ui.menu / ui.fkeybar as disjoint field borrows.
+        let subshell_screen: Option<&vt100::Screen> =
+            ui.subshell.as_ref().map(|s| s.screen());
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
         let help_overlay = ui.help_overlay.as_ref().cloned();
@@ -383,6 +421,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 mouse_captured,
                 &tab_bar_left,
                 &tab_bar_right,
+                subshell_phase,
+                subshell_screen,
+                subshell_dead,
+                subshell_rows,
             );
         })
         .map_err(Error::Terminal)?;
@@ -415,8 +457,16 @@ async fn run_loop<B: ratatui::backend::Backend>(
                             &mut mode, &mut active_dialog, &mut quit,
                         ).await?;
                     }
-                    Some(Ok(CtEvent::Resize(_, _))) => {
-                        // Loop iter will re-render.
+                    Some(Ok(CtEvent::Resize(new_cols, new_rows))) => {
+                        // Resize PTY if the subshell panel is visible (T017).
+                        if ui.subshell_phase.is_visible() {
+                            if let Some(s) = ui.subshell.as_mut() {
+                                let h_pct = app.config().ui.subshell_height_pct;
+                                let panel = ((new_rows as u32 * h_pct as u32) / 100)
+                                    .clamp(3, (new_rows as u32).saturating_sub(4)) as u16;
+                                s.resize(panel.max(3), new_cols.max(1));
+                            }
+                        }
                     }
                     Some(Ok(_)) => {} // focus/paste events — ignored
                     Some(Err(e)) => return Err(Error::Terminal(e)),
@@ -1004,6 +1054,31 @@ async fn handle_key(
         }
     }
 
+    // Feature 054: when shell focus is active, Ctrl-o cycles phase;
+    // all other keys are forwarded verbatim to the PTY (FR-009).
+    if *mode == Mode::Subshell {
+        use crossterm::event::KeyModifiers;
+        let is_ctrl_o = key.code == crossterm::event::KeyCode::Char('o')
+            && key.modifiers.contains(KeyModifiers::CONTROL);
+        if is_ctrl_o {
+            dispatch_ui_command(
+                Command::OpenSubshell,
+                app,
+                mode,
+                active_dialog,
+                status,
+                quit,
+                ui,
+            )
+            .await?;
+        } else {
+            if let Some(s) = ui.subshell.as_mut() {
+                s.write_key(key);
+            }
+        }
+        return Ok(true);
+    }
+
     // Normal mode — accumulate chord + look up.
     chord_buf.push(KeyChord {
         code: key.code,
@@ -1046,6 +1121,62 @@ async fn dispatch_ui_command(
         Command::ShowHelp => {
             let visible_h = ui.layout.left.height.saturating_sub(2).max(1);
             ui.help_overlay = Some(dialog::HelpOverlay::new(visible_h));
+            return Ok(());
+        }
+        // Feature 054 (FR-002): Ctrl-o cycles through Hidden→VisibleFmFocus→VisibleShellFocus→Hidden.
+        Command::OpenSubshell => {
+            // FR-012: no-op when any modal is open.
+            if active_dialog.is_some() || ui.help_overlay.is_some() {
+                return Ok(());
+            }
+            // E1: ignore burst keypresses (< 50 ms debounce).
+            if ui.ctrl_o_should_skip() {
+                return Ok(());
+            }
+            // FR-015: guard against terminals that are too small.
+            // content_height is pane area rows; need at least 8 free.
+            let content_height = ui.layout.left.height;
+            if content_height < 8 && ui.subshell_phase == subshell::SubshellPhase::Hidden {
+                *status = "Terminal too small to open subshell (min 8 rows)".to_string();
+                return Ok(());
+            }
+            // Advance the three-state cycle.
+            let next_phase = ui.subshell_phase.advance();
+            // Lazily spawn or respawn when transitioning from Hidden.
+            if ui.subshell_phase == subshell::SubshellPhase::Hidden {
+                let cwd = vfs_path_to_local(&app.pane(app.active_pane()).cwd);
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+                let height_pct = app.config().ui.subshell_height_pct;
+                let panel_rows = ((content_height as u32 * height_pct as u32) / 100)
+                    .clamp(3, content_height.saturating_sub(5) as u32) as u16;
+                let cols = ui.layout.left.width + ui.layout.right.width;
+                let cols = if cols == 0 { 80 } else { cols };
+                let panel_rows = if panel_rows == 0 { 10 } else { panel_rows };
+                match ui.subshell.as_mut() {
+                    Some(s) if s.dead => {
+                        if let Err(e) = s.respawn(&shell, &cwd, panel_rows, cols) {
+                            *status = format!("Subshell respawn failed: {e}");
+                            return Ok(());
+                        }
+                    }
+                    None => {
+                        match subshell::SubshellState::spawn(&shell, &cwd, panel_rows, cols) {
+                            Ok(s) => ui.subshell = Some(s),
+                            Err(e) => {
+                                *status = format!("Subshell spawn failed: {e}");
+                                return Ok(());
+                            }
+                        }
+                    }
+                    Some(_) => {} // alive and hidden — just show it
+                }
+            }
+            ui.subshell_phase = next_phase;
+            // Update input mode to route keys to the PTY.
+            *mode = match next_phase {
+                subshell::SubshellPhase::VisibleShellFocus => Mode::Subshell,
+                _ => Mode::Pane,
+            };
             return Ok(());
         }
         // Feature 041 (FR-001/002/003/006): M-m toggles mouse capture at
@@ -2238,6 +2369,21 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
     })
 }
 
+/// Convert a `VfsPath` (file:///…) to a local `PathBuf`.
+///
+/// Joins segments with `/`; prepends `/` for the root. Non-`file` scheme
+/// paths (sftp, s3) fall back to `/` since the subshell can't cd to them.
+fn vfs_path_to_local(vpath: &cargonaut_vfs::types::VfsPath) -> std::path::PathBuf {
+    if vpath.scheme != "file" {
+        return std::path::PathBuf::from("/");
+    }
+    let mut pb = std::path::PathBuf::from("/");
+    for seg in &vpath.segments {
+        pb.push(seg.as_str());
+    }
+    pb
+}
+
 /// Render the persistent mouse-capture indicator right-aligned in the menu-bar
 /// row (Feature 041 US2 / FR-005). Called after `menu.render` so it sits atop
 /// the bar background; menu dropdowns open one row below and never overlap it.
@@ -2290,20 +2436,44 @@ fn draw_frame(
     mouse_captured: bool,
     tab_bar_left: &[cargonaut_core::TabBarEntry],
     tab_bar_right: &[cargonaut_core::TabBarEntry],
+    subshell_phase: subshell::SubshellPhase,
+    subshell_screen: Option<&vt100::Screen>,
+    subshell_dead: bool,
+    subshell_rows: u16,
 ) -> FrameLayout {
     use cargonaut_core::ViewMode;
     use ratatui::widgets::Widget;
     let area = f.size();
-    // US2 layout: [menu bar | panes | status | fkey bar].
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // menu bar
-            Constraint::Min(3),    // panes
-            Constraint::Length(1), // status
-            Constraint::Length(1), // function-key bar
-        ])
-        .split(area);
+    // US2/Feature054 layout: [menu | panes | (subshell) | status | fkeys].
+    let main_chunks = if subshell_phase.is_visible() {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),              // menu bar
+                Constraint::Min(3),                 // panes
+                Constraint::Length(subshell_rows),  // subshell panel
+                Constraint::Length(1),              // status
+                Constraint::Length(1),              // function-key bar
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // menu bar
+                Constraint::Min(3),    // panes
+                Constraint::Length(1), // status
+                Constraint::Length(1), // function-key bar
+            ])
+            .split(area)
+    };
+    // Named rect indices — shift when subshell panel is visible.
+    let (subshell_rect_opt, status_idx, fkeys_idx) = if subshell_phase.is_visible() {
+        (Some(main_chunks[2]), 3usize, 4usize)
+    } else {
+        (None, 2usize, 3usize)
+    };
+
     let pane_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -2346,14 +2516,46 @@ fn draw_frame(
         )
     };
 
+    // Feature 054: render subshell panel when visible.
+    let layout_subshell = if let Some(srect) = subshell_rect_opt {
+        // 1-row header inside the panel rect.
+        let header_rect = Rect { height: 1, ..srect };
+        let body_rect = Rect {
+            y: srect.y + 1,
+            height: srect.height.saturating_sub(1),
+            ..srect
+        };
+        let phase_label = match subshell_phase {
+            subshell::SubshellPhase::VisibleFmFocus => "FM Focus",
+            subshell::SubshellPhase::VisibleShellFocus => "Shell Focus",
+            _ => "",
+        };
+        Paragraph::new(format!(" [Shell] {phase_label}"))
+            .style(ratatui::style::Style::default()
+                .fg(theme.menu_fg)
+                .bg(theme.menu_bg)
+                .add_modifier(ratatui::style::Modifier::BOLD))
+            .render(header_rect, f.buffer_mut());
+        if subshell_dead {
+            Paragraph::new(" Shell exited — press Ctrl-o to restart")
+                .style(theme.status_style())
+                .render(body_rect, f.buffer_mut());
+        } else if let Some(screen) = subshell_screen {
+            subshell::render_vt100_screen(screen, body_rect, f.buffer_mut());
+        }
+        Some(srect)
+    } else {
+        None
+    };
+
     // US1 (FR-002): status bar themed instead of bare reverse-video.
     let status_text = format!(" [{mode:?}]  {status}");
     Paragraph::new(status_text)
         .style(theme.status_style())
-        .render(main_chunks[2], f.buffer_mut());
+        .render(main_chunks[status_idx], f.buffer_mut());
 
     // US2: function-key bar (bottom) + menu bar (top, may drop down over panes).
-    fkeybar.render(main_chunks[3], f.buffer_mut(), theme);
+    fkeybar.render(main_chunks[fkeys_idx], f.buffer_mut(), theme);
     menu.render(main_chunks[0], f.buffer_mut(), theme);
     // Feature 041 US2 (FR-005): persistent capture indicator in the menu-row
     // right gutter (rendered after the menu so it overlays the bar background).
@@ -2397,8 +2599,8 @@ fn draw_frame(
         menu: main_chunks[0],
         left: left_inner,
         right: right_inner,
-        fkeys: main_chunks[3],
-        subshell: None,
+        fkeys: main_chunks[fkeys_idx],
+        subshell: layout_subshell,
     }
 }
 

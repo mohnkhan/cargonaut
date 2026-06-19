@@ -337,6 +337,75 @@ fn find_valid_ancestor(path: &Path) -> std::path::PathBuf {
 }
 
 // =====================================================================
+// VT100 → ratatui renderer (no tui-term dep; ratatui 0.27 compatible)
+// =====================================================================
+
+/// Render a `vt100::Screen` into a ratatui `Buffer` region.
+///
+/// Iterates over every cell in the visible screen area and writes the
+/// character + style into the corresponding buffer cell. Cells that fall
+/// outside `area` are silently clipped.
+pub(crate) fn render_vt100_screen(
+    screen: &vt100::Screen,
+    area: ratatui::layout::Rect,
+    buf: &mut ratatui::buffer::Buffer,
+) {
+    use ratatui::style::{Color, Modifier, Style};
+
+    let rows = screen.size().0;
+    let cols = screen.size().1;
+
+    for row in 0..rows {
+        for col in 0..cols {
+            let buf_x = area.x + col;
+            let buf_y = area.y + row;
+            if buf_x >= area.x + area.width || buf_y >= area.y + area.height {
+                continue;
+            }
+            if let Some(cell) = screen.cell(row, col) {
+                let contents = cell.contents();
+                let sym = if contents.is_empty() { " " } else { contents };
+
+                let fg = vt100_color_to_ratatui(cell.fgcolor());
+                let bg = vt100_color_to_ratatui(cell.bgcolor());
+
+                let mut mods = Modifier::empty();
+                if cell.bold() { mods |= Modifier::BOLD; }
+                if cell.italic() { mods |= Modifier::ITALIC; }
+                if cell.underline() { mods |= Modifier::UNDERLINED; }
+                if cell.inverse() { mods |= Modifier::REVERSED; }
+
+                let style = Style::default().fg(fg).bg(bg).add_modifier(mods);
+                let buf_cell = buf.get_mut(buf_x, buf_y);
+                buf_cell.set_symbol(sym);
+                buf_cell.set_style(style);
+            }
+        }
+    }
+
+    // Render cursor (only when in shell-focus mode the caller decides;
+    // we always write it so the caller can choose to skip if needed).
+    let (cur_row, cur_col) = screen.cursor_position();
+    let cur_x = area.x + cur_col;
+    let cur_y = area.y + cur_row;
+    if cur_x < area.x + area.width && cur_y < area.y + area.height && !screen.hide_cursor() {
+        let cur_cell = buf.get_mut(cur_x, cur_y);
+        let existing_style = cur_cell.style();
+        cur_cell.set_style(existing_style.add_modifier(Modifier::REVERSED));
+    }
+}
+
+/// Convert a `vt100::Color` to the closest `ratatui::style::Color`.
+fn vt100_color_to_ratatui(c: vt100::Color) -> ratatui::style::Color {
+    use ratatui::style::Color;
+    match c {
+        vt100::Color::Default => Color::Reset,
+        vt100::Color::Idx(i) => Color::Indexed(i),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
