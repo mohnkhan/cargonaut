@@ -253,6 +253,7 @@ dependencies = [
  "cargonaut-vfs",
  "crossterm 0.28.1",
  "futures",
+ "globset",
  "humantime",
  "ratatui",
  "serde",
