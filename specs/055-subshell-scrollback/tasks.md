@@ -27,8 +27,8 @@
 
 **⚠️ CRITICAL**: Must complete before Phase 3 US1 lib.rs tasks (T003–T005).
 
-- [ ] T001 Add compile-time smoke test `let _: fn(&mut SubshellState) -> &mut vt100::Screen = SubshellState::screen_mut;` inside `_assert_subshell_state_fields` in `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T001 (red): screen_mut contract assertion`** (fails to compile; method does not exist yet)
-- [ ] T001b Add `screen_mut(&mut self) -> &mut vt100::Screen` method to `SubshellState` in `crates/cargonaut-ui-tui/src/subshell.rs` (alongside existing `screen(&self)` at line 207; delegates to `self.parser.screen_mut()`) — **green commit: `T001b (green): screen_mut accessor`**
+- [x] T001 Add compile-time smoke test `let _: fn(&mut SubshellState) -> &mut vt100::Screen = SubshellState::screen_mut;` inside `_assert_subshell_state_fields` in `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T001 (red): screen_mut contract assertion`** (fails to compile; method does not exist yet)
+- [x] T001b Add `screen_mut(&mut self) -> &mut vt100::Screen` method to `SubshellState` in `crates/cargonaut-ui-tui/src/subshell.rs` (alongside existing `screen(&self)` at line 207; delegates to `self.parser.screen_mut()`) — **green commit: `T001b (green): screen_mut accessor`**
 
 **Checkpoint**: `cargo check -p cargonaut-ui-tui` passes. No test changes yet.
 
@@ -44,18 +44,18 @@
 
 > **Write these tests FIRST, ensure they FAIL (todo!() panics) before implementing**
 
-- [ ] T002 [US1] Add failing test stub `render_vt100_screen_scrollback_offset_changes_content` (body: `todo!()`) to `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T002 (red): scrollback render test stub`**
-- [ ] T003 [US1] Add failing test stub `render_vt100_screen_hides_cursor_in_scrollback` (body: `todo!()`) to `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T003 (red): cursor-hide scrollback test stub`**
+- [x] T002 [US1] Add failing test stub `render_vt100_screen_scrollback_offset_changes_content` (body: `todo!()`) to `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T002 (red): scrollback render test stub`**
+- [x] T003 [US1] Add failing test stub `render_vt100_screen_hides_cursor_in_scrollback` (body: `todo!()`) to `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T003 (red): cursor-hide scrollback test stub`**
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] Fix inverted scroll direction in `crates/cargonaut-ui-tui/src/lib.rs` `handle_mouse_event`: swap `ScrollDown` → `saturating_sub(1)` and `ScrollUp` → `saturating_add(1)` (lines ~1899, 1914) — **green for FR-004**
-- [ ] T005 [US1] Apply `s.screen_mut().set_scrollback(s.scroll_offset as usize)` before `let subshell_screen = ...` in `crates/cargonaut-ui-tui/src/lib.rs` run loop (after `poll_output`, before line 417) — **green for FR-001**
-- [ ] T006 [US1] Add `s.screen_mut().set_scrollback(0)` after `term.draw(...)?` in `crates/cargonaut-ui-tui/src/lib.rs` run loop (after line 449) — **green for FR-002**
-- [ ] T007 [US1] Skip cursor rendering in `render_vt100_screen` when `screen.scrollback() > 0` in `crates/cargonaut-ui-tui/src/subshell.rs` (wrap the cursor block at line ~394 with `if screen.scrollback() == 0 { ... }`) — **green for FR-004 cursor correctness**
-- [ ] T008 [US1] Implement `render_vt100_screen_scrollback_offset_changes_content` test body in `crates/cargonaut-ui-tui/src/subshell.rs`: create `vt100::Parser::new(5, 10, 20)`, feed 25 lines, render at `set_scrollback(0)` and `set_scrollback(5)`, assert buffers differ — **green commit: `T008 (green): scrollback render changes content`**
-- [ ] T009 [US1] Implement `render_vt100_screen_hides_cursor_in_scrollback` test body in `crates/cargonaut-ui-tui/src/subshell.rs`: create parser, feed content, verify that after `set_scrollback(n > 0)` the rendered buffer's cursor cell (live cursor position) does NOT carry `Modifier::REVERSED` — **green commit: `T009 (green): cursor hidden in scrollback`**
-- [ ] T015 [US1] Add `scroll_lock_preserved_on_new_pty_output` test in `crates/cargonaut-ui-tui/src/subshell.rs` mod tests: create `SubshellState` (or simulate `scroll_offset` directly), set `scroll_offset = 5`, call `poll_output` on a parser with pending data, assert `scroll_offset` is still 5 (US1 AC4: scroll-lock preserved when new output arrives) — **green commit: `T015 (green): scroll-lock preserved on PTY output`**
+- [x] T004 [US1] Fix inverted scroll direction in `crates/cargonaut-ui-tui/src/lib.rs` `handle_mouse_event`: swap `ScrollDown` → `saturating_sub(1)` and `ScrollUp` → `saturating_add(1)` (lines ~1899, 1914) — **green for FR-004**
+- [x] T005 [US1] Apply `s.screen_mut().set_scrollback(s.scroll_offset as usize)` before `let subshell_screen = ...` in `crates/cargonaut-ui-tui/src/lib.rs` run loop (after `poll_output`, before line 417) — **green for FR-001**
+- [x] T006 [US1] Add `s.screen_mut().set_scrollback(0)` after `term.draw(...)?` in `crates/cargonaut-ui-tui/src/lib.rs` run loop (after line 449) — **green for FR-002**
+- [x] T007 [US1] Skip cursor rendering in `render_vt100_screen` when `screen.scrollback() > 0` in `crates/cargonaut-ui-tui/src/subshell.rs` (wrap the cursor block at line ~394 with `if screen.scrollback() == 0 { ... }`) — **green for FR-004 cursor correctness**
+- [x] T008 [US1] Implement `render_vt100_screen_scrollback_offset_changes_content` test body in `crates/cargonaut-ui-tui/src/subshell.rs`: create `vt100::Parser::new(5, 10, 20)`, feed 25 lines, render at `set_scrollback(0)` and `set_scrollback(5)`, assert buffers differ — **green commit: `T008 (green): scrollback render changes content`**
+- [x] T009 [US1] Implement `render_vt100_screen_hides_cursor_in_scrollback` test body in `crates/cargonaut-ui-tui/src/subshell.rs`: create parser, feed content, verify that after `set_scrollback(n > 0)` the rendered buffer's cursor cell (live cursor position) does NOT carry `Modifier::REVERSED` — **green commit: `T009 (green): cursor hidden in scrollback`**
+- [x] T015 [US1] Add `scroll_lock_preserved_on_new_pty_output` test in `crates/cargonaut-ui-tui/src/subshell.rs` mod tests: simulate scroll_offset=5, verify vt100 offset stays at 0 after poll_output (reset before process()) so next frame's re-apply is stable — **green commit: `T015 (green): scroll-lock preserved on PTY output`**
 
 **Checkpoint**: `cargo test -p cargonaut-ui-tui` passes. Manual test: `make run`, open subshell, `seq 1 100`, scroll up → older lines appear. Scroll down → live view returns. Cursor not rendered during scrollback.
 
@@ -71,12 +71,12 @@
 
 > **Write these tests FIRST with todo!() — then implement**
 
-- [ ] T010 [US2] Add failing test stub `scrollback_clamps_at_buffer_limit` (body: `todo!()`) to `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T010 (red): scrollback boundary clamp test stub`**
+- [x] T010 [US2] Add failing test stub `scrollback_clamps_at_buffer_limit` (body: `todo!()`) to `crates/cargonaut-ui-tui/src/subshell.rs` mod tests — **red commit: `T010 (red): scrollback boundary clamp test stub`**
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Implement `scrollback_clamps_at_buffer_limit` test body in `crates/cargonaut-ui-tui/src/subshell.rs`: create `vt100::Parser::new(5, 10, 20)` (20-row scrollback), feed 200 lines, call `screen_mut().set_scrollback(999)` (exceeds buffer), call `render_vt100_screen`, assert no panic and buffer is non-empty — **green commit: `T011 (green): scrollback boundary clamped by vt100`**
-- [ ] T017 [US2] Fix `SubshellState::resize` in `crates/cargonaut-ui-tui/src/subshell.rs`: add `self.scroll_offset = 0;` after `self.parser = vt100::Parser::new(rows, cols, 200);` so a stale offset does not reference a fresh parser's empty scrollback — **green commit: `T017 (green): reset scroll_offset on resize`**
+- [x] T011 [US2] Implement `scrollback_clamps_at_buffer_limit` test body in `crates/cargonaut-ui-tui/src/subshell.rs`: create `vt100::Parser::new(5, 10, 20)` (20-row scrollback), feed 200 lines, call `screen_mut().set_scrollback(999)` (exceeds buffer), call `render_vt100_screen`, assert no panic and buffer is non-empty — **green commit: `T011 (green): scrollback boundary clamped by vt100`**
+- [x] T017 [US2] Fix `SubshellState::resize` in `crates/cargonaut-ui-tui/src/subshell.rs`: add `self.scroll_offset = 0;` after `self.parser = vt100::Parser::new(rows, cols, 200);` so a stale offset does not reference a fresh parser's empty scrollback — **green commit: `T017 (green): reset scroll_offset on resize`**
 
 **Note**: No lib.rs code changes needed for US2 — vt100 `set_scrollback` already clamps to `min(rows, scrollback.len())` (R-006 in research.md). T017 is a correctness fix for the resize edge case (spec Edge Cases line 47).
 
@@ -88,9 +88,9 @@
 
 **Purpose**: Update mandatory docs (CLAUDE.md requires README.md + Learnings.md on every feature merge).
 
-- [ ] T012 [P] Update `README.md`: increment test count in "At a Glance" table; add one-line entry in "Feature History" for Feature 055
-- [ ] T013 [P] Update `Learnings.md`: append Feature 055 section (minimum 3 bullets: scroll-direction inversion bug, set_scrollback-before-extraction pattern, cursor hide during scrollback, resize scroll_offset reset)
-- [ ] T016 [P] Verify frame-rate regression gate: run `make ci-local` confirming keypress-latency bench still passes after lib.rs render-path changes (covers FR-005 and SC-001/SC-002 via existing NFR-002 bench)
+- [x] T012 [P] Update `README.md`: increment test count in "At a Glance" table; add one-line entry in "Feature History" for Feature 055
+- [x] T013 [P] Update `Learnings.md`: append Feature 055 section (minimum 3 bullets: scroll-direction inversion bug, set_scrollback-before-extraction pattern, cursor hide during scrollback, resize scroll_offset reset)
+- [x] T016 [P] Verify frame-rate regression gate: run `make ci-local` confirming keypress-latency bench still passes after lib.rs render-path changes (covers FR-005 and SC-001/SC-002 via existing NFR-002 bench)
 
 > **PR note**: Reference "Closes #79" in the PR description body. Not a code task.
 
