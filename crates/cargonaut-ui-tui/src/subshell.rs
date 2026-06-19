@@ -539,4 +539,16 @@ mod tests {
         let result = find_valid_ancestor(gone);
         assert!(result.exists(), "ancestor must exist: {result:?}");
     }
+
+    // T002 (red): scrollback offset must change rendered content.
+    #[test]
+    fn render_vt100_screen_scrollback_offset_changes_content() {
+        todo!()
+    }
+
+    // T003 (red): cursor must not appear when scrolled into history.
+    #[test]
+    fn render_vt100_screen_hides_cursor_in_scrollback() {
+        todo!()
+    }
 }
