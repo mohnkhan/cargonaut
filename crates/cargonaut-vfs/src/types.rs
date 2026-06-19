@@ -105,6 +105,19 @@ impl VfsPath {
         }
     }
 
+    /// Percent-decode the authority component and return it as an owned `String`.
+    ///
+    /// Returns `None` if this path has no authority (e.g. `file://`).
+    ///
+    /// Used for archive paths where the host-filesystem path is encoded in the
+    /// authority with `/` as `%2F` (e.g. `zip://%2Ftmp%2Farchive.zip/`).
+    /// Performs a single pass, decoding every `%XX` sequence. Invalid sequences
+    /// (malformed hex, incomplete `%` at end of string) are left as-is.
+    pub fn decode_authority(&self) -> Option<String> {
+        let auth = self.authority.as_deref()?;
+        Some(percent_decode(auth))
+    }
+
     /// Append a single segment. Panics on `/`, `..`, or empty input —
     /// these are programmer errors at this layer; callers responsible
     /// for sanitizing untrusted input.
@@ -115,6 +128,38 @@ impl VfsPath {
         let mut p = self.clone();
         p.segments.push(SmolStr::new(segment));
         p
+    }
+}
+
+/// Decode a percent-encoded string in a single pass.
+/// `%XX` sequences where XX are valid hex digits are replaced with the
+/// corresponding byte. Invalid or incomplete sequences are passed through
+/// unchanged.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                let byte = (hi << 4) | lo;
+                out.push(byte as char);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
 }
 
