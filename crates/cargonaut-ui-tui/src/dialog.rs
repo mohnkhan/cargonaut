@@ -4843,4 +4843,126 @@ mod tests {
             "Enter in NoResults must not return Panelize"
         );
     }
+
+    // ========================================================================
+    // Feature 052 T006 (red) — start_walk name-mode tests
+    // ========================================================================
+
+    fn poll_until_done(d: &mut FindFileDialog, timeout_secs: u64) {
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_secs(timeout_secs);
+        loop {
+            d.poll_results();
+            if d.phase != DialogPhase::Walking {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("poll_until_done timed out after {timeout_secs}s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    // T006a: Happy path — 3 files, glob matches 2.
+    #[tokio::test]
+    async fn start_walk_name_mode_happy_path() {
+        let td = tempfile::TempDir::new().unwrap();
+        std::fs::write(td.path().join("foo.toml"), b"").unwrap();
+        std::fs::write(td.path().join("bar.toml"), b"").unwrap();
+        std::fs::write(td.path().join("baz.rs"), b"").unwrap();
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.toml".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+
+        poll_until_done(&mut d, 10);
+
+        assert_eq!(
+            d.results.len(),
+            2,
+            "expected 2 .toml matches, got {:?}",
+            d.results
+        );
+        assert_eq!(d.phase, DialogPhase::ResultsFocused);
+    }
+
+    // T006b: Unreadable root (FR-018) — phase becomes NoResults, notice set.
+    // Skip if running as root (root can read mode-0 dirs).
+    #[tokio::test]
+    async fn start_walk_unreadable_root_sets_no_results() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = tempfile::TempDir::new().unwrap();
+        fs::set_permissions(td.path(), fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Check if the permission actually took effect (root can bypass).
+        let probe = fs::read_dir(td.path());
+        // Restore permissions so TempDir can clean up regardless.
+        let _ = fs::set_permissions(td.path(), fs::Permissions::from_mode(0o755));
+
+        if probe.is_ok() {
+            // Running as root or filesystem ignores permissions — skip.
+            eprintln!("Skipping unreadable-root test: permissions not enforced");
+            return;
+        }
+
+        // Now re-run with a fresh tempdir since we already restored perms.
+        let td2 = tempfile::TempDir::new().unwrap();
+        fs::set_permissions(td2.path(), fs::Permissions::from_mode(0o000)).unwrap();
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.toml".to_string();
+        d.start_walk(td2.path().to_path_buf(), &config);
+
+        // Restore permissions so TempDir can clean up.
+        let _ = fs::set_permissions(td2.path(), fs::Permissions::from_mode(0o755));
+
+        assert_eq!(
+            d.phase,
+            DialogPhase::NoResults,
+            "unreadable root must set NoResults immediately"
+        );
+        assert!(
+            d.results.is_empty(),
+            "results must be empty for unreadable root"
+        );
+        let notice = d.notice.as_deref().unwrap_or("");
+        assert!(
+            notice.contains("Cannot read directory"),
+            "notice must mention 'Cannot read directory'; got: {notice:?}"
+        );
+    }
+
+    // T006c: SC-001 timing gate — 200 files, walk completes < 5s.
+    #[tokio::test]
+    async fn start_walk_name_mode_timing_gate_sc001() {
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..200usize {
+            std::fs::write(td.path().join(format!("file_{i:03}.tmp")), b"").unwrap();
+        }
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.tmp".to_string();
+
+        let t0 = std::time::Instant::now();
+        d.start_walk(td.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 10);
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "SC-001: walk must complete in <5s; took {elapsed:?}"
+        );
+        assert_eq!(
+            d.results.len(),
+            200,
+            "SC-001: all 200 files must be found; got {}",
+            d.results.len()
+        );
+    }
+
 }
