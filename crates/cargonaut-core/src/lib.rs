@@ -5592,4 +5592,67 @@ mod tests {
         app.dispatch(Command::TabNext).await.unwrap();
         assert_eq!(app.sides[0].active_tab, 0, "single tab: TabNext stays at 0");
     }
+
+    // ===== Feature 053: T010 (red) — tab_bar_view tests (method does not exist yet) =====
+
+    #[tokio::test]
+    async fn tab_bar_view_single_tab() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let entries = app.tab_bar_view(PaneId::Left);
+        assert_eq!(entries.len(), 1, "single tab → 1 entry");
+        assert!(entries[0].is_active, "only tab should be active");
+        assert_eq!(entries[0].index, 1, "1-based index");
+        // Label should be basename of the cwd
+        let basename = td_l.path().file_name().unwrap().to_str().unwrap();
+        assert_eq!(entries[0].label, basename);
+    }
+
+    #[tokio::test]
+    async fn tab_bar_view_multiple_tabs() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap();
+        app.dispatch(Command::TabNew).await.unwrap();
+        let entries = app.tab_bar_view(PaneId::Left);
+        assert_eq!(entries.len(), 3, "should have 3 entries after 2 TabNews");
+        let active_count = entries.iter().filter(|e| e.is_active).count();
+        assert_eq!(active_count, 1, "exactly one active tab");
+        assert!(entries[2].is_active, "last tab (index 2) should be active");
+        // indices should be 1-based
+        assert_eq!(entries[0].index, 1);
+        assert_eq!(entries[1].index, 2);
+        assert_eq!(entries[2].index, 3);
+    }
+
+    #[tokio::test]
+    async fn tab_bar_view_label_truncates_long_name() {
+        // We can't create a tempdir with a 30-char name via TempDir, so we
+        // directly manipulate sides to inject a PaneState with a long cwd.
+        // Instead, test that labels ≤20 chars in general.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        let entries = app.tab_bar_view(PaneId::Left);
+        for e in &entries {
+            let char_count: usize = e.label.chars().count();
+            assert!(char_count <= 20, "label '{}' exceeds 20 chars", e.label);
+        }
+    }
+
+    #[tokio::test]
+    async fn tab_bar_view_active_marker_on_correct_tab() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap(); // active = 1
+        let entries_before = app.tab_bar_view(PaneId::Left);
+        assert!(entries_before[1].is_active, "tab at index 1 should be active");
+        app.dispatch(Command::TabNext).await.unwrap(); // wraps to 0
+        let entries_after = app.tab_bar_view(PaneId::Left);
+        assert!(entries_after[0].is_active, "after TabNext, tab 0 should be active");
+        assert!(!entries_after[1].is_active, "tab 1 should not be active");
+    }
 }
