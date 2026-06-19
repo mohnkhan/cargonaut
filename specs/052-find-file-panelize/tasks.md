@@ -350,7 +350,7 @@ the active panel to its previous listing unchanged.
   the quickstart.md manual steps 1–7. Fix any clippy/fmt issues. All steps must pass
   with zero failures before T032.
 
-- [ ] T032 [POLISH] Docs (CLAUDE.md MANDATORY — must be committed BEFORE T033/PR merge):
+- [X] T032 [POLISH] Docs (CLAUDE.md MANDATORY — must be committed BEFORE T033/PR merge):
   update `README.md` ("At a Glance" metrics — test count, feature count, binary size;
   + Feature History one-liner for Feature 052) and append a Feature 052 section to
   `Learnings.md` (≥3 bullets: the BFS abort pattern via AtomicBool, the
@@ -358,7 +358,7 @@ the active panel to its previous listing unchanged.
   for ripgrep, the display-relative / store-absolute path split). Verify with
   `docs-gate` as part of T031 above.
 
-- [ ] T033 [POLISH] Run `cargo tarpaulin --package cargonaut-ui-tui --lcov --out Lcov`
+- [X] T033 [POLISH] Run `cargo tarpaulin --package cargonaut-ui-tui --lcov --out Lcov`
   and confirm coverage for `cargonaut-ui-tui` remains ≥80% (NFR-007, Constitution §II).
   If coverage drops below 80%, add tests to recover the threshold before proceeding
   to T034. (This is a constitution MUST gate — not skippable.)
