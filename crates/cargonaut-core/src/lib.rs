@@ -6055,4 +6055,44 @@ mod tests {
         );
         assert!(!entries_after[1].is_active, "tab 1 should not be active");
     }
+
+    // ===== T008 (red): PaneState.backend + App.registry — Feature 057 =====
+
+    #[tokio::test]
+    async fn pane_state_has_backend_field() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        // Access the backend field; must exist and return "file" scheme.
+        let left_scheme = app.pane(PaneId::Left).backend.scheme();
+        let right_scheme = app.pane(PaneId::Right).backend.scheme();
+        assert_eq!(left_scheme, "file", "left pane backend must be local");
+        assert_eq!(right_scheme, "file", "right pane backend must be local");
+    }
+
+    #[tokio::test]
+    async fn app_registry_returns_arc_vfs_registry() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        // registry() must exist and its local() must be the file backend.
+        let reg = app.registry();
+        assert_eq!(reg.local().scheme(), "file");
+    }
+
+    #[tokio::test]
+    async fn pane_backend_is_local_fs_on_startup() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        // Both panes must start with the local (file://) backend.
+        for id in [PaneId::Left, PaneId::Right] {
+            let backend = &app.pane(id).backend;
+            assert_eq!(backend.scheme(), "file");
+            assert!(
+                backend.caps().contains(VfsCaps::SEEKABLE),
+                "{id:?} backend must be seekable (LocalFs)"
+            );
+        }
+    }
 }
