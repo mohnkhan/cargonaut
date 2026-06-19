@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Binary](https://img.shields.io/badge/binary-2.8%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-449%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-488%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -32,7 +32,7 @@ software written this decade.
 | | |
 |---|---|
 | **Status** | Alpha · Phase 1 shipped, plus 17 features since (031–051) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 496 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Tests** | 488 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.8 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -172,7 +172,9 @@ for the local filesystem:
   search with ALL visible matches highlighted; `n`/`N` advance; `g`/`G` goto line or byte
   offset; `w` toggles word-wrap; `q`/Esc closes. Files ≥ 10 MiB stream via a chunk index
   + sliding VecDeque window (Phase 7). Symlinks are followed (display name preserved).
-  (Feature 051).
+  Phase 8 adds SC-001/SC-002/SC-003 bench gates (p50 ≤ 150 ms open; ≤ 500 µs
+  handle_key; ≤ 64 MiB RSS on 1 GiB sparse file).
+  (Feature 051 + 051b).
 
 The full per-feature history (Features 001 → 051) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).

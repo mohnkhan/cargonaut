@@ -50,3 +50,8 @@ test = false
 name = "viewer_open"
 harness = false
 test = false
+
+[[bench]]
+name = "rss_headroom"
+harness = false
+test = false
