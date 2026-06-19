@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 20 features since (031–054) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 591 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 21 features since (031–055) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 595 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 3.0 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -200,11 +200,16 @@ for the local filesystem:
   `vt100::Parser` + custom `render_vt100_screen`; cursor-addressing programs (`vim`, `htop`,
   `less`) render correctly. The shell's cwd is kept in sync with the active pane every iteration
   via `cd <path>` injection. Mouse click inside the panel switches to Shell-Focus; scroll wheel
-  adjusts the `scroll_offset` (rendering follow-up: [#79](https://github.com/mohnkhan/cargonaut/issues/79)).
-  A 50 ms debounce prevents rapid Ctrl-o bursts from cycling states unintentionally.
+  adjusts `scroll_offset`. A 50 ms debounce prevents rapid Ctrl-o bursts.
   (Feature 054, closes #44).
 
-The full per-feature history (Features 001 → 054) lives in
+- **Subshell scrollback rendering** — wires `scroll_offset` into `render_vt100_screen` via
+  `Screen::set_scrollback()`; fixes inverted scroll direction (ScrollUp was decrementing instead
+  of incrementing); hides cursor when in scrollback mode (live cursor coords are not scrollback-
+  adjusted); resets `scroll_offset` on panel resize. 4 new unit tests.
+  (Feature 055, closes #79).
+
+The full per-feature history (Features 001 → 055) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap

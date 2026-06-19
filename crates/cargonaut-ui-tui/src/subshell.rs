@@ -200,12 +200,18 @@ impl SubshellState {
         };
         let _ = self.master.resize(new_size);
         self.parser = vt100::Parser::new(rows, cols, 200);
+        self.scroll_offset = 0;
         self.current_size = new_size;
     }
 
     /// Borrow the current VT100 screen state for rendering.
     pub(crate) fn screen(&self) -> &vt100::Screen {
         self.parser.screen()
+    }
+
+    /// Mutably borrow the VT100 screen (needed to call set_scrollback before draw).
+    pub(crate) fn screen_mut(&mut self) -> &mut vt100::Screen {
+        self.parser.screen_mut()
     }
 
     /// Drop the old PTY and spawn a fresh shell. Resets `dead` and `scroll_offset`.
@@ -389,15 +395,17 @@ pub(crate) fn render_vt100_screen(
         }
     }
 
-    // Render cursor (only when in shell-focus mode the caller decides;
-    // we always write it so the caller can choose to skip if needed).
-    let (cur_row, cur_col) = screen.cursor_position();
-    let cur_x = area.x + cur_col;
-    let cur_y = area.y + cur_row;
-    if cur_x < area.x + area.width && cur_y < area.y + area.height && !screen.hide_cursor() {
-        let cur_cell = buf.get_mut(cur_x, cur_y);
-        let existing_style = cur_cell.style();
-        cur_cell.set_style(existing_style.add_modifier(Modifier::REVERSED));
+    // T007: skip cursor when in scrollback — cursor_position() returns live coords
+    // that don't correspond to the shifted visible window.
+    if screen.scrollback() == 0 {
+        let (cur_row, cur_col) = screen.cursor_position();
+        let cur_x = area.x + cur_col;
+        let cur_y = area.y + cur_row;
+        if cur_x < area.x + area.width && cur_y < area.y + area.height && !screen.hide_cursor() {
+            let cur_cell = buf.get_mut(cur_x, cur_y);
+            let existing_style = cur_cell.style();
+            cur_cell.set_style(existing_style.add_modifier(Modifier::REVERSED));
+        }
     }
 }
 
@@ -429,6 +437,15 @@ mod tests {
     #[test]
     fn subshell_state_struct_fields() {
         let _: fn(&SubshellState) = _assert_subshell_state_fields;
+    }
+
+    // T001 (red): compile-time contract — screen_mut must exist on SubshellState.
+    // This assertion fails to compile until screen_mut() is added (T001b).
+    #[allow(dead_code)]
+    fn _assert_screen_mut_exists(_: fn(&mut SubshellState) -> &mut vt100::Screen) {}
+    #[allow(dead_code)]
+    fn _check_screen_mut() {
+        _assert_screen_mut_exists(SubshellState::screen_mut);
     }
 
     // T010 (green): three-state cycle advance tests.
@@ -524,5 +541,142 @@ mod tests {
         let gone = std::path::Path::new("/tmp/surely_nonexistent_xyzzy123/sub");
         let result = find_valid_ancestor(gone);
         assert!(result.exists(), "ancestor must exist: {result:?}");
+    }
+
+    // T008 (green): scrollback offset must change rendered content.
+    #[test]
+    fn render_vt100_screen_scrollback_offset_changes_content() {
+        use ratatui::{buffer::Buffer, layout::Rect};
+
+        // 5 rows × 10 cols, 20-row scrollback capacity.
+        let mut parser = vt100::Parser::new(5, 10, 20);
+        // Feed 25 distinct lines so scrollback is non-empty.
+        for i in 0..25u32 {
+            parser.process(format!("L{i:03}\r\n").as_bytes());
+        }
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 5,
+        };
+
+        let mut buf_live = Buffer::empty(area);
+        render_vt100_screen(parser.screen(), area, &mut buf_live);
+
+        parser.screen_mut().set_scrollback(5);
+        let mut buf_scroll = Buffer::empty(area);
+        render_vt100_screen(parser.screen(), area, &mut buf_scroll);
+        parser.screen_mut().set_scrollback(0);
+
+        assert_ne!(
+            buf_live, buf_scroll,
+            "scrollback must shift visible content"
+        );
+    }
+
+    // T011 (green): set_scrollback beyond capacity must not panic.
+    #[test]
+    fn scrollback_clamps_at_buffer_limit() {
+        use ratatui::{buffer::Buffer, layout::Rect};
+
+        // 5 rows × 10 cols, 20-row scrollback capacity.
+        let mut parser = vt100::Parser::new(5, 10, 20);
+        // Fill beyond scrollback limit so the buffer is full.
+        for i in 0..200u32 {
+            parser.process(format!("L{i:03}\r\n").as_bytes());
+        }
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 5,
+        };
+
+        // set_scrollback(999) must be clamped by vt100 — no panic.
+        parser.screen_mut().set_scrollback(999);
+        let mut buf = Buffer::empty(area);
+        render_vt100_screen(parser.screen(), area, &mut buf);
+
+        // Buffer must contain visible content (not all blank).
+        let non_blank = buf.content().iter().any(|c| c.symbol() != " ");
+        assert!(
+            non_blank,
+            "buffer must have non-blank cells after clamped scrollback"
+        );
+        parser.screen_mut().set_scrollback(0);
+    }
+
+    // T015 (green): vt100 offset stays at 0 when poll_output runs.
+    // The UI loop resets set_scrollback(0) after each draw, so when
+    // poll_output's parser.process() runs, the internal offset is 0 and
+    // vt100 does not adjust it. SubshellState::scroll_offset (u16) is a
+    // separate field only written by mouse event handlers.
+    #[test]
+    fn scroll_lock_preserved_on_new_pty_output() {
+        let mut parser = vt100::Parser::new(5, 10, 20);
+        for i in 0..25u32 {
+            parser.process(format!("L{i:03}\r\n").as_bytes());
+        }
+
+        // Simulate the UI render loop: set before draw, reset after.
+        parser.screen_mut().set_scrollback(5);
+        parser.screen_mut().set_scrollback(0); // reset after draw
+
+        // poll_output arrives while offset is 0 — vt100 does not adjust from 0.
+        parser.process(b"NEW\r\n");
+        assert_eq!(
+            parser.screen().scrollback(),
+            0,
+            "vt100 must not adjust offset from 0 when new content arrives"
+        );
+
+        // Next frame can safely re-apply scroll_offset=5 (same u16 field value).
+        parser.screen_mut().set_scrollback(5);
+        assert!(
+            parser.screen().scrollback() <= 5,
+            "re-applied offset must not exceed requested"
+        );
+        parser.screen_mut().set_scrollback(0);
+    }
+
+    // T009 (green): cursor must not appear when scrolled into history.
+    #[test]
+    fn render_vt100_screen_hides_cursor_in_scrollback() {
+        use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
+
+        // 3 rows × 5 cols, 5-row scrollback.
+        let mut parser = vt100::Parser::new(3, 5, 5);
+        // Push 4 lines of plain text; cursor ends on a blank cell at live bottom.
+        for i in 0..4u8 {
+            parser.process(format!("L{i:02}\r\n").as_bytes());
+        }
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 5,
+            height: 3,
+        };
+        let (cur_row, cur_col) = parser.screen().cursor_position();
+
+        // At live bottom the cursor cell should carry REVERSED.
+        let mut buf_live = Buffer::empty(area);
+        render_vt100_screen(parser.screen(), area, &mut buf_live);
+        let live_style = buf_live.get(cur_col, cur_row).style();
+        assert!(
+            live_style.add_modifier.contains(Modifier::REVERSED),
+            "cursor must show REVERSED at live bottom; style={live_style:?}"
+        );
+
+        // In scrollback mode the cursor block is skipped entirely.
+        parser.screen_mut().set_scrollback(1);
+        let mut buf_scroll = Buffer::empty(area);
+        render_vt100_screen(parser.screen(), area, &mut buf_scroll);
+        let scroll_style = buf_scroll.get(cur_col, cur_row).style();
+        assert!(
+            !scroll_style.add_modifier.contains(Modifier::REVERSED),
+            "cursor must not show REVERSED in scrollback mode; style={scroll_style:?}"
+        );
+        parser.screen_mut().set_scrollback(0);
     }
 }

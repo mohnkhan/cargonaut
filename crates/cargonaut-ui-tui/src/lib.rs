@@ -412,6 +412,11 @@ async fn run_loop<B: ratatui::backend::Backend>(
         } else {
             10
         };
+        // T005: apply scrollback offset so the screen ref reflects the user's scroll position.
+        if let Some(s) = ui.subshell.as_mut() {
+            let offset = s.scroll_offset as usize;
+            s.screen_mut().set_scrollback(offset);
+        }
         // Extract screen ref before split-borrows: NLL treats ui.subshell and
         // ui.menu / ui.fkeybar as disjoint field borrows.
         let subshell_screen: Option<&vt100::Screen> = ui.subshell.as_ref().map(|s| s.screen());
@@ -447,6 +452,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
             );
         })
         .map_err(Error::Terminal)?;
+        // T006: restore live view so non-render screen accesses are unaffected.
+        if let Some(s) = ui.subshell.as_mut() {
+            s.screen_mut().set_scrollback(0);
+        }
         ui.layout = layout;
 
         if quit {
@@ -1896,7 +1905,8 @@ async fn handle_mouse(
             if let Some(srect) = ui.layout.subshell {
                 if rect_contains(srect, x, y) {
                     if let Some(s) = ui.subshell.as_mut() {
-                        s.scroll_offset = s.scroll_offset.saturating_add(1);
+                        // ScrollDown = move toward live bottom (T004: direction fix).
+                        s.scroll_offset = s.scroll_offset.saturating_sub(1);
                     }
                     return Ok(());
                 }
@@ -1911,7 +1921,8 @@ async fn handle_mouse(
             if let Some(srect) = ui.layout.subshell {
                 if rect_contains(srect, x, y) {
                     if let Some(s) = ui.subshell.as_mut() {
-                        s.scroll_offset = s.scroll_offset.saturating_sub(1);
+                        // ScrollUp = move into older history (T004: direction fix).
+                        s.scroll_offset = s.scroll_offset.saturating_add(1);
                     }
                     return Ok(());
                 }
