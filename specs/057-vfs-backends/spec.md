@@ -8,6 +8,16 @@
 
 **Input**: User description: "Feature 057 — VFS backends: archives-as-directories + remote (SFTP/FTP/fish). Closes issue #48."
 
+## Clarifications
+
+### Session 2026-06-19
+
+- Q: When SftpFs connects to an unknown host (not in `~/.ssh/known_hosts`), what should the verification UI do? → A: Block pane navigation with a "Host fingerprint unknown — Accept / Reject?" modal dialog; persist accepted key to `~/.ssh/known_hosts`.
+- Q: Should ZipFs declare VfsCaps::SEEKABLE? → A: No — ZipFs does NOT declare SEEKABLE; only whole-file (ByteRange::FULL) reads are supported regardless of entry compression method.
+- Q: Should archive backends be Cargo feature-gated, and what should the feature names be? → A: Two features: `archives` (zip+tar, default-enabled) and `remote` (sftp+ftp, default-enabled); both enabled by default so the out-of-the-box binary is full-featured.
+- Q: How should the VfsPath encode the archive file path vs. the in-archive entry path? → A: The VfsPath `authority` field encodes the archive's host-path (slashes percent-encoded); `segments` encode the in-archive entry path. Example: `zip://home%2Fuser%2Farchive.zip/subdir/file.txt` — authority=`home/user/archive.zip`, entry=`subdir/file.txt`.
+- Q: Should SFTP/FTP connection events be logged for debugging? → A: Yes — log connect, auth success/fail, disconnect, and reconnect attempts at INFO/WARN level to `~/.local/share/cargonaut/debug.log` via the existing `tracing` infrastructure; no new UI surface required.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Browse a ZIP archive as a directory (Priority: P1)
@@ -20,7 +30,7 @@ A user has a `.zip` file in their active pane. They press Enter on it and the pa
 
 **Acceptance Scenarios**:
 
-1. **Given** a pane showing a local directory containing `archive.zip`, **When** the user presses Enter on `archive.zip`, **Then** the pane header updates to `zip:///…/archive.zip/` and the entries of the archive are listed sorted by name.
+1. **Given** a pane showing a local directory containing `archive.zip`, **When** the user presses Enter on `archive.zip`, **Then** the pane header updates to `zip://<percent-encoded-path-to-archive.zip>/` (authority = archive host path, empty segments = archive root) and the entries of the archive are listed sorted by name.
 2. **Given** the pane is inside a ZIP archive at a sub-folder, **When** the user navigates to `..`, **Then** the pane ascends one level within the archive (or back to the local filesystem if at the archive root).
 3. **Given** the pane is inside a ZIP archive, **When** the user presses F5 to copy a file to the opposite pane (local `file://`), **Then** the file is transferred correctly with matching content.
 4. **Given** a corrupt or password-protected ZIP, **When** Enter is pressed on it, **Then** a dismissible error banner is shown in the pane; no crash or empty panic occurs.
@@ -115,7 +125,7 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 
 **ZIP backend**
 
-- **FR-004**: The system MUST implement a `ZipFs` backend (`zip://` scheme) that supports `list`, `stat`, and `read_stream` (full file only and byte-range).
+- **FR-004**: The system MUST implement a `ZipFs` backend (`zip://` scheme) that supports `list`, `stat`, and `read_stream` (whole-file `ByteRange::FULL` only; byte-range reads MUST return `VfsError::Unsupported`). `ZipFs` MUST NOT declare `VfsCaps::SEEKABLE`.
 - **FR-005**: `ZipFs` MUST cache the archive's entry index in memory on first `list` call; subsequent `list` calls on the same instance MUST NOT re-scan the archive file.
 - **FR-006**: `ZipFs` MUST return `VfsError::PermissionDenied` for encrypted entries and `VfsError::Io` for corrupt archive data.
 - **FR-007**: `ZipFs` write operations (`write_stream`, `mkdir`, `unlink`, `rmdir`, `rename`) MUST return `VfsError::Unsupported`.
@@ -132,6 +142,7 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 
 - **FR-013**: The system MUST implement an `SftpFs` backend (`sftp://` scheme) with a pure-async SSH implementation (no `libssh2` dependency) supporting `list`, `stat`, `read_stream` (with byte-range), `write_stream` (Truncate and AppendAtOffset), `unlink`, `rmdir`, `rename`, `mkdir`, `symlink`.
 - **FR-014**: `SftpFs` MUST attempt SSH public-key authentication first (ssh-agent socket, then `~/.ssh/id_ed25519`, then `~/.ssh/id_rsa`); on failure it MUST accept a `SftpCredentials::Password` value supplied at construction time.
+- **FR-014a**: When connecting to a host whose key is not present in `~/.ssh/known_hosts`, the app MUST display a blocking modal dialog showing the host fingerprint with "Accept" and "Reject" actions. On Accept, the key MUST be persisted to `~/.ssh/known_hosts`. On Reject, the connection MUST be aborted and `VfsError::AuthFailed` returned to the caller.
 - **FR-015**: On transport failure, `SftpFs` MUST reconnect automatically up to 3 times with exponential backoff before returning `VfsError::Io`.
 - **FR-016**: `SftpFs` MUST declare capabilities: `SEEKABLE | RANDOM_WRITE | METADATA_RICH | ATOMIC_RENAME | SYMLINKS`.
 - **FR-017**: `SftpFs` authority format is `user@host` or `user@host:port`; the default port is 22.
@@ -159,6 +170,10 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 
 - **FR-028**: All backend errors (corrupt archive, auth failure, connection drop, permission denied) MUST be surfaced as dismissible error banners in the affected pane; no operation may result in an application panic or a silent empty listing for an error condition.
 
+**Observability**
+
+- **FR-030**: SFTP and FTP backends MUST emit `tracing` events at `INFO` level on successful connection and at `WARN` level on authentication failure, transport error, reconnect attempt, and disconnection. These events MUST be captured by the app's existing log subscriber and written to `~/.local/share/cargonaut/debug.log`.
+
 **Transfer engine integration**
 
 - **FR-029**: The transfer engine MUST accept `(src: VfsPath, src_backend: Arc<dyn VfsBackend>, dst: VfsPath, dst_backend: Arc<dyn VfsBackend>)` and execute the copy via `read_stream` + `write_stream` regardless of whether the backends are the same type or different.
@@ -166,8 +181,8 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 ### Key Entities
 
 - **VfsRegistry**: Maps URI scheme strings to `Arc<dyn VfsBackend>` instances; resolved by the app layer to dispatch pane operations.
-- **ZipFs**: Read-only `VfsBackend` for the `zip://` scheme; wraps an in-memory entry index over a `zip` crate archive.
-- **TarFs**: Read-only `VfsBackend` for the `tar://` scheme; supports uncompressed, gzip, bzip2, and xz-compressed tarballs; in-memory entry index.
+- **ZipFs**: Read-only `VfsBackend` for the `zip://` scheme; wraps an in-memory entry index over a `zip` crate archive. The `VfsPath` authority holds the archive's host filesystem path (slashes percent-encoded as `%2F`); segments hold the in-archive entry path. Example: `zip://home%2Fuser%2Farchive.zip/subdir/file.txt`.
+- **TarFs**: Read-only `VfsBackend` for the `tar://` scheme; supports uncompressed, gzip, bzip2, and xz-compressed tarballs; in-memory entry index. Same `authority = archive host-path`, `segments = entry path` convention as ZipFs.
 - **SftpFs**: Read-write `VfsBackend` for the `sftp://` scheme; holds a persistent multiplexed SSH connection; reconnects on transport failure.
 - **SftpCredentials**: Enum of `PublicKey { agent: bool, key_path: Option<PathBuf> }` and `Password(String)` — passed to `SftpFs::connect`.
 - **FtpFs**: Read-write `VfsBackend` for the `ftp://` scheme; wraps an async FTP client connection.
@@ -184,7 +199,7 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 - **SC-005**: All existing local-filesystem tests pass without modification after the registry refactor (zero regression in the `file://` path).
 - **SC-006**: A corrupt or encrypted archive surfaces an error banner within 1 second of pressing Enter; the app remains interactive.
 - **SC-007**: An SFTP connection failure after 3 retries surfaces an error banner; the app remains stable (no panic, no hung task).
-- **SC-008**: The release binary size does not increase by more than 1.5 MiB compared to the pre-feature baseline (managed via cargo features to keep SFTP/FTP behind optional flags).
+- **SC-008**: The release binary size (with both `archives` and `remote` features enabled, the default) does not increase by more than 1.5 MiB compared to the pre-feature baseline. A build with `--no-default-features` must produce a binary no larger than the pre-feature baseline.
 
 ## Assumptions
 
@@ -192,8 +207,8 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 - SFTP servers support SFTPv3 or later; servers advertising only SFTPv1/v2 may have degraded capability (no symlink support).
 - FTP servers are reachable on a non-TLS plain connection; FTPS (FTP-over-TLS) is out of scope and deferred.
 - SSH host-key verification uses the system `~/.ssh/known_hosts`; unknown host keys prompt the user with an accept/reject dialog (a UI-layer concern; the backend returns `VfsError::AuthFailed` if the key is rejected).
-- The `zip`, `tar`, `flate2`, `bzip2`, and `xz2` crates are added as dependencies; `russh`/`russh-sftp` for SFTP; a suitable async FTP crate (`suppaftp`) for FTP. All are pure-Rust or link only stable system libraries.
-- The SFTP and FTP backends are gated behind Cargo features (`sftp`, `ftp`) so users who do not need remote access can build a smaller binary.
+- The `zip`, `tar`, `flate2`, `bzip2`, and `xz2` crates are added as dependencies under the `archives` Cargo feature; `russh`/`russh-sftp` for SFTP and `suppaftp` for FTP are added under the `remote` Cargo feature. All are pure-Rust or link only stable system libraries.
+- Two Cargo features gate the optional backends: `archives` (enables ZipFs + TarFs, default-enabled) and `remote` (enables SftpFs + FtpFs, default-enabled). Downstream builds can disable either feature to reduce binary size and dependency count.
 - fish/TRAMP-style `sh://` backend is out of scope for this feature.
 - S3/GCS/Azure object-storage backends are out of scope for this feature.
 - SFTP key management UI (key generation wizard) is out of scope; credential input is limited to URL entry + the existing `PathInputDialog`.
