@@ -1059,11 +1059,10 @@ impl App {
             BulkRenameApply(pairs) => self.apply_bulk_rename(pairs).await,
             UndoLastOp => self.undo_last_operation().await,
             Quit => Ok(vec![Event::QuitRequested]),
-            // Feature 053: stub arms — full impl in T009
-            TabNew => Ok(vec![]),
-            TabClose => Ok(vec![]),
-            TabNext => Ok(vec![]),
-            TabPrev => Ok(vec![]),
+            TabNew => self.tab_new(),
+            TabClose => self.tab_close(),
+            TabNext => self.tab_next(),
+            TabPrev => self.tab_prev(),
         }
     }
 
@@ -2152,6 +2151,56 @@ impl App {
     /// - `Delete` → emits "cannot be undone" warning
     ///
     /// On success, clears selection on both panes and re-lists both.
+    // ===== Feature 053: Tab operations =====
+
+    fn tab_new(&mut self) -> Result<Vec<Event>, AppError> {
+        let idx = pane_idx(self.active);
+        let s = &mut self.sides[idx];
+        let src = &s.tabs[s.active_tab];
+        let new_tab = PaneState {
+            cwd: src.cwd.clone(),
+            listing: src.listing.clone(),
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden: self.config.ui.show_hidden,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: Vec::new(),
+            dir_history_fwd: Vec::new(),
+        };
+        s.tabs.push(new_tab);
+        s.active_tab = s.tabs.len() - 1;
+        Ok(vec![Event::PaneUpdated(self.active)])
+    }
+
+    fn tab_close(&mut self) -> Result<Vec<Event>, AppError> {
+        let idx = pane_idx(self.active);
+        let s = &mut self.sides[idx];
+        if s.tabs.len() == 1 {
+            return Ok(vec![]);
+        }
+        let closed = s.active_tab;
+        s.tabs.remove(closed);
+        s.active_tab = closed.min(s.tabs.len() - 1);
+        Ok(vec![Event::PaneUpdated(self.active)])
+    }
+
+    fn tab_next(&mut self) -> Result<Vec<Event>, AppError> {
+        let idx = pane_idx(self.active);
+        let s = &mut self.sides[idx];
+        let n = s.tabs.len();
+        s.active_tab = (s.active_tab + 1) % n;
+        Ok(vec![Event::PaneUpdated(self.active)])
+    }
+
+    fn tab_prev(&mut self) -> Result<Vec<Event>, AppError> {
+        let idx = pane_idx(self.active);
+        let s = &mut self.sides[idx];
+        let n = s.tabs.len();
+        s.active_tab = (s.active_tab + n - 1) % n;
+        Ok(vec![Event::PaneUpdated(self.active)])
+    }
+
     pub async fn undo_last_operation(&mut self) -> Result<Vec<Event>, AppError> {
         let entry = match self.undo_log.take() {
             None => {
