@@ -5448,4 +5448,46 @@ mod tests {
             d.phase
         );
     }
+
+    // ---------- FileEditorDialog (Feature 056) ----------
+
+    #[test]
+    fn editor_insert_and_save_writes_correct_content() {
+        todo!()
+    }
+
+    #[test]
+    fn editor_utf8_roundtrip_no_edits() {
+        todo!()
+    }
+
+    #[test]
+    fn editor_save_failure_keeps_dirty_and_shows_error() {
+        todo!()
+    }
+
+    #[test]
+    fn editor_cursor_navigation_stays_in_bounds() {
+        todo!()
+    }
+
+    #[test]
+    fn editor_render_shows_modified_indicator() {
+        todo!()
+    }
+
+    #[test]
+    fn editor_unsaved_changes_guard_triggered_on_quit() {
+        todo!()
+    }
+
+    #[test]
+    fn editor_discard_does_not_save() {
+        todo!()
+    }
+
+    #[test]
+    fn unsaved_dialog_cancel_resumes_editing() {
+        todo!()
+    }
 }
