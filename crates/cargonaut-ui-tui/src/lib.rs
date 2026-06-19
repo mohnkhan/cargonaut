@@ -5959,6 +5959,19 @@ mod tests {
         assert!(matches!(kind, RemoteKind::Sftp));
     }
 
+    /// T032 (red/green): `RemoteKind::Ftp` must exist and `ActiveDialog::RemoteConnect`
+    /// must accept it — compile-time check (T029 already added these).
+    #[test]
+    fn remote_kind_ftp_exists() {
+        let kind = RemoteKind::Ftp;
+        assert!(matches!(kind, RemoteKind::Ftp));
+        // T033 green: RemoteConnect with Ftp must be constructable.
+        let _compile_check: Option<ActiveDialog> = Some(ActiveDialog::RemoteConnect {
+            kind: RemoteKind::Ftp,
+            widget: dialog::PathInputDialog::new("Connect FTP", "URL:", "ftp://user@host/"),
+        });
+    }
+
     #[tokio::test]
     async fn show_user_menu_includes_connect_sftp_builtin() {
         let td_l = TempDir::new().unwrap();

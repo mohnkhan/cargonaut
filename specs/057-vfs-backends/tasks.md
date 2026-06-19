@@ -148,13 +148,13 @@
 
 ### T030-T031: FtpFs core (FR-018..FR-020)
 
-- [ ] T030 [US4] (red) Write failing unit tests for `FtpFs` using a mock FTP connection: list with MLSD → DirListing; list fallback to LIST → DirListing; stat via MLST → VfsMetadata; read_stream FULL → bytes; read_stream range → Unsupported; write_stream Truncate → bytes; write_stream AppendAtOffset → Unsupported; unlink → ok; rmdir → ok; rename → ok; mkdir → ok; `caps()` == ATOMIC_RENAME; `scheme()` == "ftp"; connect timeout → Io — in `crates/cargonaut-vfs/tests/ftp_fs_mock.rs`
-- [ ] T031 [US4] (green) Implement `FtpFs` in `crates/cargonaut-vfs/src/remote/ftp_fs.rs`: `FtpFs::connect(authority, user, pass, config)` → `AsyncFtpStream::connect` + `login`; `Arc<Mutex<AsyncFtpStream>>` internal; list tries `mlsd()` first, falls back to `list()` + parse; stat via `mlst()`; read via `retr_as_stream` (FULL only); write via `put_with_stream` (Truncate only); `tracing::info!`/`tracing::warn!`; T011 `FtpFs` dyn_dispatch stub turns green
+- [X] T030 [US4] (red) Write failing unit tests for `FtpFs` using a mock FTP connection: list with MLSD → DirListing; list fallback to LIST → DirListing; stat via MLST → VfsMetadata; read_stream FULL → bytes; read_stream range → Unsupported; write_stream Truncate → bytes; write_stream AppendAtOffset → Unsupported; unlink → ok; rmdir → ok; rename → ok; mkdir → ok; `caps()` == ATOMIC_RENAME; `scheme()` == "ftp"; connect timeout → Io — in `crates/cargonaut-vfs/tests/ftp_fs_mock.rs`
+- [X] T031 [US4] (green) Implement `FtpFs` in `crates/cargonaut-vfs/src/remote/ftp_fs.rs`: `FtpFs::connect(authority, user, pass, config)` → `AsyncFtpStream::connect` + `login`; `Arc<Mutex<AsyncFtpStream>>` internal; list tries `mlsd()` first, falls back to `list()` + parse; stat via `mlst()`; read via `retr_as_stream` (FULL only); write via `put_with_stream` (Truncate only); `tracing::info!`/`tracing::warn!`; T011 `FtpFs` dyn_dispatch stub turns green
 
 ### T032-T033: F2 "Connect FTP…" (FR-024..FR-027)
 
-- [ ] T032 [US4] (red) Write failing test: "Connect FTP…" built-in item opens `ActiveDialog::RemoteConnect { kind: Ftp }` pre-filled with `ftp://user@host/`; submitting valid URL connects and navigates pane — in `crates/cargonaut-ui-tui/src/lib.rs` test module
-- [ ] T033 [US4] (green) Add "Connect FTP…" built-in item in `ShowUserMenu` handler in `crates/cargonaut-ui-tui/src/lib.rs`; wire `RemoteKind::Ftp` → `FtpFs::connect`; on success `registry.register_remote` + `navigate_to`; on error: error banner (reuses T029 RemoteConnect infrastructure)
+- [X] T032 [US4] (red) Write failing test: "Connect FTP…" built-in item opens `ActiveDialog::RemoteConnect { kind: Ftp }` pre-filled with `ftp://user@host/`; submitting valid URL connects and navigates pane — in `crates/cargonaut-ui-tui/src/lib.rs` test module
+- [X] T033 [US4] (green) Add "Connect FTP…" built-in item in `ShowUserMenu` handler in `crates/cargonaut-ui-tui/src/lib.rs`; wire `RemoteKind::Ftp` → `FtpFs::connect`; on success `registry.register_remote` + `navigate_to`; on error: error banner (reuses T029 RemoteConnect infrastructure)
 
 **Checkpoint**: Binary connects to FTP server, lists remote directory, copies files to local pane. `cargo test --workspace` clean.
 

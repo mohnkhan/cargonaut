@@ -37,7 +37,7 @@ pub use types::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsP
 #[cfg(feature = "archives")]
 pub use archive::{TarCompression, TarFs, ZipFs};
 #[cfg(feature = "remote")]
-pub use remote::{FtpFs, HostKeyEvent, SftpCredentials, SftpFs, SftpOps};
+pub use remote::{FtpFs, FtpOps, HostKeyEvent, SftpCredentials, SftpFs, SftpOps};
 
 /// SFTP-specific items, including test helpers.
 #[cfg(feature = "remote")]
