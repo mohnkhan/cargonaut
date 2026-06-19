@@ -226,6 +226,36 @@ impl PaneState {
 }
 
 // =====================================================================
+// Tab state types (Feature 053)
+// =====================================================================
+
+/// Holds all tab state for one pane side (left or right). Private to
+/// `cargonaut-core`; callers always access the active tab via [`App::pane`].
+///
+/// Invariants (enforced by all mutation methods):
+/// - `tabs.len() >= 1` at all times
+/// - `active_tab < tabs.len()` at all times
+#[derive(Debug, Clone)]
+struct SideState {
+    /// Ordered list of directory tabs. Always non-empty.
+    tabs: Vec<PaneState>,
+    /// Index of the currently visible tab.
+    active_tab: usize,
+}
+
+/// View model for one tab entry in the tab bar widget. Produced by
+/// [`App::tab_bar_view`]; consumed by the TUI renderer. Pure data — no I/O.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabBarEntry {
+    /// 1-based display index shown in the `[N]` prefix.
+    pub index: usize,
+    /// Truncated basename of this tab's cwd (max 20 UTF-8 chars, hard cap).
+    pub label: String,
+    /// `true` when this tab is currently active (visible) on its side.
+    pub is_active: bool,
+}
+
+// =====================================================================
 // Command / Event / DialogKind
 // =====================================================================
 
