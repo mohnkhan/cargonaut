@@ -431,6 +431,15 @@ mod tests {
         let _: fn(&SubshellState) = _assert_subshell_state_fields;
     }
 
+    // T001 (red): compile-time contract — screen_mut must exist on SubshellState.
+    // This assertion fails to compile until screen_mut() is added (T001b).
+    #[allow(dead_code)]
+    fn _assert_screen_mut_exists(_: fn(&mut SubshellState) -> &mut vt100::Screen) {}
+    #[allow(dead_code)]
+    fn _check_screen_mut() {
+        _assert_screen_mut_exists(SubshellState::screen_mut);
+    }
+
     // T010 (green): three-state cycle advance tests.
     #[test]
     fn advance_hidden_to_visible_fm_focus() {
