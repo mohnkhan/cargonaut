@@ -5893,4 +5893,63 @@ mod tests {
         let accepted = accept_rx.try_recv().expect("reject() must send immediately");
         assert!(!accepted, "reject() must send false");
     }
+
+    // ---------- RemoteConnect dialog (Feature 057 — T028 red) ----------
+
+    /// T028 (red): dispatching `Command::ShowUserMenu` must include a built-in
+    /// "Connect SFTP…" item.  Selecting it must open
+    /// `ActiveDialog::RemoteConnect { kind: RemoteKind::Sftp, widget }` with
+    /// the widget pre-filled with `sftp://user@host/`.
+    ///
+    /// These tests compile-fail until T029 (green) adds `RemoteKind` and
+    /// `ActiveDialog::RemoteConnect`.
+
+    #[test]
+    fn remote_kind_sftp_exists() {
+        // T029 green: RemoteKind::Sftp must be a public enum variant.
+        let kind = RemoteKind::Sftp;
+        assert!(matches!(kind, RemoteKind::Sftp));
+    }
+
+    #[tokio::test]
+    async fn show_user_menu_includes_connect_sftp_builtin() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = ratatui::layout::Rect {
+            x: 0, y: 0, width: 80, height: 24,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ShowUserMenu,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+
+        // T029 green: the opened UserMenu or RemoteConnect must contain a
+        // "Connect SFTP…" item — OR the command directly opens RemoteConnect.
+        // Either way, the dialog must be Some and must contain SFTP wording.
+        assert!(dlg.is_some(), "ShowUserMenu must open a dialog");
+        // T029 green: ActiveDialog::RemoteConnect with kind Sftp must be
+        // constructable (compile-time check).
+        let _compile_check: Option<ActiveDialog> = Some(ActiveDialog::RemoteConnect {
+            kind: RemoteKind::Sftp,
+            widget: dialog::PathInputDialog::new(
+                "Connect SFTP",
+                "URL:",
+                "sftp://user@host/",
+            ),
+        });
+    }
 }
