@@ -5437,4 +5437,110 @@ mod tests {
         let result = app.dispatch(Command::TabPrev).await;
         assert!(result.is_ok());
     }
+
+    // ===== Feature 053: T008 (red) — behavioral tab operation tests =====
+    // Tests compile but fail at assertions because stubs return Ok(vec![]).
+
+    #[tokio::test]
+    async fn tab_new_opens_in_same_cwd() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let orig_cwd = app.pane(PaneId::Left).cwd.clone();
+        app.dispatch(Command::TabNew).await.unwrap();
+        // Left side should now have 2 tabs
+        assert_eq!(app.sides[0].tabs.len(), 2, "expected 2 tabs after TabNew");
+        assert_eq!(app.sides[0].tabs[1].cwd, orig_cwd, "new tab cwd should match original");
+    }
+
+    #[tokio::test]
+    async fn tab_new_inherits_no_filter_or_selection() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap();
+        let new_tab = &app.sides[0].tabs[1];
+        assert!(new_tab.filter.is_none(), "new tab filter should be None");
+        assert!(new_tab.selected.is_empty(), "new tab selection should be empty");
+    }
+
+    #[tokio::test]
+    async fn tab_new_becomes_active() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 1, "active_tab should be 1 after TabNew");
+    }
+
+    #[tokio::test]
+    async fn tab_close_noop_on_single_tab() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let events = app.dispatch(Command::TabClose).await.unwrap();
+        assert_eq!(app.sides[0].tabs.len(), 1, "single tab should remain after TabClose");
+        assert!(events.is_empty(), "single-tab close returns Ok(vec![])");
+    }
+
+    #[tokio::test]
+    async fn tab_close_selects_right_successor() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Open 3 tabs total; close the first (index 0); successor is index 0 (former index 1)
+        app.dispatch(Command::TabNew).await.unwrap(); // tab 1
+        app.dispatch(Command::TabNew).await.unwrap(); // tab 2
+        app.sides[0].active_tab = 0; // focus tab 0 (first)
+        app.dispatch(Command::TabClose).await.unwrap();
+        assert_eq!(app.sides[0].tabs.len(), 2, "should have 2 tabs after close");
+        assert_eq!(app.sides[0].active_tab, 0, "active_tab should be 0 (right successor)");
+    }
+
+    #[tokio::test]
+    async fn tab_close_wraps_to_last_when_rightmost() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap(); // tab 1
+        app.dispatch(Command::TabNew).await.unwrap(); // tab 2 (active)
+        // Close rightmost tab (index 2); should wrap to index 1 (last of remaining)
+        app.dispatch(Command::TabClose).await.unwrap();
+        assert_eq!(app.sides[0].tabs.len(), 2, "should have 2 tabs");
+        assert_eq!(app.sides[0].active_tab, 1, "active_tab should wrap to last");
+    }
+
+    #[tokio::test]
+    async fn tab_next_advances_and_wraps() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap(); // now 2 tabs, active=1
+        app.sides[0].active_tab = 0; // reset to first
+        app.dispatch(Command::TabNext).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 1, "TabNext should advance to index 1");
+        app.dispatch(Command::TabNext).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 0, "TabNext should wrap from last to first");
+    }
+
+    #[tokio::test]
+    async fn tab_prev_recedes_and_wraps() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap(); // now 2 tabs, active=1
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 0, "TabPrev should go back to index 0");
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 1, "TabPrev should wrap from first to last");
+    }
+
+    #[tokio::test]
+    async fn tab_next_noop_with_one_tab() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNext).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 0, "single tab: TabNext stays at 0");
+    }
 }
