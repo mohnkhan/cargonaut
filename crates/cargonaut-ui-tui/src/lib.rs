@@ -10,6 +10,7 @@ pub mod chrome;
 pub mod dialog;
 pub mod keymap;
 pub mod pane;
+pub(crate) mod subshell;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
@@ -4950,5 +4951,26 @@ mod tests {
             first_row.contains("[1"),
             "first row should contain tab bar '[1', got: {first_row:?}"
         );
+    }
+
+    // ===== Feature 054: Phase 2 foundational type compile-tests =====
+
+    #[test]
+    fn subshell_phase_enum_exists() {
+        // T004 (red → green): SubshellPhase::Hidden must exist in subshell module.
+        let _ = subshell::SubshellPhase::Hidden;
+    }
+
+    #[test]
+    fn frame_layout_has_subshell_field() {
+        // T008 (red → green): FrameLayout must have a subshell: Option<Rect> field.
+        let layout = FrameLayout {
+            menu: Rect::default(),
+            left: Rect::default(),
+            right: Rect::default(),
+            fkeys: Rect::default(),
+            subshell: None,
+        };
+        assert!(layout.subshell.is_none());
     }
 }
