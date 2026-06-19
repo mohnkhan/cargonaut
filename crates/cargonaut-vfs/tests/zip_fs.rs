@@ -9,7 +9,6 @@
 use cargonaut_vfs::{ByteRange, Sort, VfsBackend, VfsCaps, VfsError, VfsPath, ZipFs};
 use futures::AsyncReadExt;
 use std::io::Write;
-use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
 // ─── Test fixture helpers ─────────────────────────────────────────────────────
@@ -86,7 +85,7 @@ fn zip_fs_caps_are_empty() {
 async fn zip_fs_list_root_returns_all_root_entries() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let root = VfsPath::parse("zip:///root/").unwrap();
+    let root = VfsPath::parse("zip:///").unwrap();
     let listing = z.list(&root, Sort::NameAsc).await.expect("list root");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
     assert!(names.contains(&"readme.txt"), "missing readme.txt: {names:?}");
@@ -97,7 +96,7 @@ async fn zip_fs_list_root_returns_all_root_entries() {
 async fn zip_fs_list_subdir_returns_only_that_dirs_entries() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let subdir = VfsPath::parse("zip:///root/subdir").unwrap();
+    let subdir = VfsPath::parse("zip:///subdir").unwrap();
     let listing = z.list(&subdir, Sort::NameAsc).await.expect("list subdir");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, vec!["notes.md"], "subdir must have exactly notes.md, got {names:?}");
@@ -107,7 +106,7 @@ async fn zip_fs_list_subdir_returns_only_that_dirs_entries() {
 async fn zip_fs_list_nonexistent_returns_not_found() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let missing = VfsPath::parse("zip:///root/no-such-dir").unwrap();
+    let missing = VfsPath::parse("zip:///no-such-dir").unwrap();
     let err = z.list(&missing, Sort::NameAsc).await.expect_err("must fail");
     assert!(
         matches!(err, VfsError::NotFound(_)),
@@ -121,7 +120,7 @@ async fn zip_fs_list_nonexistent_returns_not_found() {
 async fn zip_fs_stat_file_returns_correct_metadata() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/readme.txt").unwrap();
+    let path = VfsPath::parse("zip:///readme.txt").unwrap();
     let meta = z.stat(&path).await.expect("stat readme.txt");
     assert_eq!(meta.size, 12, "readme.txt is 12 bytes");
     assert!(matches!(meta.kind, cargonaut_vfs::VfsKind::File));
@@ -131,7 +130,7 @@ async fn zip_fs_stat_file_returns_correct_metadata() {
 async fn zip_fs_stat_directory_returns_dir_kind() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/subdir").unwrap();
+    let path = VfsPath::parse("zip:///subdir").unwrap();
     let meta = z.stat(&path).await.expect("stat subdir");
     assert!(matches!(meta.kind, cargonaut_vfs::VfsKind::Dir));
 }
@@ -140,7 +139,7 @@ async fn zip_fs_stat_directory_returns_dir_kind() {
 async fn zip_fs_stat_nonexistent_returns_not_found() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/no-such-file.txt").unwrap();
+    let path = VfsPath::parse("zip:///no-such-file.txt").unwrap();
     let err = z.stat(&path).await.expect_err("must fail");
     assert!(
         matches!(err, VfsError::NotFound(_)),
@@ -154,7 +153,7 @@ async fn zip_fs_stat_nonexistent_returns_not_found() {
 async fn zip_fs_read_stream_full_returns_correct_bytes() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/readme.txt").unwrap();
+    let path = VfsPath::parse("zip:///readme.txt").unwrap();
     let mut stream = z
         .read_stream(&path, ByteRange::FULL)
         .await
@@ -168,7 +167,7 @@ async fn zip_fs_read_stream_full_returns_correct_bytes() {
 async fn zip_fs_read_stream_range_returns_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/readme.txt").unwrap();
+    let path = VfsPath::parse("zip:///readme.txt").unwrap();
     let range = ByteRange { start: 0, end: Some(5) };
     let result = z.read_stream(&path, range).await;
     assert!(result.is_err(), "range reads must fail");
@@ -186,7 +185,7 @@ async fn zip_fs_read_stream_range_returns_unsupported() {
 async fn zip_fs_write_stream_is_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/new.txt").unwrap();
+    let path = VfsPath::parse("zip:///new.txt").unwrap();
     let result = z.write_stream(&path, 0, cargonaut_vfs::WriteMode::Truncate).await;
     assert!(result.is_err(), "write_stream must fail");
     if let Err(e) = result {
@@ -198,7 +197,7 @@ async fn zip_fs_write_stream_is_unsupported() {
 async fn zip_fs_unlink_is_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/readme.txt").unwrap();
+    let path = VfsPath::parse("zip:///readme.txt").unwrap();
     let err = z.unlink(&path).await.expect_err("must be Unsupported");
     assert!(matches!(err, VfsError::Unsupported(_)));
 }
@@ -207,7 +206,7 @@ async fn zip_fs_unlink_is_unsupported() {
 async fn zip_fs_mkdir_is_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let path = VfsPath::parse("zip:///root/newdir").unwrap();
+    let path = VfsPath::parse("zip:///newdir").unwrap();
     let err = z.mkdir(&path, false).await.expect_err("must be Unsupported");
     assert!(matches!(err, VfsError::Unsupported(_)));
 }
@@ -230,7 +229,7 @@ fn zip_fs_open_corrupt_returns_io_error() {
 async fn zip_fs_skips_traversal_entries_silently() {
     let tf = make_traversal_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open traversal zip");
-    let root = VfsPath::parse("zip:///root/").unwrap();
+    let root = VfsPath::parse("zip:///").unwrap();
     let listing = z.list(&root, Sort::NameAsc).await.expect("list root");
     for entry in &listing.entries {
         assert!(
@@ -247,7 +246,7 @@ async fn zip_fs_skips_traversal_entries_silently() {
 async fn zip_fs_listing_is_cached_between_calls() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
-    let root = VfsPath::parse("zip:///root/").unwrap();
+    let root = VfsPath::parse("zip:///").unwrap();
     let l1 = z.list(&root, Sort::NameAsc).await.expect("first list");
     let l2 = z.list(&root, Sort::NameAsc).await.expect("second list");
     assert_eq!(
