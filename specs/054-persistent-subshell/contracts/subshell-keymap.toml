@@ -1,0 +1,33 @@
+# Contract: Keymap bindings for Feature 054 — Persistent Subshell
+#
+# These bindings extend design/contracts/keymap.toml.
+# The pane-mode C-o binding already exists; the subshell-mode binding is new.
+
+# ── Pane mode (already exists — documented here for completeness) ──────────
+# [[binding]]
+# mode = "pane"
+# key  = "C-o"
+# action = "open-subshell"
+# description = "Open/cycle subshell: Hidden → VisibleFmFocus → VisibleShellFocus → Hidden"
+
+# ── Subshell mode (NEW — must be added to design/contracts/keymap.toml) ───
+[[binding]]
+mode = "subshell"
+key = "C-o"
+action = "open-subshell"
+description = "Return keyboard focus to file manager (VisibleShellFocus → Hidden)"
+
+# ── Three-state semantics (reference) ────────────────────────────────────
+#
+# State 1 – Hidden:
+#   Ctrl-o (pane mode)  → advance to State 2 (VisibleFmFocus)
+#
+# State 2 – VisibleFmFocus:
+#   All normal pane-mode bindings apply (file manager has input focus).
+#   Ctrl-o (pane mode)  → advance to State 3 (VisibleShellFocus)
+#   Mouse click in subshell rect → jump to State 3
+#
+# State 3 – VisibleShellFocus:
+#   All keystrokes (except Ctrl-o) forwarded verbatim to the PTY.
+#   Ctrl-o (subshell mode) → advance to State 1 (Hidden)
+#   Mouse click outside subshell rect → return to State 2 (VisibleFmFocus)

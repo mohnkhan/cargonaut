@@ -1,0 +1,21 @@
+# Contract: Subshell panel configuration keys (Feature 054)
+#
+# These fields extend the existing [ui] section of cargonaut's config file
+# (~/.config/cargonaut/config.toml or path overridden by --config).
+# All fields are optional; defaults apply when absent.
+
+[ui]
+
+# Percentage of the content-area rows to allocate for the persistent
+# subshell panel when it is visible.
+#
+# Type    : integer, 10–60 (clamped; values outside range emit a warning
+#           and the nearest bound is used)
+# Default : 33  (approximately the lower third of the screen)
+# Unit    : percent of available content rows (menu bar, status bar, and
+#           function-key bar rows are excluded from the base before applying)
+# Minimum : 3 rows (enforced even if the computed pct yields fewer)
+#
+# Example: on a 24-row terminal with 1-row menu, 1-row status, 1-row fkeys
+#   → 21 available content rows × 33% ≈ 7 rows for the subshell panel
+subshell_height_pct = 33
