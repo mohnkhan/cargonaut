@@ -6,8 +6,8 @@
 [![CI](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml/badge.svg)](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
-[![Binary](https://img.shields.io/badge/binary-3.0%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-605%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
+[![Binary](https://img.shields.io/badge/binary-2.97%20MiB-success.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-724-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,9 +31,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 22 features since (031–056) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 605 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
-| **Binary** | 3.0 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Alpha · Phase 1 shipped, plus 23 features since (031–057) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Binary** | 2.97 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **Platform** | Linux terminal (local filesystem) |
@@ -217,20 +217,26 @@ for the local filesystem:
   Deletes the now-dead `ExternalTool` enum and `queue_external` fn. 10 new green tests.
   (Feature 056, closes #40).
 
-The full per-feature history (Features 001 → 056) lives in
+- **VFS backends: archives + remote** — ZIP and TAR archives browsable as directories
+  (`zip://`, `tar://`); SFTP backend (`sftp://`) via `russh`/`russh-sftp` with mock-injectable
+  `SftpOps` trait, 4-attempt retry with exponential backoff, SSH host-key verification dialog, and
+  credential-safe tracing; FTP backend (`ftp://`) via `suppaftp`; `VfsRegistry` maps schemes to
+  backends; UI wires F2 menu + Enter-on-archive descend; 119 new tests (mock-backed, no live
+  connections required in CI). T041 Docker integration test deferred to issue #84.
+  (Feature 057, closes #48).
+
+The full per-feature history (Features 001 → 057) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
 
-Cargonaut is alpha and honest about it. These are designed and issue-tracked but
-**not implemented yet** (a few have keymap entries reserved that currently do
-nothing):
+Cargonaut is alpha. The original roadmap (#40–#48) has mostly shipped; remaining
+gap items:
 
-- Remote & archive VFS backends — SFTP / S3 / archives-as-directories (#48)
-- Internal full-screen editor (`F4` today shells out to `$EDITOR`) (#40)
-- Find-file by name/content + external panelize (#41) — **shipped in Feature 052**
-- Tabs (#45), persistent subshell (#44)
-- Directory compare + diff (#43)
+- S3/GCS/Azure backends — cloud object storage (not in #48 scope)
+- SFTP live integration test gated on Docker-in-CI (#84)
+- FTP-over-TLS (FTPS) — deferrable
+- SSH tunnel / jump host support
 
 The `list-plugins`, `audit`, and `resume` subcommands are placeholders today.
 See [`ROADMAP.md`](./ROADMAP.md) — the authoritative, issue-backed plan.

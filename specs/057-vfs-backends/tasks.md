@@ -166,32 +166,32 @@
 
 ### T034: Archive listing benchmark — hard CI gate (SC-001)
 
-- [ ] T034 [P] (red + green) Add criterion bench `crates/cargonaut-vfs/benches/archive_listing.rs` that generates a test ZIP with 10 000 entries and measures `ZipFs::list(root)` time; **the bench MUST use `criterion::Criterion::sample_size(10).measurement_time(Duration::from_secs(10))` and save a baseline on first run; add `scripts/bench-check.sh` (or extend `Makefile` `bench:` target) that runs `cargo bench --bench archive_listing -- --load-baseline main --baseline feature057` and fails with non-zero exit code if the mean is >500 ms**; wire this script into `.github/workflows/ci.yml` so it runs on every PR — a soft "reviewed report" is NOT sufficient per Constitution §II which requires a CI gate that **fails the build** on regression (**analysis finding H1**)
+- [X] T034 [P] (red + green) Add criterion bench `crates/cargonaut-vfs/benches/archive_listing.rs` that generates a test ZIP with 10 000 entries and measures `ZipFs::list(root)` time; **the bench MUST use `criterion::Criterion::sample_size(10).measurement_time(Duration::from_secs(10))` and save a baseline on first run; add `scripts/bench-check.sh` (or extend `Makefile` `bench:` target) that runs `cargo bench --bench archive_listing -- --load-baseline main --baseline feature057` and fails with non-zero exit code if the mean is >500 ms**; wire this script into `.github/workflows/ci.yml` so it runs on every PR — a soft "reviewed report" is NOT sufficient per Constitution §II which requires a CI gate that **fails the build** on regression (**analysis finding H1**)
 
 ### T034b: SC-006 corrupt archive timing gate (SC-006)
 
-- [ ] T034b [P] Add a sub-bench or a `#[test]` in `crates/cargonaut-vfs/tests/zip_fs.rs` asserting that `ZipFs::open(corrupt_bytes)` returns `Err(VfsError::Io)` within 1 second (measure with `std::time::Instant`; assert `elapsed < Duration::from_secs(1)`); this fulfils SC-006's "within 1 second" constraint as a CI gate (**analysis finding L2; Constitution §II requires CI gate for every SC**)
+- [X] T034b [P] Add a sub-bench or a `#[test]` in `crates/cargonaut-vfs/tests/zip_fs.rs` asserting that `ZipFs::open(corrupt_bytes)` returns `Err(VfsError::Io)` within 1 second (measure with `std::time::Instant`; assert `elapsed < Duration::from_secs(1)`); this fulfils SC-006's "within 1 second" constraint as a CI gate (**analysis finding L2; Constitution §II requires CI gate for every SC**)
 
 ### T035: Debug log sink (FR-030)
 
-- [ ] T035 Add `tracing_subscriber::fmt::layer().with_writer(log_file)` to subscriber init in `crates/cargonaut-bin/src/main.rs`; log file path = `~/.local/share/cargonaut/debug.log`; create parent dirs if absent; add integration-level smoke test asserting a connection `WARN` event appears in the log file
+- [X] T035 Add `tracing_subscriber::fmt::layer().with_writer(log_file)` to subscriber init in `crates/cargonaut-bin/src/main.rs`; log file path = `~/.local/share/cargonaut/debug.log`; create parent dirs if absent; add integration-level smoke test asserting a connection `WARN` event appears in the log file
 
 ### T036: Binary size CI gate update (SC-008)
 
-- [ ] T036 Update `scripts/check-binary-size.sh` to measure baseline (with `--no-default-features`) and full build (with both features); assert delta ≤ 1 500 000 bytes; wire into CI pipeline (verify `.github/workflows/ci.yml` references the script or runs `make ci-local`)
+- [X] T036 Update `scripts/check-binary-size.sh` to measure baseline (with `--no-default-features`) and full build (with both features); assert delta ≤ 1 500 000 bytes; wire into CI pipeline (verify `.github/workflows/ci.yml` references the script or runs `make ci-local`)
 
 ### T037: keymap.toml documentation (Constitution §III)
 
-- [ ] T037 [P] Add `enter = "descend-or-open-archive"` (or equivalent) to `[pane]` section of `design/contracts/keymap.toml` with a comment explaining archive auto-detect; verify `help_covers_all_keymap_bindings` test still passes
+- [X] T037 [P] Add `enter = "descend-or-open-archive"` (or equivalent) to `[pane]` section of `design/contracts/keymap.toml` with a comment explaining archive auto-detect; verify `help_covers_all_keymap_bindings` test still passes
 
 ### T038-T039: Required documentation (CLAUDE.md mandatory)
 
-- [ ] T038 [P] Update `README.md`: "At a Glance" metrics table (test count, feature count, binary size); add Feature 057 entry to "Feature History" section
-- [ ] T039 [P] Append `Learnings.md` §057 with ≥3 bullet points covering: what was hard (e.g., russh API changes, VfsPath authority encoding, TAR sequential read model), root causes, non-obvious decisions (e.g., xz2 C dep accepted, FtpFs serialised connection, ZipFs not SEEKABLE)
+- [X] T038 [P] Update `README.md`: "At a Glance" metrics table (test count, feature count, binary size); add Feature 057 entry to "Feature History" section
+- [X] T039 [P] Append `Learnings.md` §057 with ≥3 bullet points covering: what was hard (e.g., russh API changes, VfsPath authority encoding, TAR sequential read model), root causes, non-obvious decisions (e.g., xz2 C dep accepted, FtpFs serialised connection, ZipFs not SEEKABLE)
 
 ### T041: SC-003/SC-004 Docker SFTP integration test (SC-003, SC-004)
 
-- [ ] T041 [P] (red + green) Add a Docker-based SFTP integration test to satisfy Constitution §II CI gate for SC-003 and SC-004: (a) add a `docker-compose.ci.yml` (or `Makefile` `ci-sftp-up:` / `ci-sftp-down:` targets) launching `atmoz/sftp testuser:testpass:1001` bound to `localhost:2222`; (b) add a `#[tokio::test] #[cfg(feature = "ci-integration")]` test in `crates/cargonaut-vfs/tests/sftp_integration.rs` that connects `SftpFs::connect("testuser@localhost:2222", ...)`, lists the root, and asserts completion within 5 seconds (latency gate for SC-003); (c) transfer a 10 MiB file from SFTP to a temp local file and assert transfer time implies ≥70% of 1 Gbps loopback (throughput gate for SC-004); (d) wire `cargo test --features ci-integration` step into `.github/workflows/ci.yml` after the Docker service is up; this is the ONLY way to satisfy Constitution §II for SC-003/SC-004 without a live server (**analysis finding M1**) (**Note**: this task may be deferred to a follow-up issue if Docker integration adds >30 min to CI; in that case open a GitHub issue + ROADMAP row per CLAUDE.md §Deferrals)
+- [X] T041 [P] (red + green) Add a Docker-based SFTP integration test to satisfy Constitution §II CI gate for SC-003 and SC-004: (a) add a `docker-compose.ci.yml` (or `Makefile` `ci-sftp-up:` / `ci-sftp-down:` targets) launching `atmoz/sftp testuser:testpass:1001` bound to `localhost:2222`; (b) add a `#[tokio::test] #[cfg(feature = "ci-integration")]` test in `crates/cargonaut-vfs/tests/sftp_integration.rs` that connects `SftpFs::connect("testuser@localhost:2222", ...)`, lists the root, and asserts completion within 5 seconds (latency gate for SC-003); (c) transfer a 10 MiB file from SFTP to a temp local file and assert transfer time implies ≥70% of 1 Gbps loopback (throughput gate for SC-004); (d) wire `cargo test --features ci-integration` step into `.github/workflows/ci.yml` after the Docker service is up; this is the ONLY way to satisfy Constitution §II for SC-003/SC-004 without a live server (**analysis finding M1**) (**Note**: this task may be deferred to a follow-up issue if Docker integration adds >30 min to CI; in that case open a GitHub issue + ROADMAP row per CLAUDE.md §Deferrals)
 
 ---
 
