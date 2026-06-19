@@ -46,3 +46,4 @@ suppaftp = { version = "8", features = ["tokio"], optional = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true }
