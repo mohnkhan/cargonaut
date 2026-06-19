@@ -554,7 +554,12 @@ mod tests {
         for i in 0..25u32 {
             parser.process(format!("L{i:03}\r\n").as_bytes());
         }
-        let area = Rect { x: 0, y: 0, width: 10, height: 5 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 5,
+        };
 
         let mut buf_live = Buffer::empty(area);
         render_vt100_screen(parser.screen(), area, &mut buf_live);
@@ -565,8 +570,7 @@ mod tests {
         parser.screen_mut().set_scrollback(0);
 
         assert_ne!(
-            buf_live,
-            buf_scroll,
+            buf_live, buf_scroll,
             "scrollback must shift visible content"
         );
     }
@@ -582,7 +586,12 @@ mod tests {
         for i in 0..200u32 {
             parser.process(format!("L{i:03}\r\n").as_bytes());
         }
-        let area = Rect { x: 0, y: 0, width: 10, height: 5 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 5,
+        };
 
         // set_scrollback(999) must be clamped by vt100 — no panic.
         parser.screen_mut().set_scrollback(999);
@@ -591,7 +600,10 @@ mod tests {
 
         // Buffer must contain visible content (not all blank).
         let non_blank = buf.content().iter().any(|c| c.symbol() != " ");
-        assert!(non_blank, "buffer must have non-blank cells after clamped scrollback");
+        assert!(
+            non_blank,
+            "buffer must have non-blank cells after clamped scrollback"
+        );
         parser.screen_mut().set_scrollback(0);
     }
 
@@ -639,7 +651,12 @@ mod tests {
         for i in 0..4u8 {
             parser.process(format!("L{i:02}\r\n").as_bytes());
         }
-        let area = Rect { x: 0, y: 0, width: 5, height: 3 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 5,
+            height: 3,
+        };
         let (cur_row, cur_col) = parser.screen().cursor_position();
 
         // At live bottom the cursor cell should carry REVERSED.
