@@ -32,7 +32,7 @@ from contracts §3) are the gating correctness tests.
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
+- [X] T001 [SETUP] Confirm tmpfs is active (`make tmpfs-status`) and a clean
   baseline builds + tests (`make build && make test`). Verify the workspace
   `globset` dep (line ~50 of `Cargo.toml`) — add `globset = { workspace = true }`
   to `crates/cargonaut-ui-tui/Cargo.toml` dependencies, then `make build` to
@@ -48,13 +48,13 @@ dispatched or tested end-to-end.
 
 **⚠️ No user-story phase can start until this is complete.**
 
-- [ ] T002 [FOUND] (red) In `crates/cargonaut-ui-tui/src/keymap.rs`, add a
+- [X] T002 [FOUND] (red) In `crates/cargonaut-ui-tui/src/keymap.rs`, add a
   failing test asserting `Keymap::load(DEFAULT_KEYMAP_TOML)` succeeds and
   `lookup(Mode::Pane, M-?)` resolves to `Command::FindFilePopup` (contract §1/§2).
   Add a non-collision assertion: no other binding resolves `M-?`.
   (Will not compile until the variant exists — that is the red state.)
 
-- [ ] T003 [FOUND] (green) Add the `FindFilePopup` variant to the `Command`
+- [X] T003 [FOUND] (green) Add the `FindFilePopup` variant to the `Command`
   enum in `crates/cargonaut-ui-tui/src/keymap.rs` with a doc comment
   (`/// Open find-file overlay (Alt-?) — FR-001 (issue #41).`). Add the binding
   block to `design/contracts/keymap.toml` (`mode = "pane"`, `key = "M-?"`,
@@ -75,7 +75,7 @@ on the panelized files.
 `Enter` on result list → panel lists exactly the `.toml` files; `Space` tags one;
 `F5` opens copy dialog for that file.
 
-- [ ] T004 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add failing
+- [X] T004 [P] [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add failing
   unit tests for `plan_content_available(rg_path)` covering the truth table
   (contract §3a): valid path → `true`; non-existent path → `false`. Add failing
   unit tests for `SearchMode` Tab-toggle: `Name → Content` when `content_available=true`;
@@ -83,7 +83,7 @@ on the panelized files.
   tests covering the `Enter`-key truth table (contract §3b rows `InputFocused`
   and `ResultsFocused`).
 
-- [ ] T005 [US1] (green) In `crates/cargonaut-ui-tui/src/dialog.rs`, implement
+- [X] T005 [US1] (green) In `crates/cargonaut-ui-tui/src/dialog.rs`, implement
   `SearchMode` enum, `DialogPhase` enum, `FindEvent` enum, `FindOutcome` enum,
   and `FindFileDialog` struct with all fields from data-model.md (including the `cursor: usize` highlighted-result field added by H2 remediation). Implement
   `plan_content_available(rg_path: &str) -> bool` (pure: checks `Command::new(rg_path).arg("--version").status().is_ok()`).
@@ -91,7 +91,7 @@ on the panelized files.
   `FindFileDialog::handle_key` for the phase transitions tested in T004.
   All new public items carry doc comments. Make T004 pass.
 
-- [ ] T006 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add three failing
+- [X] T006 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add three failing
   tests for `FindFileDialog::start_walk` (name mode): (a) Happy path: create a
   `tempfile` dir with 3 known files, call `start_walk` with a glob matching 2 of them,
   poll `poll_results()` in a loop, assert `results.len() == 2` and `phase ==
@@ -107,7 +107,7 @@ on the panelized files.
   `results.len() == 200`. This integration test is the CI gate for SC-001 (≤5 s name
   search) per Constitution §II — run unconditionally (no `#[ignore]`).
 
-- [ ] T007 [US1] (green) Implement `FindFileDialog::start_walk` for Name mode
+- [X] T007 [US1] (green) Implement `FindFileDialog::start_walk` for Name mode
   in `crates/cargonaut-ui-tui/src/dialog.rs`: first check `std::fs::read_dir(&root)`
   is readable — if not, set `phase = NoResults` and `notice = Some(format!("Cannot
   read directory: {}", root.display()))` and return without spawning (FR-018 root
@@ -121,7 +121,7 @@ on the panelized files.
   loop, update `results`, handle `Done`. Implement `FindFileDialog::cancel()`.
   Make T006 pass.
 
-- [ ] T008 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add failing
+- [X] T008 [US1] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add failing
   integration tests for the panelize action (FR-009, SC-004 — all panel ops):
   Given a `tempfile` dir with known files, simulate `dispatch_ui_command(Command::FindFilePopup, …)`
   opening the dialog, simulate walk completion, simulate `Enter` on `ResultsFocused`
@@ -136,7 +136,7 @@ on the panelized files.
   - `dispatch_ui_command(Command::Edit, …)` is dispatched without panic (edit / F4 op — FR-009/C1).
   Each assertion uses `assert!(result.is_ok())` or equivalent — verifying dispatch reaches the correct op, not full execution. (Full copy/move/delete/view/edit execution is covered by existing test suites for those commands.)
 
-- [ ] T009 [US1] (green) In `crates/cargonaut-ui-tui/src/lib.rs`:
+- [X] T009 [US1] (green) In `crates/cargonaut-ui-tui/src/lib.rs`:
   - Add `find_label: Option<String>` to `UiState`.
   - Add `ActiveDialog::FindFile { widget: dialog::FindFileDialog, root: PathBuf }`
     variant to the `ActiveDialog` enum.
@@ -159,7 +159,7 @@ on the panelized files.
     as before. The passive pane's status bar is unaffected.
   Make T008 pass.
 
-- [ ] T010 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs` (or `lib.rs`
+- [X] T010 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs` (or `lib.rs`
   render tests), add failing `TestBackend` render tests: (a) `FindFileDialog` in
   `InputFocused` phase renders a bordered overlay with the title "Find File"; (b)
   in `ResultsFocused` with 2 results, renders those paths in the list and the header
@@ -168,7 +168,7 @@ on the panelized files.
   area and assert the rendered row contains `…` and ends with the filename (left-truncated,
   spec edge case). (E6)
 
-- [ ] T011 [US1] (green) Implement `FindFileDialog::render(f, area, theme)` in
+- [X] T011 [US1] (green) Implement `FindFileDialog::render(f, area, theme)` in
   `crates/cargonaut-ui-tui/src/dialog.rs`: draw a centered overlay block using
   `ratatui::widgets::Block::default().title("Find File").borders(Borders::ALL)`;
   draw mode indicator (`[Name]`/`[Content]`); draw the input field; draw the
@@ -189,7 +189,7 @@ panelize works identically to US1.
 **Independent Test**: With `rg` on PATH, dialog in Content mode, type a pattern
 known to match files; results equal `rg <pattern> --files-with-matches <root>` output; panelize works.
 
-- [ ] T012 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add two
+- [X] T012 [P] [US2] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add two
   failing tests for `FindFileDialog::start_walk` in Content mode (SC-003):
   (a) Basic: create a `tempfile` dir with 2 text files (one containing "needle",
   one not); call `start_walk` with Content mode pattern `needle`; poll results;
@@ -203,7 +203,7 @@ known to match files; results equal `rg <pattern> --files-with-matches <root>` o
   via `std::process::Command`; sort both; assert they are equal (SC-003 full-set
   comparison, not just count).
 
-- [ ] T013 [US2] (green) Extend `FindFileDialog::start_walk` to handle
+- [X] T013 [US2] (green) Extend `FindFileDialog::start_walk` to handle
   `SearchMode::Content` in `crates/cargonaut-ui-tui/src/dialog.rs`: use
   **`tokio::process::Command`** (not `std::process::Command`) — `tokio::process::Command`
   supports `kill_on_drop` for async-native cancellation. Spawn
@@ -218,12 +218,12 @@ known to match files; results equal `rg <pattern> --files-with-matches <root>` o
   file regardless of how many lines match); no additional dedup step is needed in the
   result accumulation loop. Make T012 pass.
 
-- [ ] T014 [US2] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
+- [X] T014 [US2] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for Tab-toggle when `content_available=false`: pressing Tab
   does NOT change mode and sets `notice` to a string containing "Content
   search unavailable" (contract §3a).
 
-- [ ] T015 [US2] (green) Wire the Tab key in `FindFileDialog::handle_key`
+- [X] T015 [US2] (green) Wire the Tab key in `FindFileDialog::handle_key`
   (`crates/cargonaut-ui-tui/src/dialog.rs`): toggle `mode` between `Name`
   and `Content`; if toggling to `Content` and `!content_available`, keep mode
   as `Name` and set `notice = Some("Content search unavailable: rg not found")`.
@@ -241,7 +241,7 @@ the active panel to its previous listing unchanged.
 **Independent Test**: Start a walk on a large directory tree; press `Esc` within
 2 s; confirm panel unchanged and app is immediately responsive.
 
-- [ ] T016 [US3] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
+- [X] T016 [US3] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for abort behaviour: start a name-search walk on a `tempfile` dir;
   call `cancel()` immediately after; assert `walk_rx` is `None` and `abort_flag`
   holds `true` (or is dropped); assert `phase` is `InputFocused` and `results`
@@ -252,7 +252,7 @@ the active panel to its previous listing unchanged.
   assert < 300ms. This isolates the sleep to the test helper — production `start_walk`
   has no sleep. Do NOT inject `thread::sleep` into the production walk loop.
 
-- [ ] T017 [US3] (green) Wire the Esc path in the event-loop
+- [X] T017 [US3] (green) Wire the Esc path in the event-loop
   `ActiveDialog::FindFile` arm in `crates/cargonaut-ui-tui/src/lib.rs`:
   when `FindFileDialog::handle_key` returns `FindOutcome::Cancelled`, call
   `widget.cancel()` (which sets the abort flag, drops walk_rx, resets phase)
@@ -261,11 +261,11 @@ the active panel to its previous listing unchanged.
   are atomic from the caller's perspective. Make T016 pass. (This task adds the
   event-loop-level Esc wiring; the dialog-level cancel logic is from T007.)
 
-- [ ] T018 [US3] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
+- [X] T018 [US3] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a failing
   test asserting that after the dialog is dismissed via `Esc` (cancelled),
   `ui.find_label` is NOT set and the active pane's listing is unchanged.
 
-- [ ] T019 [US3] (green) Confirm the `ActiveDialog::FindFile` Esc path in
+- [X] T019 [US3] (green) Confirm the `ActiveDialog::FindFile` Esc path in
   `crates/cargonaut-ui-tui/src/lib.rs` does NOT call the panelize helper and
   does NOT set `find_label`. Make T018 pass.
 
@@ -275,60 +275,60 @@ the active panel to its previous listing unchanged.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T020 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+- [X] T020 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
   failing test asserting the help-overlay text contains both `M-?` and `Find`
   (contract §8, FR-019 — help-overlay discoverability).
 
-- [ ] T021 [POLISH] (green) Update the help-overlay in
+- [X] T021 [POLISH] (green) Update the help-overlay in
   `crates/cargonaut-ui-tui/src/dialog.rs` (HELP_SECTIONS constant, Navigation
   or Search section) to add an entry for `M-?` → `Find file (name glob or
   ripgrep content search, then panelize)`. Make T020 pass.
 
-- [ ] T022 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
+- [X] T022 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/lib.rs`, add a
   regression test asserting `navigate_to(real_dir)` clears `ui.find_label`
   (contract §6 — find_label lifecycle). Assert that after panelizing (setting
   `find_label = Some(pattern)`) and calling `navigate_to` with a real directory,
   `find_label` is `None`.
 
-- [ ] T023 [POLISH] (green) Confirm `navigate_to` in
+- [X] T023 [POLISH] (green) Confirm `navigate_to` in
   `crates/cargonaut-ui-tui/src/lib.rs` resets `ui.find_label = None` when a
   real directory is loaded (implemented in T009 — verify and lock with the test).
   Make T022 pass.
 
-- [ ] T024 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add
+- [X] T024 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add
   a failing test for the result truncation path (contract §4): walk a `tempfile`
   dir with `max_results = 3` and 5 files; assert `results.len() == 3` and
   `truncated == true` after `poll_results` drains `Done`.
 
-- [ ] T025 [POLISH] (green) Verify the truncation guard in `start_walk` (walk
+- [X] T025 [POLISH] (green) Verify the truncation guard in `start_walk` (walk
   task stops after `max_results` items and sends `Done { truncated: true }`)
   and in `poll_results` (sets `self.truncated = true`). Verify `render` shows
   `N matches (truncated)` when `truncated`. Make T024 pass.
 
-- [ ] T026 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add
+- [X] T026 [P] [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add
   a failing test for the no-results path (contract §3b, NoResults row): after
   walk completes with 0 matches, `phase == NoResults` and `notice` contains
   "No files found"; pressing `Enter` in `NoResults` does NOT return `Panelize`
   outcome (returns `Consumed` or stays).
 
-- [ ] T027 [POLISH] (green) Implement the `NoResults` phase handling in
+- [X] T027 [POLISH] (green) Implement the `NoResults` phase handling in
   `FindFileDialog::handle_key` and `poll_results` in `crates/cargonaut-ui-tui/src/dialog.rs`:
   on `Done` with empty results, set `phase = NoResults` and `notice = Some(format!("No files found matching `{}`", input))`.
   Confirm `Enter` in `NoResults` is a no-op. Make T026 pass.
 
-- [ ] T028 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
+- [X] T028 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for the scroll behavior: `ResultsFocused` with 20 results and a
   visible window of 5; pressing `Down` 7 times updates `scroll_offset` so the
   cursor stays visible; pressing `PgDn` advances by ~window height.
 
-- [ ] T029 [POLISH] (green) Implement scroll navigation in `FindFileDialog::handle_key`
+- [X] T029 [POLISH] (green) Implement scroll navigation in `FindFileDialog::handle_key`
   (`crates/cargonaut-ui-tui/src/dialog.rs`): `Up`/`Down` move `cursor` (the
   highlighted-result index from data-model.md — H2 addition) within results, clamped to
   `results.len()-1`; `PgUp`/`PgDn` move cursor by visible window height; update
   `scroll_offset` after each cursor move to keep cursor in the visible window
   (`scroll_offset ≤ cursor ≤ scroll_offset + window_height - 1`). Make T028 pass.
 
-- [ ] T030 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
+- [X] T030 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for `rg` non-zero exit path (FR-012/FR-018 graceful degradation):
   set up a mock `rg` script (a temp shell script that exits with code 1) as
   `ripgrep_path`; call `start_walk` in Content mode; poll results; assert
@@ -336,7 +336,7 @@ the active panel to its previous listing unchanged.
   (e.g. "Content search failed" or "No files found"). Confirms rg non-zero exit
   never panics the event loop and is surfaced as an empty result set.
 
-- [ ] T030B [POLISH] (green) Implement the rg non-zero exit handling in
+- [X] T030B [POLISH] (green) Implement the rg non-zero exit handling in
   `FindFileDialog::start_walk` (Content mode, `crates/cargonaut-ui-tui/src/dialog.rs`):
   when the `tokio::process::Command` child exits with non-zero status, send
   `FindEvent::Done { truncated: false }` with whatever results were accumulated
@@ -344,7 +344,7 @@ the active panel to its previous listing unchanged.
   and the walk was Content mode, set `notice = Some("Content search returned no results (check pattern or rg exit code)")`.
   Make T030 pass.
 
-- [ ] T031 [POLISH] Run `make ci-local` (fmt → clippy `-D warnings` → `cargo test --workspace`
+- [X] T031 [POLISH] Run `make ci-local` (fmt → clippy `-D warnings` → `cargo test --workspace`
   [SC-008 regression gate] → `cargo build --release` → `scripts/check-binary-size.sh`
   [SC-007 ≤8 MiB gate] → docs-gate). Run `cargo run -p cargonaut-bin` and walk
   the quickstart.md manual steps 1–7. Fix any clippy/fmt issues. All steps must pass
