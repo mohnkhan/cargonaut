@@ -6,7 +6,9 @@
 
 #![cfg(feature = "archives")]
 
-use cargonaut_vfs::{ByteRange, Sort, VfsBackend, VfsCaps, VfsError, VfsPath, TarFs, TarCompression};
+use cargonaut_vfs::{
+    ByteRange, Sort, TarCompression, TarFs, VfsBackend, VfsCaps, VfsError, VfsPath,
+};
 use futures::AsyncReadExt;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -27,14 +29,18 @@ fn make_test_tar() -> NamedTempFile {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "readme.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "readme.txt", content.as_slice())
+            .unwrap();
 
         let content2 = b"# TAR Notes\n";
         let mut header2 = tar::Header::new_gnu();
         header2.set_size(content2.len() as u64);
         header2.set_mode(0o644);
         header2.set_cksum();
-        builder.append_data(&mut header2, "subdir/notes.md", content2.as_slice()).unwrap();
+        builder
+            .append_data(&mut header2, "subdir/notes.md", content2.as_slice())
+            .unwrap();
 
         builder.finish().unwrap();
     }
@@ -53,7 +59,9 @@ fn make_test_tar_gz() -> NamedTempFile {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "gz_file.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "gz_file.txt", content.as_slice())
+            .unwrap();
 
         builder.into_inner().unwrap().finish().unwrap();
     }
@@ -72,7 +80,9 @@ fn make_test_tar_bz2() -> NamedTempFile {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "bz_file.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "bz_file.txt", content.as_slice())
+            .unwrap();
 
         builder.into_inner().unwrap().finish().unwrap();
     }
@@ -91,7 +101,9 @@ fn make_test_tar_xz() -> NamedTempFile {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "xz_file.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "xz_file.txt", content.as_slice())
+            .unwrap();
 
         builder.into_inner().unwrap().finish().unwrap();
     }
@@ -101,7 +113,8 @@ fn make_test_tar_xz() -> NamedTempFile {
 /// Write a clearly corrupt (non-tar) file.
 fn make_corrupt_tar() -> NamedTempFile {
     let mut tf = NamedTempFile::new().expect("tempfile");
-    tf.write_all(b"\x00\xff\xfe garbage not a tar file").unwrap();
+    tf.write_all(b"\x00\xff\xfe garbage not a tar file")
+        .unwrap();
     tf
 }
 
@@ -117,7 +130,9 @@ fn make_traversal_tar() -> NamedTempFile {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "safe.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "safe.txt", content.as_slice())
+            .unwrap();
 
         builder.finish().unwrap();
     }
@@ -149,7 +164,10 @@ async fn tar_fs_list_root_returns_all_root_entries() {
     let root = VfsPath::parse("tar:///").unwrap();
     let listing = t.list(&root, Sort::NameAsc).await.expect("list root");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"readme.txt"), "missing readme.txt: {names:?}");
+    assert!(
+        names.contains(&"readme.txt"),
+        "missing readme.txt: {names:?}"
+    );
     assert!(names.contains(&"subdir"), "missing subdir: {names:?}");
 }
 
@@ -160,7 +178,11 @@ async fn tar_fs_list_subdir_returns_only_that_dirs_entries() {
     let subdir = VfsPath::parse("tar:///subdir").unwrap();
     let listing = t.list(&subdir, Sort::NameAsc).await.expect("list subdir");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["notes.md"], "subdir must have exactly notes.md, got {names:?}");
+    assert_eq!(
+        names,
+        vec!["notes.md"],
+        "subdir must have exactly notes.md, got {names:?}"
+    );
 }
 
 #[tokio::test]
@@ -168,8 +190,14 @@ async fn tar_fs_list_nonexistent_returns_not_found() {
     let tf = make_test_tar();
     let t = TarFs::open(tf.path().to_path_buf(), TarCompression::None).expect("open valid tar");
     let missing = VfsPath::parse("tar:///no-such-dir").unwrap();
-    let err = t.list(&missing, Sort::NameAsc).await.expect_err("must fail");
-    assert!(matches!(err, VfsError::NotFound(_)), "expected NotFound, got {err:?}");
+    let err = t
+        .list(&missing, Sort::NameAsc)
+        .await
+        .expect_err("must fail");
+    assert!(
+        matches!(err, VfsError::NotFound(_)),
+        "expected NotFound, got {err:?}"
+    );
 }
 
 // ─── list (compressed variants) ──────────────────────────────────────────────
@@ -181,7 +209,10 @@ async fn tar_fs_list_gz_archive_works() {
     let root = VfsPath::parse("tar:///").unwrap();
     let listing = t.list(&root, Sort::NameAsc).await.expect("list gz root");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"gz_file.txt"), "missing gz_file.txt: {names:?}");
+    assert!(
+        names.contains(&"gz_file.txt"),
+        "missing gz_file.txt: {names:?}"
+    );
 }
 
 #[tokio::test]
@@ -191,7 +222,10 @@ async fn tar_fs_list_bz2_archive_works() {
     let root = VfsPath::parse("tar:///").unwrap();
     let listing = t.list(&root, Sort::NameAsc).await.expect("list bz2 root");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"bz_file.txt"), "missing bz_file.txt: {names:?}");
+    assert!(
+        names.contains(&"bz_file.txt"),
+        "missing bz_file.txt: {names:?}"
+    );
 }
 
 #[tokio::test]
@@ -201,7 +235,10 @@ async fn tar_fs_list_xz_archive_works() {
     let root = VfsPath::parse("tar:///").unwrap();
     let listing = t.list(&root, Sort::NameAsc).await.expect("list xz root");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"xz_file.txt"), "missing xz_file.txt: {names:?}");
+    assert!(
+        names.contains(&"xz_file.txt"),
+        "missing xz_file.txt: {names:?}"
+    );
 }
 
 // ─── stat ─────────────────────────────────────────────────────────────────────
@@ -231,7 +268,10 @@ async fn tar_fs_stat_nonexistent_returns_not_found() {
     let t = TarFs::open(tf.path().to_path_buf(), TarCompression::None).expect("open valid tar");
     let path = VfsPath::parse("tar:///no-such-file.txt").unwrap();
     let err = t.stat(&path).await.expect_err("must fail");
-    assert!(matches!(err, VfsError::NotFound(_)), "expected NotFound, got {err:?}");
+    assert!(
+        matches!(err, VfsError::NotFound(_)),
+        "expected NotFound, got {err:?}"
+    );
 }
 
 // ─── read_stream ─────────────────────────────────────────────────────────────
@@ -241,7 +281,10 @@ async fn tar_fs_read_stream_full_returns_correct_bytes() {
     let tf = make_test_tar();
     let t = TarFs::open(tf.path().to_path_buf(), TarCompression::None).expect("open valid tar");
     let path = VfsPath::parse("tar:///readme.txt").unwrap();
-    let mut stream = t.read_stream(&path, ByteRange::FULL).await.expect("read_stream");
+    let mut stream = t
+        .read_stream(&path, ByteRange::FULL)
+        .await
+        .expect("read_stream");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.expect("read to end");
     assert_eq!(buf, b"hello tar\n");
@@ -252,7 +295,10 @@ async fn tar_fs_read_stream_gz_returns_correct_bytes() {
     let tf = make_test_tar_gz();
     let t = TarFs::open(tf.path().to_path_buf(), TarCompression::Gz).expect("open gz tar");
     let path = VfsPath::parse("tar:///gz_file.txt").unwrap();
-    let mut stream = t.read_stream(&path, ByteRange::FULL).await.expect("read_stream gz");
+    let mut stream = t
+        .read_stream(&path, ByteRange::FULL)
+        .await
+        .expect("read_stream gz");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.expect("read gz to end");
     assert_eq!(buf, b"gzipped content\n");
@@ -263,11 +309,17 @@ async fn tar_fs_read_stream_range_returns_unsupported() {
     let tf = make_test_tar();
     let t = TarFs::open(tf.path().to_path_buf(), TarCompression::None).expect("open valid tar");
     let path = VfsPath::parse("tar:///readme.txt").unwrap();
-    let range = ByteRange { start: 0, end: Some(5) };
+    let range = ByteRange {
+        start: 0,
+        end: Some(5),
+    };
     let result = t.read_stream(&path, range).await;
     assert!(result.is_err(), "range reads must fail");
     if let Err(e) = result {
-        assert!(matches!(e, VfsError::Unsupported(_)), "expected Unsupported, got {e:?}");
+        assert!(
+            matches!(e, VfsError::Unsupported(_)),
+            "expected Unsupported, got {e:?}"
+        );
     }
 }
 
@@ -278,10 +330,15 @@ async fn tar_fs_write_stream_is_unsupported() {
     let tf = make_test_tar();
     let t = TarFs::open(tf.path().to_path_buf(), TarCompression::None).expect("open valid tar");
     let path = VfsPath::parse("tar:///new.txt").unwrap();
-    let result = t.write_stream(&path, 0, cargonaut_vfs::WriteMode::Truncate).await;
+    let result = t
+        .write_stream(&path, 0, cargonaut_vfs::WriteMode::Truncate)
+        .await;
     assert!(result.is_err(), "write_stream must fail");
     if let Err(e) = result {
-        assert!(matches!(e, VfsError::Unsupported(_)), "expected Unsupported, got {e:?}");
+        assert!(
+            matches!(e, VfsError::Unsupported(_)),
+            "expected Unsupported, got {e:?}"
+        );
     }
 }
 
@@ -301,7 +358,10 @@ fn tar_fs_open_corrupt_returns_io_error() {
     let tf = make_corrupt_tar();
     let err = TarFs::open(tf.path().to_path_buf(), TarCompression::None)
         .expect_err("corrupt tar must fail");
-    assert!(matches!(err, VfsError::Io(_)), "expected VfsError::Io, got {err:?}");
+    assert!(
+        matches!(err, VfsError::Io(_)),
+        "expected VfsError::Io, got {err:?}"
+    );
 }
 
 // ─── Path-traversal safety ───────────────────────────────────────────────────
@@ -325,12 +385,33 @@ async fn tar_fs_skips_traversal_entries_silently() {
 
 #[test]
 fn tar_compression_from_extension() {
-    assert!(matches!(TarCompression::from_extension("archive.tar"), Some(TarCompression::None)));
-    assert!(matches!(TarCompression::from_extension("archive.tar.gz"), Some(TarCompression::Gz)));
-    assert!(matches!(TarCompression::from_extension("archive.tgz"), Some(TarCompression::Gz)));
-    assert!(matches!(TarCompression::from_extension("archive.tar.bz2"), Some(TarCompression::Bz2)));
-    assert!(matches!(TarCompression::from_extension("archive.tbz2"), Some(TarCompression::Bz2)));
-    assert!(matches!(TarCompression::from_extension("archive.tar.xz"), Some(TarCompression::Xz)));
-    assert!(matches!(TarCompression::from_extension("archive.txz"), Some(TarCompression::Xz)));
+    assert!(matches!(
+        TarCompression::from_extension("archive.tar"),
+        Some(TarCompression::None)
+    ));
+    assert!(matches!(
+        TarCompression::from_extension("archive.tar.gz"),
+        Some(TarCompression::Gz)
+    ));
+    assert!(matches!(
+        TarCompression::from_extension("archive.tgz"),
+        Some(TarCompression::Gz)
+    ));
+    assert!(matches!(
+        TarCompression::from_extension("archive.tar.bz2"),
+        Some(TarCompression::Bz2)
+    ));
+    assert!(matches!(
+        TarCompression::from_extension("archive.tbz2"),
+        Some(TarCompression::Bz2)
+    ));
+    assert!(matches!(
+        TarCompression::from_extension("archive.tar.xz"),
+        Some(TarCompression::Xz)
+    ));
+    assert!(matches!(
+        TarCompression::from_extension("archive.txz"),
+        Some(TarCompression::Xz)
+    ));
     assert!(TarCompression::from_extension("archive.zip").is_none());
 }

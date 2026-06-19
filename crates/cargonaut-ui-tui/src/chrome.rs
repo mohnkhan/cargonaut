@@ -544,7 +544,9 @@ fn civil_from_unix(secs: u64) -> (i64, u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cargonaut_vfs::{DirEntry, DirListing, FileMode, LocalFs, Sort, VfsKind, VfsMetadata, VfsPath};
+    use cargonaut_vfs::{
+        DirEntry, DirListing, FileMode, LocalFs, Sort, VfsKind, VfsMetadata, VfsPath,
+    };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use smol_str::SmolStr;
@@ -737,16 +739,19 @@ mod tests {
         {
             let mut f = tf.reopen().unwrap();
             f.write_all(&[
-                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00,
+                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ]).unwrap();
+            ])
+            .unwrap();
         }
         let zip_fs = ZipFs::open(tf.path().to_path_buf()).unwrap();
         let cwd = VfsPath::parse("zip:///tmp%2Ftest.zip").unwrap();
         let state = PaneState {
             cwd: cwd.clone(),
-            listing: DirListing { entries: vec![], sort: Sort::NameAsc },
+            listing: DirListing {
+                entries: vec![],
+                sort: Sort::NameAsc,
+            },
             cursor: 0,
             selected: BTreeSet::new(),
             show_hidden: false,

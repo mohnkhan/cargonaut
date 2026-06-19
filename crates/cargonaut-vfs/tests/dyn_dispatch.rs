@@ -60,7 +60,7 @@ fn byte_range_full_constant() {
 
 #[cfg(feature = "archives")]
 mod archive_stubs {
-    use cargonaut_vfs::{VfsBackend, ZipFs, TarFs};
+    use cargonaut_vfs::{TarFs, VfsBackend, ZipFs};
 
     // Compile-time object-safety assertions. If any type stops implementing
     // VfsBackend as a trait object these will fail to compile.
@@ -74,7 +74,10 @@ mod archive_stubs {
     fn zip_fs_open_returns_err_stub() {
         use std::path::PathBuf;
         let result = ZipFs::open(PathBuf::from("/tmp/nonexistent.zip"));
-        assert!(result.is_err(), "ZipFs::open is a stub and must return Err until Phase 3");
+        assert!(
+            result.is_err(),
+            "ZipFs::open is a stub and must return Err until Phase 3"
+        );
     }
 
     #[test]
@@ -82,13 +85,16 @@ mod archive_stubs {
         use cargonaut_vfs::archive::tar_fs::TarCompression;
         use std::path::PathBuf;
         let result = TarFs::open(PathBuf::from("/tmp/nonexistent.tar"), TarCompression::None);
-        assert!(result.is_err(), "TarFs::open is a stub and must return Err until Phase 4");
+        assert!(
+            result.is_err(),
+            "TarFs::open is a stub and must return Err until Phase 4"
+        );
     }
 }
 
 #[cfg(feature = "remote")]
 mod remote_stubs {
-    use cargonaut_vfs::{VfsBackend, SftpFs, FtpFs};
+    use cargonaut_vfs::{FtpFs, SftpFs, VfsBackend};
 
     const fn _assert_vfs_backend<T: VfsBackend + 'static>() {}
     const _: () = {

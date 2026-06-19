@@ -1595,18 +1595,13 @@ async fn dispatch_ui_command(
                     .map_err(|e| std::io::Error::other(e.to_string()));
                     match zip_result {
                         Ok(Ok(zip_fs)) => {
-                            let encoded_auth = encode_archive_authority(
-                                raw_path.to_str().unwrap_or(""),
-                            );
+                            let encoded_auth =
+                                encode_archive_authority(raw_path.to_str().unwrap_or(""));
                             let zip_url = format!("zip://{encoded_auth}/");
                             match cargonaut_vfs::VfsPath::parse(&zip_url) {
                                 Ok(zip_path) => {
                                     match app
-                                        .navigate_into(
-                                            id,
-                                            zip_path,
-                                            std::sync::Arc::new(zip_fs),
-                                        )
+                                        .navigate_into(id, zip_path, std::sync::Arc::new(zip_fs))
                                         .await
                                     {
                                         Ok(_) => {}
@@ -1631,7 +1626,9 @@ async fn dispatch_ui_command(
                 }
 
                 // Feature 057 US2: .tar/.tar.gz/.tgz/.tar.bz2/.tbz2/.tar.xz/.txz open as tar:// backends.
-                if let Some(compression) = cargonaut_vfs::TarCompression::from_extension(&display_name.to_lowercase()) {
+                if let Some(compression) =
+                    cargonaut_vfs::TarCompression::from_extension(&display_name.to_lowercase())
+                {
                     let id = app.active_pane();
                     let archive_path = raw_path.clone();
                     let tar_result = tokio::task::spawn_blocking(move || {
@@ -1641,18 +1638,13 @@ async fn dispatch_ui_command(
                     .map_err(|e| std::io::Error::other(e.to_string()));
                     match tar_result {
                         Ok(Ok(tar_fs)) => {
-                            let encoded_auth = encode_archive_authority(
-                                raw_path.to_str().unwrap_or(""),
-                            );
+                            let encoded_auth =
+                                encode_archive_authority(raw_path.to_str().unwrap_or(""));
                             let tar_url = format!("tar://{encoded_auth}/");
                             match cargonaut_vfs::VfsPath::parse(&tar_url) {
                                 Ok(tar_path) => {
                                     match app
-                                        .navigate_into(
-                                            id,
-                                            tar_path,
-                                            std::sync::Arc::new(tar_fs),
-                                        )
+                                        .navigate_into(id, tar_path, std::sync::Arc::new(tar_fs))
                                         .await
                                     {
                                         Ok(_) => {}
@@ -5658,8 +5650,15 @@ mod tests {
         write_valid_zip(td_l.path(), "archive.zip");
         let mut app = app_with(&td_l, &td_r).await;
         // Cursor at index 0 is the ".." entry; the zip file is at index 1.
-        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, false);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -5696,10 +5695,21 @@ mod tests {
         // PK magic header but then corrupted — valid ZIP magic so ZipFs tries to open it,
         // but invalid structure so ZipFs::open returns Err; binary bytes so file viewer
         // also fails its UTF-8 check.
-        std::fs::write(td_l.path().join("bad.zip"), b"PK\x03\x04\x00\xff\xfe binary garbage").unwrap();
+        std::fs::write(
+            td_l.path().join("bad.zip"),
+            b"PK\x03\x04\x00\xff\xfe binary garbage",
+        )
+        .unwrap();
         let mut app = app_with(&td_l, &td_r).await;
-        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, false);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -5744,7 +5754,9 @@ mod tests {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "hello.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "hello.txt", content.as_slice())
+            .unwrap();
         builder.finish().unwrap();
         p
     }
@@ -5760,7 +5772,9 @@ mod tests {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        builder.append_data(&mut header, "gz_hello.txt", content.as_slice()).unwrap();
+        builder
+            .append_data(&mut header, "gz_hello.txt", content.as_slice())
+            .unwrap();
         builder.into_inner().unwrap().finish().unwrap();
         p
     }
@@ -5774,8 +5788,15 @@ mod tests {
         write_valid_tar(td_l.path(), "archive.tar");
         let mut app = app_with(&td_l, &td_r).await;
         // Cursor 0 = "..", cursor 1 = archive.tar
-        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, false);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -5808,8 +5829,15 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         write_valid_tar_gz(td_l.path(), "archive.tar.gz");
         let mut app = app_with(&td_l, &td_r).await;
-        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, false);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -5832,7 +5860,10 @@ mod tests {
             "DescendOrOpen on a .tar.gz file must navigate pane to tar:// (got: {}; status: {status:?})",
             app.active_pane_state().cwd.display()
         );
-        assert!(dlg.is_none(), "no dialog must be open after tar.gz navigation");
+        assert!(
+            dlg.is_none(),
+            "no dialog must be open after tar.gz navigation"
+        );
     }
 
     // T021a stub: .tgz extension also navigates to tar://.
@@ -5842,8 +5873,15 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         write_valid_tar_gz(td_l.path(), "archive.tgz");
         let mut app = app_with(&td_l, &td_r).await;
-        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
-        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
         let mut ui = fresh_ui(rect, rect, false);
         let mut mode = Mode::Pane;
         let mut dlg: Option<ActiveDialog> = None;
@@ -5925,7 +5963,9 @@ mod tests {
             accept_tx,
         );
         widget.accept();
-        let accepted = accept_rx.try_recv().expect("accept() must send immediately");
+        let accepted = accept_rx
+            .try_recv()
+            .expect("accept() must send immediately");
         assert!(accepted, "accept() must send true");
     }
 
@@ -5938,7 +5978,9 @@ mod tests {
             accept_tx,
         );
         widget.reject();
-        let accepted = accept_rx.try_recv().expect("reject() must send immediately");
+        let accepted = accept_rx
+            .try_recv()
+            .expect("reject() must send immediately");
         assert!(!accepted, "reject() must send false");
     }
 
@@ -5978,7 +6020,10 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = app_with(&td_l, &td_r).await;
         let rect = ratatui::layout::Rect {
-            x: 0, y: 0, width: 80, height: 24,
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
         };
         let mut ui = fresh_ui(rect, rect, false);
         let mut mode = Mode::Pane;
@@ -6006,11 +6051,7 @@ mod tests {
         // constructable (compile-time check).
         let _compile_check: Option<ActiveDialog> = Some(ActiveDialog::RemoteConnect {
             kind: RemoteKind::Sftp,
-            widget: dialog::PathInputDialog::new(
-                "Connect SFTP",
-                "URL:",
-                "sftp://user@host/",
-            ),
+            widget: dialog::PathInputDialog::new("Connect SFTP", "URL:", "sftp://user@host/"),
         });
     }
 }

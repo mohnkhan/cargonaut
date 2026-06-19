@@ -101,7 +101,10 @@ impl TarIndex {
 }
 
 /// Generic scan over any `tar::Archive<R: Read>`.
-fn scan_tar<R: Read>(mut archive: tar::Archive<R>, entries: &mut HashMap<String, EntryMeta>) -> Result<(), VfsError> {
+fn scan_tar<R: Read>(
+    mut archive: tar::Archive<R>,
+    entries: &mut HashMap<String, EntryMeta>,
+) -> Result<(), VfsError> {
     let all = archive
         .entries()
         .map_err(|e| VfsError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -121,8 +124,7 @@ fn scan_tar<R: Read>(mut archive: tar::Archive<R>, entries: &mut HashMap<String,
         if raw_path.contains("../") || raw_path.starts_with("../") || raw_path == ".." {
             tracing::warn!(path = %raw_path, "tar: dropping unsafe path-traversal entry");
             // Still consume the entry to advance the stream.
-            io::copy(&mut entry, &mut io::sink())
-                .map_err(VfsError::Io)?;
+            io::copy(&mut entry, &mut io::sink()).map_err(VfsError::Io)?;
             seq_idx += 1;
             continue;
         }
@@ -141,10 +143,17 @@ fn scan_tar<R: Read>(mut archive: tar::Archive<R>, entries: &mut HashMap<String,
         let is_dir = entry.header().entry_type().is_dir();
         let size = entry.header().size().unwrap_or(0);
         let mtime_secs = entry.header().mtime().unwrap_or(0);
-        let mtime = SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_secs(mtime_secs);
+        let mtime = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime_secs);
 
-        entries.insert(key, EntryMeta { size, is_dir, mtime, seq_idx });
+        entries.insert(
+            key,
+            EntryMeta {
+                size,
+                is_dir,
+                mtime,
+                seq_idx,
+            },
+        );
 
         // Drain entry bytes to advance the stream.
         io::copy(&mut entry, &mut io::sink()).map_err(VfsError::Io)?;
@@ -156,7 +165,11 @@ fn scan_tar<R: Read>(mut archive: tar::Archive<R>, entries: &mut HashMap<String,
 // ─── VfsPath ↔ TAR entry path ─────────────────────────────────────────────────
 
 fn segments_to_tar_prefix(path: &VfsPath) -> String {
-    path.segments.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("/")
+    path.segments
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 // ─── TarFs ────────────────────────────────────────────────────────────────────
@@ -255,7 +268,11 @@ impl VfsBackend for TarFs {
                 }
             };
 
-            let kind = if meta.is_dir { VfsKind::Dir } else { VfsKind::File };
+            let kind = if meta.is_dir {
+                VfsKind::Dir
+            } else {
+                VfsKind::File
+            };
             if meta.is_dir && seen_dirs.contains(&child_name) {
                 continue;
             }
@@ -273,7 +290,11 @@ impl VfsBackend for TarFs {
 
         if children.is_empty() && !prefix.is_empty() {
             let exists = self.index.entries.contains_key(&prefix)
-                || self.index.entries.keys().any(|k| k.starts_with(&format!("{prefix}/")));
+                || self
+                    .index
+                    .entries
+                    .keys()
+                    .any(|k| k.starts_with(&format!("{prefix}/")));
             if !exists {
                 return Err(VfsError::NotFound(format!("no such directory: {prefix}")));
             }
@@ -291,7 +312,10 @@ impl VfsBackend for TarFs {
             }),
         }
 
-        Ok(DirListing { entries: children, sort })
+        Ok(DirListing {
+            entries: children,
+            sort,
+        })
     }
 
     async fn stat(&self, path: &VfsPath) -> Result<VfsMetadata, VfsError> {
@@ -310,7 +334,11 @@ impl VfsBackend for TarFs {
                 size: meta.size,
                 mtime: meta.mtime,
                 mode: None,
-                kind: if meta.is_dir { VfsKind::Dir } else { VfsKind::File },
+                kind: if meta.is_dir {
+                    VfsKind::Dir
+                } else {
+                    VfsKind::File
+                },
                 is_hidden: key.starts_with('.') || key.contains("/."),
             }),
             None => {
@@ -336,13 +364,19 @@ impl VfsBackend for TarFs {
     ) -> Result<Pin<Box<dyn AsyncRead + Send>>, VfsError> {
         // TAR is sequential — range reads are not supported.
         if range.start != 0 || range.end.is_some() {
-            return Err(VfsError::Unsupported("TarFs: only FULL byte ranges are supported"));
+            return Err(VfsError::Unsupported(
+                "TarFs: only FULL byte ranges are supported",
+            ));
         }
 
         let key = segments_to_tar_prefix(path);
         let meta = match self.index.entries.get(&key) {
             None => return Err(VfsError::NotFound(format!("not found in archive: {key}"))),
-            Some(m) if m.is_dir => return Err(VfsError::Other("cannot read a directory as a file stream".to_string())),
+            Some(m) if m.is_dir => {
+                return Err(VfsError::Other(
+                    "cannot read a directory as a file stream".to_string(),
+                ))
+            }
             Some(m) => m,
         };
         let target_seq_idx = meta.seq_idx;
@@ -354,9 +388,18 @@ impl VfsBackend for TarFs {
             let file = std::fs::File::open(&archive_path).map_err(VfsError::Io)?;
             match compression {
                 TarCompression::None => read_entry(tar::Archive::new(file), target_seq_idx),
-                TarCompression::Gz => read_entry(tar::Archive::new(flate2::read::GzDecoder::new(file)), target_seq_idx),
-                TarCompression::Bz2 => read_entry(tar::Archive::new(bzip2::read::BzDecoder::new(file)), target_seq_idx),
-                TarCompression::Xz => read_entry(tar::Archive::new(xz2::read::XzDecoder::new(file)), target_seq_idx),
+                TarCompression::Gz => read_entry(
+                    tar::Archive::new(flate2::read::GzDecoder::new(file)),
+                    target_seq_idx,
+                ),
+                TarCompression::Bz2 => read_entry(
+                    tar::Archive::new(bzip2::read::BzDecoder::new(file)),
+                    target_seq_idx,
+                ),
+                TarCompression::Xz => read_entry(
+                    tar::Archive::new(xz2::read::XzDecoder::new(file)),
+                    target_seq_idx,
+                ),
             }
         })
         .await
@@ -392,7 +435,10 @@ impl VfsBackend for TarFs {
 }
 
 /// Re-open the archive and read the entry at `seq_idx` into a Vec<u8>.
-fn read_entry<R: Read>(mut archive: tar::Archive<R>, target_seq_idx: usize) -> Result<Vec<u8>, VfsError> {
+fn read_entry<R: Read>(
+    mut archive: tar::Archive<R>,
+    target_seq_idx: usize,
+) -> Result<Vec<u8>, VfsError> {
     let all = archive
         .entries()
         .map_err(|e| VfsError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -411,5 +457,7 @@ fn read_entry<R: Read>(mut archive: tar::Archive<R>, target_seq_idx: usize) -> R
         io::copy(&mut entry, &mut io::sink()).map_err(VfsError::Io)?;
     }
 
-    Err(VfsError::NotFound(format!("entry at seq_idx {target_seq_idx} not found in archive")))
+    Err(VfsError::NotFound(format!(
+        "entry at seq_idx {target_seq_idx} not found in archive"
+    )))
 }

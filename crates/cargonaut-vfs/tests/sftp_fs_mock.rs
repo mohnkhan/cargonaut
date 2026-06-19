@@ -11,8 +11,8 @@
 
 use async_trait::async_trait;
 use cargonaut_vfs::{
-    ByteRange, Sort, VfsBackend, VfsCaps, VfsError, VfsKind, VfsMetadata, VfsPath, WriteMode,
-    SftpCredentials, SftpOps,
+    ByteRange, SftpCredentials, SftpOps, Sort, VfsBackend, VfsCaps, VfsError, VfsKind, VfsMetadata,
+    VfsPath, WriteMode,
 };
 use futures::AsyncWriteExt;
 use std::collections::HashMap;
@@ -165,18 +165,31 @@ impl SftpOps for MockSftpOps {
         }
     }
 
-    async fn read_bytes(&self, path: &str, offset: u64, len: Option<u64>) -> Result<Vec<u8>, VfsError> {
+    async fn read_bytes(
+        &self,
+        path: &str,
+        offset: u64,
+        len: Option<u64>,
+    ) -> Result<Vec<u8>, VfsError> {
         match self.read_responses.get(path) {
             Some(bytes) => {
                 let start = offset as usize;
-                let end = len.map(|l| (start + l as usize).min(bytes.len())).unwrap_or(bytes.len());
+                let end = len
+                    .map(|l| (start + l as usize).min(bytes.len()))
+                    .unwrap_or(bytes.len());
                 Ok(bytes[start..end].to_vec())
             }
             None => Err(VfsError::NotFound(format!("no mock for read({path})"))),
         }
     }
 
-    async fn write_all(&self, _path: &str, _data: &[u8], _offset: u64, _truncate: bool) -> Result<(), VfsError> {
+    async fn write_all(
+        &self,
+        _path: &str,
+        _data: &[u8],
+        _offset: u64,
+        _truncate: bool,
+    ) -> Result<(), VfsError> {
         match &self.default_mutate {
             MockAction::Ok => Ok(()),
             MockAction::Fail(msg) => Err(VfsError::Other(msg.clone())),
@@ -272,8 +285,8 @@ fn sftp_fs_caps_are_full_remote_set() {
 
 #[tokio::test]
 async fn sftp_fs_list_root_returns_entries() {
-    let ops = MockSftpOps::new()
-        .with_dir("/", vec![dir_entry("home"), file_entry("etc_hosts", 1024)]);
+    let ops =
+        MockSftpOps::new().with_dir("/", vec![dir_entry("home"), file_entry("etc_hosts", 1024)]);
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/").unwrap();
     let listing = fs.list(&path, Sort::NameAsc).await.expect("list root");
@@ -332,7 +345,10 @@ async fn sftp_fs_read_stream_full_returns_bytes() {
     let ops = MockSftpOps::new().with_read("/readme.txt", b"hello sftp\n".to_vec());
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/readme.txt").unwrap();
-    let mut stream = fs.read_stream(&path, ByteRange::FULL).await.expect("read_stream");
+    let mut stream = fs
+        .read_stream(&path, ByteRange::FULL)
+        .await
+        .expect("read_stream");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.expect("read all");
     assert_eq!(buf, b"hello sftp\n");
@@ -345,7 +361,10 @@ async fn sftp_fs_read_stream_byte_range_returns_slice() {
     let ops = MockSftpOps::new().with_read("/data.bin", content);
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/data.bin").unwrap();
-    let range = ByteRange { start: 4, end: Some(8) };
+    let range = ByteRange {
+        start: 4,
+        end: Some(8),
+    };
     let mut stream = fs.read_stream(&path, range).await.expect("ranged read");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.expect("read ranged");
@@ -359,7 +378,10 @@ async fn sftp_fs_write_stream_truncate_succeeds() {
     let ops = MockSftpOps::new();
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/newfile.txt").unwrap();
-    let mut writer = fs.write_stream(&path, 0, WriteMode::Truncate).await.expect("write_stream");
+    let mut writer = fs
+        .write_stream(&path, 0, WriteMode::Truncate)
+        .await
+        .expect("write_stream");
     writer.write_all(b"data").await.expect("write");
     writer.close().await.expect("close");
 }
@@ -369,7 +391,10 @@ async fn sftp_fs_write_stream_append_at_offset_succeeds() {
     let ops = MockSftpOps::new();
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/append.txt").unwrap();
-    let mut writer = fs.write_stream(&path, 100, WriteMode::AppendAtOffset).await.expect("append_at_offset");
+    let mut writer = fs
+        .write_stream(&path, 100, WriteMode::AppendAtOffset)
+        .await
+        .expect("append_at_offset");
     writer.write_all(b"more").await.expect("write");
     writer.close().await.expect("close");
 }
@@ -410,11 +435,15 @@ async fn sftp_fs_mkdir_succeeds() {
 #[tokio::test]
 async fn sftp_fs_auth_failure_returns_auth_failed() {
     let mut ops = MockSftpOps::new();
-    ops.list_responses.insert("/".to_string(), MockAction::AuthFail);
+    ops.list_responses
+        .insert("/".to_string(), MockAction::AuthFail);
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/").unwrap();
     let err = fs.list(&path, Sort::NameAsc).await.expect_err("must fail");
-    assert!(matches!(err, VfsError::AuthFailed(_)), "expected AuthFailed, got {err:?}");
+    assert!(
+        matches!(err, VfsError::AuthFailed(_)),
+        "expected AuthFailed, got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -438,7 +467,10 @@ async fn sftp_fs_transport_failure_succeeds_after_retry() {
         .with_stat("/ok.txt", file_entry("ok.txt", 42));
     let fs = make_sftp_fs(ops);
     let path = VfsPath::parse("sftp://user@host/ok.txt").unwrap();
-    let meta = fs.stat(&path).await.expect("should succeed after 2 retries");
+    let meta = fs
+        .stat(&path)
+        .await
+        .expect("should succeed after 2 retries");
     assert_eq!(meta.size, 42);
 }
 
@@ -472,7 +504,8 @@ async fn sftp_auth_failure_log_does_not_leak_password() {
     let creds = SftpCredentials::Password(SECRET.to_string());
 
     let mut ops = MockSftpOps::new();
-    ops.list_responses.insert("/".to_string(), MockAction::AuthFail);
+    ops.list_responses
+        .insert("/".to_string(), MockAction::AuthFail);
     let fs = cargonaut_vfs::SftpFs::with_ops_and_creds(Arc::new(ops), creds);
 
     let path = VfsPath::parse("sftp://user@host/").unwrap();

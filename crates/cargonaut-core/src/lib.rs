@@ -1342,14 +1342,8 @@ impl App {
         let src = parse_path(&rt.checkpoint.src_uri)?;
         let dst = parse_path(&rt.checkpoint.dst_uri)?;
         let opts = self.transfer_opts();
-        let job = submit_transfer(
-            self.registry.local(),
-            src,
-            self.registry.local(),
-            dst,
-            opts,
-        )
-        .await?;
+        let job =
+            submit_transfer(self.registry.local(), src, self.registry.local(), dst, opts).await?;
         let id = job.id;
         self.transfers.insert(id, job);
         self.transfer_order.push(id);
@@ -1452,7 +1446,8 @@ impl App {
         let active = self.active;
         let other = active.other();
         let other_cwd = self.pane(other).cwd.clone();
-        self.navigate_to(active, other_cwd, self.registry.local()).await
+        self.navigate_to(active, other_cwd, self.registry.local())
+            .await
     }
 
     async fn show_focused_in_other_panel(&mut self) -> Result<Vec<Event>, AppError> {
@@ -1623,7 +1618,12 @@ impl App {
                     continue;
                 }
             };
-            match self.registry.local().chmod(&target, mode_spec.apply(current)).await {
+            match self
+                .registry
+                .local()
+                .chmod(&target, mode_spec.apply(current))
+                .await
+            {
                 Ok(()) => ok += 1,
                 Err(e) => failures.push(format!("{name}: {e}")),
             }
@@ -1740,7 +1740,12 @@ impl App {
                 continue; // never chmod through a symlink (FR-006)
             }
             let current = meta.mode.map(|fm| fm.bits).unwrap_or(0);
-            match self.registry.local().chmod(p, mode_spec.apply(current)).await {
+            match self
+                .registry
+                .local()
+                .chmod(p, mode_spec.apply(current))
+                .await
+            {
                 Ok(()) => ok += 1,
                 Err(e) => failures.push(format!("{}: {e}", p.display())),
             }
@@ -6187,10 +6192,10 @@ mod tests {
             let mut f = std::fs::File::create(&zip_path).unwrap();
             // Minimal EOCD record — 0 entries, valid zip.
             f.write_all(&[
-                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00,
+                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ]).unwrap();
+            ])
+            .unwrap();
         }
 
         let td_l = TempDir::new().unwrap();
@@ -6199,7 +6204,9 @@ mod tests {
 
         // Mount the zip archive in the active (left) pane.
         let zip_fs = ZipFs::open(zip_path.clone()).unwrap();
-        let encoded_auth: String = zip_path.to_str().unwrap()
+        let encoded_auth: String = zip_path
+            .to_str()
+            .unwrap()
             .chars()
             .flat_map(|c| match c {
                 '%' => "%25".chars().collect::<Vec<_>>(),

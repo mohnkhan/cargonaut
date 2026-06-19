@@ -167,10 +167,7 @@ impl FtpOps for RealFtpOps {
 
         // Try MLSD first (machine-readable); fall back to LIST.
         if let Ok(lines) = ftp.mlsd(path_opt).await {
-            let result = lines
-                .iter()
-                .filter_map(|l| parse_mlsd_line(l))
-                .collect();
+            let result = lines.iter().filter_map(|l| parse_mlsd_line(l)).collect();
             return Ok(result);
         }
 
@@ -179,10 +176,7 @@ impl FtpOps for RealFtpOps {
             .list(path_opt)
             .await
             .map_err(|e| io::Error::other(e.to_string()))?;
-        let result = raw
-            .iter()
-            .filter_map(|l| parse_list_line(l))
-            .collect();
+        let result = raw.iter().filter_map(|l| parse_list_line(l)).collect();
         Ok(result)
     }
 
@@ -327,23 +321,21 @@ impl futures::io::AsyncWrite for FtpBufferWriter {
                         Box::pin(async move { ops.write_file(&path, &buf).await });
                     self.state = FtpWriteState::Closing(fut);
                 }
-                FtpWriteState::Closing(fut) => {
-                    match fut.as_mut().poll(cx) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Ok(())) => {
-                            self.state = FtpWriteState::Closed;
-                            return Poll::Ready(Ok(()));
-                        }
-                        Poll::Ready(Err(VfsError::Io(e))) => {
-                            self.state = FtpWriteState::Closed;
-                            return Poll::Ready(Err(e));
-                        }
-                        Poll::Ready(Err(other)) => {
-                            self.state = FtpWriteState::Closed;
-                            return Poll::Ready(Err(io::Error::other(other.to_string())));
-                        }
+                FtpWriteState::Closing(fut) => match fut.as_mut().poll(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Ok(())) => {
+                        self.state = FtpWriteState::Closed;
+                        return Poll::Ready(Ok(()));
                     }
-                }
+                    Poll::Ready(Err(VfsError::Io(e))) => {
+                        self.state = FtpWriteState::Closed;
+                        return Poll::Ready(Err(e));
+                    }
+                    Poll::Ready(Err(other)) => {
+                        self.state = FtpWriteState::Closed;
+                        return Poll::Ready(Err(io::Error::other(other.to_string())));
+                    }
+                },
                 FtpWriteState::Closed => return Poll::Ready(Ok(())),
             }
         }

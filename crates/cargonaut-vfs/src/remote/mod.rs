@@ -3,8 +3,8 @@
 
 //! Remote VFS backends — read/write backends for SFTP and FTP servers.
 
-pub mod sftp_fs;
 pub mod ftp_fs;
+pub mod sftp_fs;
 
-pub use sftp_fs::{HostKeyEvent, SftpCredentials, SftpFs, SftpOps};
 pub use ftp_fs::{FtpFs, FtpOps};
+pub use sftp_fs::{HostKeyEvent, SftpCredentials, SftpFs, SftpOps};

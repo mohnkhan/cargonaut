@@ -12,8 +12,8 @@
 //!   - authority decoded = `/home/user/archive.zip`
 //!   - entry path = `subdir/file.txt`
 
-pub mod zip_fs;
 pub mod tar_fs;
+pub mod zip_fs;
 
-pub use zip_fs::ZipFs;
 pub use tar_fs::{TarCompression, TarFs};
+pub use zip_fs::ZipFs;

@@ -4157,10 +4157,7 @@ impl HostKeyVerifyDialog {
         };
 
         f.render_widget(Paragraph::new("[ Accept ]").style(accept_style), chunks[2]);
-        f.render_widget(
-            Paragraph::new("[ Reject ]").style(reject_style),
-            chunks[3],
-        );
+        f.render_widget(Paragraph::new("[ Reject ]").style(reject_style), chunks[3]);
     }
 }
 

@@ -127,7 +127,10 @@ mod tests {
             segments: smallvec::smallvec![],
         };
         let resolved = reg.resolve(&path).unwrap();
-        assert!(Arc::ptr_eq(&resolved, &second), "should return the overwritten (second) backend");
+        assert!(
+            Arc::ptr_eq(&resolved, &second),
+            "should return the overwritten (second) backend"
+        );
     }
 
     #[test]

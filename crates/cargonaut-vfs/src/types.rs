@@ -423,10 +423,7 @@ mod tests {
             authority: Some(SmolStr::new("%2Ftmp%2Farchive.zip")),
             segments: SmallVec::new(),
         };
-        assert_eq!(
-            p.decode_authority(),
-            Some("/tmp/archive.zip".to_string())
-        );
+        assert_eq!(p.decode_authority(), Some("/tmp/archive.zip".to_string()));
     }
 
     #[test]

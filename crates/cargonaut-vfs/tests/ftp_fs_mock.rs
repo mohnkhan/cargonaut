@@ -10,12 +10,19 @@
 #![cfg(feature = "remote")]
 
 use async_trait::async_trait;
+use cargonaut_vfs::FtpFs; // T030 red: doesn't exist yet → compile error
 use cargonaut_vfs::{
-    ByteRange, Sort, VfsBackend, VfsCaps, VfsError, VfsKind, VfsMetadata,
-    VfsPath, WriteMode,
-    FtpOps,  // T030 red: doesn't exist yet → compile error
+    ByteRange,
+    FtpOps, // T030 red: doesn't exist yet → compile error
+    Sort,
+    VfsBackend,
+    VfsCaps,
+    VfsError,
+    VfsKind,
+    VfsMetadata,
+    VfsPath,
+    WriteMode,
 };
-use cargonaut_vfs::FtpFs;  // T030 red: doesn't exist yet → compile error
 use futures::AsyncWriteExt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -245,7 +252,10 @@ async fn ftp_fs_read_stream_range_returns_unsupported() {
     let ops = MockFtpOps::new().with_read("/data.bin", b"0123456789".to_vec());
     let fs = make_ftp_fs(ops);
     let path = VfsPath::parse("ftp://user@host/data.bin").unwrap();
-    let range = ByteRange { start: 10, end: None };
+    let range = ByteRange {
+        start: 10,
+        end: None,
+    };
     let result = fs.read_stream(&path, range).await;
     let err = result.err().expect("range read must fail");
     assert!(
@@ -320,9 +330,9 @@ async fn ftp_fs_connect_error_returns_io() {
     let ops = MockFtpOps::new().with_connect_fail();
     let fs = make_ftp_fs(ops);
     let path = VfsPath::parse("ftp://user@host/any.txt").unwrap();
-    let err = fs.stat(&path).await.expect_err("must fail on connect error");
-    assert!(
-        matches!(err, VfsError::Io(_)),
-        "expected Io, got {err:?}"
-    );
+    let err = fs
+        .stat(&path)
+        .await
+        .expect_err("must fail on connect error");
+    assert!(matches!(err, VfsError::Io(_)), "expected Io, got {err:?}");
 }

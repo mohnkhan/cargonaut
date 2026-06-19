@@ -210,7 +210,10 @@ impl SftpOps for RealSftpOps {
             // CREATE | TRUNCATE | WRITE — creates or overwrites.
             let mut file = self
                 .sftp
-                .open_with_flags(path, OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE)
+                .open_with_flags(
+                    path,
+                    OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+                )
                 .await
                 .map_err(|e| io::Error::other(e.to_string()))?;
             file.write_all(data)
@@ -317,8 +320,7 @@ impl russh::client::Handler for ClientHandler {
 
         let accepted = accept_rx.await.unwrap_or(false);
         if accepted {
-            if let Err(e) =
-                known_hosts::learn_known_hosts(&self.host, self.port, server_public_key)
+            if let Err(e) = known_hosts::learn_known_hosts(&self.host, self.port, server_public_key)
             {
                 warn!(host = %host_str, error = %e, "failed to persist known_hosts entry");
             }
@@ -394,23 +396,21 @@ impl futures::io::AsyncWrite for SftpBufferWriter {
                     self.state = WriteState::Closing(fut);
                     // Continue in loop to poll the future.
                 }
-                WriteState::Closing(fut) => {
-                    match fut.as_mut().poll(cx) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Ok(())) => {
-                            self.state = WriteState::Closed;
-                            return Poll::Ready(Ok(()));
-                        }
-                        Poll::Ready(Err(VfsError::Io(e))) => {
-                            self.state = WriteState::Closed;
-                            return Poll::Ready(Err(e));
-                        }
-                        Poll::Ready(Err(other)) => {
-                            self.state = WriteState::Closed;
-                            return Poll::Ready(Err(io::Error::other(other.to_string())));
-                        }
+                WriteState::Closing(fut) => match fut.as_mut().poll(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Ok(())) => {
+                        self.state = WriteState::Closed;
+                        return Poll::Ready(Ok(()));
                     }
-                }
+                    Poll::Ready(Err(VfsError::Io(e))) => {
+                        self.state = WriteState::Closed;
+                        return Poll::Ready(Err(e));
+                    }
+                    Poll::Ready(Err(other)) => {
+                        self.state = WriteState::Closed;
+                        return Poll::Ready(Err(io::Error::other(other.to_string())));
+                    }
+                },
                 WriteState::Closed => return Poll::Ready(Ok(())),
             }
         }
@@ -507,10 +507,8 @@ impl SftpFs {
                     }
                     match russh::keys::load_secret_key(key_path, None) {
                         Ok(key_pair) => {
-                            let key = russh::keys::PrivateKeyWithHashAlg::new(
-                                Arc::new(key_pair),
-                                None,
-                            );
+                            let key =
+                                russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), None);
                             match session.authenticate_publickey(user.as_str(), key).await {
                                 Ok(result) if result.success() => {
                                     success = true;
@@ -867,21 +865,10 @@ mod tests {
         async fn stat(&self, _: &str) -> Result<VfsMetadata, VfsError> {
             Err(VfsError::Other("null".into()))
         }
-        async fn read_bytes(
-            &self,
-            _: &str,
-            _: u64,
-            _: Option<u64>,
-        ) -> Result<Vec<u8>, VfsError> {
+        async fn read_bytes(&self, _: &str, _: u64, _: Option<u64>) -> Result<Vec<u8>, VfsError> {
             Err(VfsError::Other("null".into()))
         }
-        async fn write_all(
-            &self,
-            _: &str,
-            _: &[u8],
-            _: u64,
-            _: bool,
-        ) -> Result<(), VfsError> {
+        async fn write_all(&self, _: &str, _: &[u8], _: u64, _: bool) -> Result<(), VfsError> {
             Err(VfsError::Other("null".into()))
         }
         async fn unlink(&self, _: &str) -> Result<(), VfsError> {

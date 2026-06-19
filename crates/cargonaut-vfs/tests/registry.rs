@@ -4,11 +4,11 @@
 //! Integration tests for VfsRegistry — scheme+authority dispatch.
 //! T006: external test suite for VfsRegistry (FR-001).
 
+use cargonaut_vfs::VfsPath;
 use cargonaut_vfs::{LocalFs, VfsBackend, VfsCaps, VfsRegistry};
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 use std::sync::Arc;
-use cargonaut_vfs::VfsPath;
 
 fn local_backend() -> Arc<dyn VfsBackend> {
     Arc::new(LocalFs::new())
@@ -66,7 +66,10 @@ fn re_register_overwrites_previous() {
 fn local_accessor_returns_seekable_backend() {
     let reg = VfsRegistry::new(local_backend());
     let b = reg.local();
-    assert!(b.caps().contains(VfsCaps::SEEKABLE), "local backend must be seekable");
+    assert!(
+        b.caps().contains(VfsCaps::SEEKABLE),
+        "local backend must be seekable"
+    );
 }
 
 #[test]

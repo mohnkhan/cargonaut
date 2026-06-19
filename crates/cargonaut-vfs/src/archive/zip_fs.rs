@@ -43,14 +43,14 @@ struct ZipIndex {
 impl ZipIndex {
     /// Build the index by scanning all entries in the archive.
     fn build(archive_path: &PathBuf) -> Result<Self, VfsError> {
-        let file = std::fs::File::open(archive_path)
-            .map_err(VfsError::Io)?;
+        let file = std::fs::File::open(archive_path).map_err(VfsError::Io)?;
         let mut archive = zip::ZipArchive::new(file)
             .map_err(|e| VfsError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
         let mut entries = HashMap::new();
         for i in 0..archive.len() {
-            let entry = archive.by_index(i)
+            let entry = archive
+                .by_index(i)
                 .map_err(|e| VfsError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
             // Drop path-traversal entries silently.
@@ -77,7 +77,14 @@ impl ZipIndex {
             // Use UNIX epoch as mtime fallback — zip DateTime conversion is optional.
             let mtime = SystemTime::UNIX_EPOCH;
 
-            entries.insert(key, EntryMeta { size, is_dir, mtime });
+            entries.insert(
+                key,
+                EntryMeta {
+                    size,
+                    is_dir,
+                    mtime,
+                },
+            );
         }
 
         Ok(ZipIndex { entries })
@@ -89,7 +96,11 @@ impl ZipIndex {
 /// Convert VfsPath segments into the zip entry name prefix to match against.
 /// An empty segment list corresponds to the archive root.
 fn segments_to_zip_prefix(path: &VfsPath) -> String {
-    path.segments.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("/")
+    path.segments
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 // ─── ZipFs ────────────────────────────────────────────────────────────────────
@@ -193,7 +204,11 @@ impl VfsBackend for ZipFs {
             };
 
             // Direct child — add as file or dir.
-            let kind = if meta.is_dir { VfsKind::Dir } else { VfsKind::File };
+            let kind = if meta.is_dir {
+                VfsKind::Dir
+            } else {
+                VfsKind::File
+            };
             // Skip directory entries that already appeared as synthetic dirs.
             if meta.is_dir && seen_dirs.contains(&child_name) {
                 continue;
@@ -213,7 +228,11 @@ impl VfsBackend for ZipFs {
         // Verify the prefix actually exists if the listing is empty.
         if children.is_empty() && !prefix.is_empty() {
             let exists = self.index.entries.contains_key(&prefix)
-                || self.index.entries.keys().any(|k| k.starts_with(&format!("{prefix}/")));
+                || self
+                    .index
+                    .entries
+                    .keys()
+                    .any(|k| k.starts_with(&format!("{prefix}/")));
             if !exists {
                 return Err(VfsError::NotFound(format!("no such directory: {prefix}")));
             }
@@ -232,7 +251,10 @@ impl VfsBackend for ZipFs {
             }),
         }
 
-        Ok(DirListing { entries: children, sort })
+        Ok(DirListing {
+            entries: children,
+            sort,
+        })
     }
 
     async fn stat(&self, path: &VfsPath) -> Result<VfsMetadata, VfsError> {
@@ -252,7 +274,11 @@ impl VfsBackend for ZipFs {
                 size: meta.size,
                 mtime: meta.mtime,
                 mode: None,
-                kind: if meta.is_dir { VfsKind::Dir } else { VfsKind::File },
+                kind: if meta.is_dir {
+                    VfsKind::Dir
+                } else {
+                    VfsKind::File
+                },
                 is_hidden: key.starts_with('.') || key.contains("/."),
             }),
             None => {
@@ -279,14 +305,20 @@ impl VfsBackend for ZipFs {
     ) -> Result<Pin<Box<dyn AsyncRead + Send>>, VfsError> {
         // Only FULL reads supported — ZIP is not seekable.
         if range.start != 0 || range.end.is_some() {
-            return Err(VfsError::Unsupported("ZipFs: only FULL byte ranges are supported"));
+            return Err(VfsError::Unsupported(
+                "ZipFs: only FULL byte ranges are supported",
+            ));
         }
 
         let key = segments_to_zip_prefix(path);
         // Verify the entry exists and is a file.
         match self.index.entries.get(&key) {
             None => return Err(VfsError::NotFound(format!("not found in archive: {key}"))),
-            Some(m) if m.is_dir => return Err(VfsError::Other("cannot read a directory as a file stream".to_string())),
+            Some(m) if m.is_dir => {
+                return Err(VfsError::Other(
+                    "cannot read a directory as a file stream".to_string(),
+                ))
+            }
             Some(_) => {}
         }
 
@@ -299,7 +331,8 @@ impl VfsBackend for ZipFs {
             // Find the entry by matching its normalized name.
             let mut found_idx = None;
             for i in 0..archive.len() {
-                let entry = archive.by_index(i)
+                let entry = archive
+                    .by_index(i)
                     .map_err(|e| VfsError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                 let entry_name = match entry.enclosed_name() {
                     Some(n) => n.to_string_lossy().trim_end_matches('/').to_string(),
@@ -311,8 +344,10 @@ impl VfsBackend for ZipFs {
                 }
             }
 
-            let idx = found_idx.ok_or_else(|| VfsError::NotFound(format!("entry not found: {key}")))?;
-            let mut entry = archive.by_index(idx)
+            let idx =
+                found_idx.ok_or_else(|| VfsError::NotFound(format!("entry not found: {key}")))?;
+            let mut entry = archive
+                .by_index(idx)
                 .map_err(|e| VfsError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
             // Encrypted entries: the zip crate returns an error on read.

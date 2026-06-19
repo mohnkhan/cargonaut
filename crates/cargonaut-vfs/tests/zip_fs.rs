@@ -88,7 +88,10 @@ async fn zip_fs_list_root_returns_all_root_entries() {
     let root = VfsPath::parse("zip:///").unwrap();
     let listing = z.list(&root, Sort::NameAsc).await.expect("list root");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"readme.txt"), "missing readme.txt: {names:?}");
+    assert!(
+        names.contains(&"readme.txt"),
+        "missing readme.txt: {names:?}"
+    );
     assert!(names.contains(&"subdir"), "missing subdir: {names:?}");
 }
 
@@ -99,7 +102,11 @@ async fn zip_fs_list_subdir_returns_only_that_dirs_entries() {
     let subdir = VfsPath::parse("zip:///subdir").unwrap();
     let listing = z.list(&subdir, Sort::NameAsc).await.expect("list subdir");
     let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["notes.md"], "subdir must have exactly notes.md, got {names:?}");
+    assert_eq!(
+        names,
+        vec!["notes.md"],
+        "subdir must have exactly notes.md, got {names:?}"
+    );
 }
 
 #[tokio::test]
@@ -107,7 +114,10 @@ async fn zip_fs_list_nonexistent_returns_not_found() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
     let missing = VfsPath::parse("zip:///no-such-dir").unwrap();
-    let err = z.list(&missing, Sort::NameAsc).await.expect_err("must fail");
+    let err = z
+        .list(&missing, Sort::NameAsc)
+        .await
+        .expect_err("must fail");
     assert!(
         matches!(err, VfsError::NotFound(_)),
         "expected NotFound, got {err:?}"
@@ -168,7 +178,10 @@ async fn zip_fs_read_stream_range_returns_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
     let path = VfsPath::parse("zip:///readme.txt").unwrap();
-    let range = ByteRange { start: 0, end: Some(5) };
+    let range = ByteRange {
+        start: 0,
+        end: Some(5),
+    };
     let result = z.read_stream(&path, range).await;
     assert!(result.is_err(), "range reads must fail");
     if let Err(e) = result {
@@ -186,10 +199,15 @@ async fn zip_fs_write_stream_is_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
     let path = VfsPath::parse("zip:///new.txt").unwrap();
-    let result = z.write_stream(&path, 0, cargonaut_vfs::WriteMode::Truncate).await;
+    let result = z
+        .write_stream(&path, 0, cargonaut_vfs::WriteMode::Truncate)
+        .await;
     assert!(result.is_err(), "write_stream must fail");
     if let Err(e) = result {
-        assert!(matches!(e, VfsError::Unsupported(_)), "expected Unsupported, got {e:?}");
+        assert!(
+            matches!(e, VfsError::Unsupported(_)),
+            "expected Unsupported, got {e:?}"
+        );
     }
 }
 
@@ -207,7 +225,10 @@ async fn zip_fs_mkdir_is_unsupported() {
     let tf = make_test_zip();
     let z = ZipFs::open(tf.path().to_path_buf()).expect("open valid zip");
     let path = VfsPath::parse("zip:///newdir").unwrap();
-    let err = z.mkdir(&path, false).await.expect_err("must be Unsupported");
+    let err = z
+        .mkdir(&path, false)
+        .await
+        .expect_err("must be Unsupported");
     assert!(matches!(err, VfsError::Unsupported(_)));
 }
 
