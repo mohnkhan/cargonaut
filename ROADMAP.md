@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-19 (Feature 054 closed #44 — persistent subshell Ctrl-o; opened #79 — scrollback render follow-up).
+**Last updated**: 2026-06-19 (Feature 055 closed #79 — subshell scrollback render; #40 F4 editor is the next active work item).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,7 +42,9 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#79](https://github.com/mohnkhan/cargonaut/issues/79) | Subshell scrollback rendering: wire scroll_offset into render | S–M | Feature 054 US2 follow-up — scroll_offset tracked; render always starts at row 0 |
+| _(none — Tier 3 is clear)_ | | | |
+
+> ✅ **Resolved**: [#79](https://github.com/mohnkhan/cargonaut/issues/79) (subshell scrollback rendering) shipped in **Feature 055** (`055-subshell-scrollback`). `scroll_offset` is now wired into `render_vt100_screen` via `Screen::set_scrollback()`; scroll direction inversion fixed; cursor hidden in scrollback mode; `scroll_offset` reset on resize.
 
 ---
 
