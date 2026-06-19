@@ -35,6 +35,6 @@ pub use traits::{ByteRange, VfsBackend, VfsCaps, WriteMode};
 pub use types::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsPath};
 
 #[cfg(feature = "archives")]
-pub use archive::{TarFs, ZipFs};
+pub use archive::{TarCompression, TarFs, ZipFs};
 #[cfg(feature = "remote")]
 pub use remote::{FtpFs, SftpFs};

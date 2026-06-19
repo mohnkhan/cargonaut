@@ -16,4 +16,4 @@ pub mod zip_fs;
 pub mod tar_fs;
 
 pub use zip_fs::ZipFs;
-pub use tar_fs::TarFs;
+pub use tar_fs::{TarCompression, TarFs};
