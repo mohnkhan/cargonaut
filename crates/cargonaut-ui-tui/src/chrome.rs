@@ -703,4 +703,41 @@ mod tests {
         assert_eq!(perms_string(0o755, &VfsKind::Dir), "drwxr-xr-x");
         assert_eq!(perms_string(0o644, &VfsKind::File), "-rw-r--r--");
     }
+
+    // T016a [US1] (red): pane_header_title for zip:// backend shows full URI.
+    // Fails because pane_header_title does not exist yet.
+    #[test]
+    fn pane_header_title_zip_shows_full_display_string() {
+        use cargonaut_vfs::ZipFs;
+        use std::io::Write;
+        // Minimal valid ZIP (just an EOCD record — 0 entries).
+        let tf = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut f = tf.reopen().unwrap();
+            f.write_all(&[
+                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]).unwrap();
+        }
+        let zip_fs = ZipFs::open(tf.path().to_path_buf()).unwrap();
+        let cwd = VfsPath::parse("zip:///tmp%2Ftest.zip").unwrap();
+        let state = PaneState {
+            cwd: cwd.clone(),
+            listing: DirListing { entries: vec![], sort: Sort::NameAsc },
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden: false,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: vec![],
+            dir_history_fwd: vec![],
+            backend: Arc::new(zip_fs),
+        };
+        let title = pane_header_title(&state);
+        assert!(
+            title.contains(&cwd.display()),
+            "zip pane header must contain full URI; got: {title:?}"
+        );
+    }
 }
