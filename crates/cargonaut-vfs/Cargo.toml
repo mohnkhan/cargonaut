@@ -6,6 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 description = "VFS trait + local-filesystem backend for Cargonaut."
 
+[features]
+## Archive backends: ZipFs (zip://) and TarFs (tar://). Default-enabled so the
+## out-of-the-box binary supports browsing ZIP and TAR archives.
+archives = ["dep:zip", "dep:tar", "dep:flate2", "dep:bzip2", "dep:xz2"]
+## Remote backends: SftpFs (sftp://) and FtpFs (ftp://). Default-enabled so
+## the out-of-the-box binary supports SFTP and FTP connections.
+remote = ["dep:russh", "dep:russh-sftp", "dep:suppaftp"]
+## Both features enabled by default so `cargonaut` is full-featured without
+## any cargo flag.
+default = ["archives", "remote"]
+
 [dependencies]
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["compat"] }
@@ -17,6 +28,19 @@ thiserror = { workspace = true }
 futures = { workspace = true }
 bitflags = { workspace = true }
 nix = { workspace = true }
+tracing = { workspace = true }
+
+# Archives feature deps
+zip = { version = "2", optional = true }
+tar = { version = "0.4", optional = true }
+flate2 = { version = "1.1", optional = true }
+bzip2 = { version = "0.6", optional = true }
+xz2 = { version = "0.1", optional = true }
+
+# Remote feature deps
+russh = { version = "0.61", features = ["aws-lc-rs"], optional = true }
+russh-sftp = { version = "2.1", optional = true }
+suppaftp = { version = "8", features = ["tokio"], optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

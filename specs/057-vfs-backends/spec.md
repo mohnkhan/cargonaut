@@ -107,7 +107,7 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 ### Edge Cases
 
 - What happens when an archive entry has a path with `..` traversal components? → Entry is silently skipped (logged at debug); no directory traversal outside the archive.
-- What happens when an archive exceeds available RAM for the in-memory listing cache? → The listing is built lazily in chunks up to a configurable cap (default 50 000 entries); excess entries are omitted and a warning banner is shown.
+- What happens when an archive exceeds available RAM for the in-memory listing cache? → **DEFERRED**: A configurable entry cap (default 50 000 entries) with a warning banner for excess entries is the target behaviour, but is explicitly out of scope for this feature. The current implementation loads all entries unconditionally; archives with entry counts causing OOM will fail at the OS level. A follow-up issue + ROADMAP row must be created to track the cap implementation (see analysis finding M2).
 - What happens when an SFTP server sends an unknown file type (device node, FIFO)? → Reported as `VfsKind::Other`; copy/delete operations on it return `VfsError::Unsupported`.
 - What happens when the user presses Backspace at the root of an archive? → The pane returns to the parent local directory that contained the archive file.
 - What happens when both panes are on the same SFTP host? → The transfer uses `rename` (atomic, within same authority) if source and destination are on the same path prefix; otherwise falls back to read+write.
@@ -170,13 +170,13 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 
 - **FR-028**: All backend errors (corrupt archive, auth failure, connection drop, permission denied) MUST be surfaced as dismissible error banners in the affected pane; no operation may result in an application panic or a silent empty listing for an error condition.
 
-**Observability**
-
-- **FR-030**: SFTP and FTP backends MUST emit `tracing` events at `INFO` level on successful connection and at `WARN` level on authentication failure, transport error, reconnect attempt, and disconnection. These events MUST be captured by the app's existing log subscriber and written to `~/.local/share/cargonaut/debug.log`.
-
 **Transfer engine integration**
 
 - **FR-029**: The transfer engine MUST accept `(src: VfsPath, src_backend: Arc<dyn VfsBackend>, dst: VfsPath, dst_backend: Arc<dyn VfsBackend>)` and execute the copy via `read_stream` + `write_stream` regardless of whether the backends are the same type or different.
+
+**Observability**
+
+- **FR-030**: SFTP and FTP backends MUST emit `tracing` events at `INFO` level on successful connection and at `WARN` level on authentication failure, transport error, reconnect attempt, and disconnection. These events MUST be captured by the app's existing log subscriber and written to `~/.local/share/cargonaut/debug.log`. **SECURITY NOTE**: tracing events MUST NOT include credential values (passwords, private key material) — use `user@host` identifiers only (per Constitution §Dev Workflow).
 
 ### Key Entities
 
@@ -204,6 +204,7 @@ Internally, every pane knows which backend it is on. Transfers between any two p
 ## Assumptions
 
 - Archive files are accessible on the local filesystem at the time of mounting; network-mounted archives are not a supported scenario for this feature.
+- **Archive entry count is unbounded in this feature**: the in-memory entry index loads all entries without a cap. Large archives (>50 000 entries) that exhaust RAM will fail at the OS level. A configurable cap with a warning banner is explicitly deferred — a GitHub issue + ROADMAP row must be created before PR merge to track this (CLAUDE.md §Deferrals).
 - SFTP servers support SFTPv3 or later; servers advertising only SFTPv1/v2 may have degraded capability (no symlink support).
 - FTP servers are reachable on a non-TLS plain connection; FTPS (FTP-over-TLS) is out of scope and deferred.
 - SSH host-key verification uses the system `~/.ssh/known_hosts`; unknown host keys prompt the user with an accept/reject dialog (a UI-layer concern; the backend returns `VfsError::AuthFailed` if the key is rejected).
