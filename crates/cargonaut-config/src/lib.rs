@@ -1237,4 +1237,11 @@ only_if = "test -d {path}"
             "unknown keys should be rejected by deny_unknown_fields"
         );
     }
+
+    // ===== Feature 054: persistent subshell config =====
+
+    #[test]
+    fn subshell_height_pct_defaults_to_33() {
+        assert_eq!(Config::default().ui.subshell_height_pct, 33);
+    }
 }
