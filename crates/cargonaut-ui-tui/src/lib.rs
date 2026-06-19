@@ -122,6 +122,12 @@ struct UiState {
     /// Set by handle_key on FindOutcome::Panelize; applied in run_loop
     /// which owns the PaneViews.
     pending_panelize: Option<(Vec<std::path::PathBuf>, String)>,
+    /// Feature 054 — persistent subshell panel.
+    subshell: Option<subshell::SubshellState>,
+    /// Feature 054 — current Ctrl-o cycle phase.
+    subshell_phase: subshell::SubshellPhase,
+    /// Feature 054 — debounce: tracks when Ctrl-o was last processed.
+    last_ctrl_o_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug)]
@@ -252,6 +258,9 @@ async fn run_loop<B: ratatui::backend::Backend>(
         pending_external: None,
         find_label: None,
         pending_panelize: None,
+        subshell: None,
+        subshell_phase: subshell::SubshellPhase::default(),
+        last_ctrl_o_at: None,
     };
 
     // US1 (FR-001/005/006): resolve the configured theme once. An unknown
@@ -2683,6 +2692,9 @@ mod tests {
             pending_external: None,
             find_label: None,
             pending_panelize: None,
+            subshell: None,
+            subshell_phase: subshell::SubshellPhase::default(),
+            last_ctrl_o_at: None,
         }
     }
 
@@ -4976,5 +4988,15 @@ mod tests {
             subshell: None,
         };
         assert!(layout.subshell.is_none());
+    }
+
+    // T015b (red → green): debounce guard ignores Ctrl-o fired within 50 ms.
+    #[test]
+    fn ctrl_o_debounce_ignores_rapid_press() {
+        let mut ui = fresh_ui(Rect::default(), Rect::default(), false);
+        // First call: no prior timestamp — must NOT skip.
+        assert!(!ui.ctrl_o_should_skip(), "first press should not be skipped");
+        // Second call immediately after: must skip (elapsed < 50 ms).
+        assert!(ui.ctrl_o_should_skip(), "rapid second press must be skipped");
     }
 }
