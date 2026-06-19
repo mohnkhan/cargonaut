@@ -5384,4 +5384,44 @@ mod tests {
         assert_eq!(e.label, "foo");
         assert!(e.is_active);
     }
+
+    // ===== Feature 053: T006 (red) — tab command dispatch compile-fail tests =====
+    // These tests reference Command::TabNew, TabClose, TabNext, TabPrev which do not
+    // yet exist. Compile error IS the red state per Constitution §II.
+
+    #[tokio::test]
+    async fn tab_new_dispatch_returns_ok() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let result = app.dispatch(Command::TabNew).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn tab_close_dispatch_returns_ok() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let result = app.dispatch(Command::TabClose).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn tab_next_dispatch_returns_ok() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let result = app.dispatch(Command::TabNext).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn tab_prev_dispatch_returns_ok() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let result = app.dispatch(Command::TabPrev).await;
+        assert!(result.is_ok());
+    }
 }
