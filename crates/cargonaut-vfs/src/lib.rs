@@ -37,4 +37,45 @@ pub use types::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsP
 #[cfg(feature = "archives")]
 pub use archive::{TarCompression, TarFs, ZipFs};
 #[cfg(feature = "remote")]
-pub use remote::{FtpFs, SftpFs};
+pub use remote::{FtpFs, HostKeyEvent, SftpCredentials, SftpFs, SftpOps};
+
+/// SFTP-specific items, including test helpers.
+#[cfg(feature = "remote")]
+pub mod sftp {
+    pub use crate::remote::sftp_fs::{HostKeyEvent, SftpCredentials, SftpFs, SftpOps};
+
+    /// Test helpers for asserting SFTP security properties (e.g. credential
+    /// redaction in log output).
+    pub mod testing {
+        use std::io;
+        use std::sync::{Arc, Mutex};
+
+        /// A writer that captures formatted log lines into a shared `Vec<String>`
+        /// for assertions in tests.
+        pub struct CaptureWriter {
+            captured: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl CaptureWriter {
+            /// Create a new writer that appends to `captured`.
+            pub fn new(captured: Arc<Mutex<Vec<String>>>) -> Self {
+                Self { captured }
+            }
+        }
+
+        impl io::Write for CaptureWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if let Ok(s) = std::str::from_utf8(buf) {
+                    if let Ok(mut guard) = self.captured.lock() {
+                        guard.push(s.to_owned());
+                    }
+                }
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+    }
+}

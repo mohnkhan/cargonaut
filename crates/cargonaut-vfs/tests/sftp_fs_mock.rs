@@ -179,7 +179,7 @@ impl SftpOps for MockSftpOps {
         }
     }
 
-    async fn write_all(&self, _path: &str, _data: &[u8], _offset: u64) -> Result<(), VfsError> {
+    async fn write_all(&self, _path: &str, _data: &[u8], _offset: u64, _truncate: bool) -> Result<(), VfsError> {
         match &self.default_mutate {
             MockAction::Ok => Ok(()),
             MockAction::Fail(msg) => Err(VfsError::Other(msg.clone())),

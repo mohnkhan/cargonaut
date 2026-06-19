@@ -6,5 +6,5 @@
 pub mod sftp_fs;
 pub mod ftp_fs;
 
-pub use sftp_fs::SftpFs;
+pub use sftp_fs::{HostKeyEvent, SftpCredentials, SftpFs, SftpOps};
 pub use ftp_fs::FtpFs;

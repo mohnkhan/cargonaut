@@ -464,6 +464,7 @@ dependencies = [
  "cargonaut-core",
  "cargonaut-vfs",
  "crossterm 0.28.1",
+ "flate2",
  "futures",
  "globset",
  "humantime",
@@ -473,6 +474,7 @@ dependencies = [
  "shell-words",
  "smol_str",
  "strip-ansi-escapes",
+ "tar",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -504,6 +506,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "xz2",
  "zip",
 ]
