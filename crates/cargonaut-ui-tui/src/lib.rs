@@ -214,12 +214,28 @@ enum ActiveDialog {
     ///
     /// Shown when `SftpFs::connect` encounters an unknown server key.
     /// Accept adds the key to `~/.ssh/known_hosts`; Reject aborts.
-    /// Constructed by T028/T029 F2-Connect flow; suppressed until then.
     #[allow(dead_code)]
     HostKeyVerify {
         fingerprint: String,
         accept_tx: tokio::sync::oneshot::Sender<bool>,
     },
+    /// Feature 057 US3/US4 — "Connect SFTP…" / "Connect FTP…" URL prompt.
+    ///
+    /// Pre-filled with `sftp://user@host/` or `ftp://user@host/`.
+    /// On submit: parse URL, initiate connection, navigate pane.
+    #[allow(dead_code)]
+    RemoteConnect {
+        kind: RemoteKind,
+        widget: dialog::PathInputDialog,
+    },
+}
+
+/// Remote protocol kind for the "Connect…" dialog (Feature 057 US3/US4).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteKind {
+    Sftp,
+    Ftp,
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -1181,6 +1197,34 @@ async fn handle_key(
                         let _ = accept_tx.send(accepted);
                     }
                     *mode = Mode::Pane;
+                }
+                return Ok(true);
+            }
+            ActiveDialog::RemoteConnect { widget, kind } => {
+                use dialog::PathInputAction;
+                let kind = *kind;
+                match widget.handle_key(key.code) {
+                    PathInputAction::Cancel => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    PathInputAction::Submit(url) => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        // Show "Connecting…" banner; actual connection wired
+                        // in the polish phase (T034).
+                        *status = format!(
+                            "Connecting to {} ({})…",
+                            url,
+                            match kind {
+                                RemoteKind::Sftp => "SFTP",
+                                RemoteKind::Ftp => "FTP",
+                            }
+                        );
+                    }
+                    PathInputAction::Consumed
+                    | PathInputAction::Edited
+                    | PathInputAction::RequestCompletions { .. } => {}
                 }
                 return Ok(true);
             }
@@ -2957,6 +3001,10 @@ fn draw_frame(
                     tokio::sync::oneshot::channel::<bool>().0,
                 );
                 hkd.render(f, darea);
+            }
+            // Feature 057: remote-connect URL prompt — reuses PathInputDialog.
+            ActiveDialog::RemoteConnect { widget, .. } => {
+                widget.render(darea, f.buffer_mut(), theme);
             }
         }
     }

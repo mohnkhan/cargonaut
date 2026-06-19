@@ -134,7 +134,7 @@
 ### T028-T029: F2 "Connect SFTP…" + RemoteConnect dialog (FR-024..FR-027)
 
 - [X] T028 [US3] (red) Write failing test: dispatching `Command::ShowUserMenu` and selecting the "Connect SFTP…" built-in item opens `ActiveDialog::RemoteConnect { kind: Sftp, widget }` pre-filled with `sftp://user@host/`; submitting a valid URL initiates connection and navigates pane — in `crates/cargonaut-ui-tui/src/lib.rs` test module
-- [ ] T029 [US3] (green) Add `RemoteKind { Sftp, Ftp }` enum and `ActiveDialog::RemoteConnect { kind: RemoteKind, widget: PathInputDialog }` in `crates/cargonaut-ui-tui/src/lib.rs`; implement `RemoteConnectDialog` widget in `crates/cargonaut-ui-tui/src/dialog.rs`; add "Connect SFTP…" as a built-in item in the `ShowUserMenu` handler; on submit: parse URL, show "Connecting…" in pane header, call `SftpFs::connect`, `registry.register_remote`, `navigate_to`; on error: dismiss dialog, show error banner (FR-028)
+- [X] T029 [US3] (green) Add `RemoteKind { Sftp, Ftp }` enum and `ActiveDialog::RemoteConnect { kind: RemoteKind, widget: PathInputDialog }` in `crates/cargonaut-ui-tui/src/lib.rs`; implement `RemoteConnectDialog` widget in `crates/cargonaut-ui-tui/src/dialog.rs`; add "Connect SFTP…" as a built-in item in the `ShowUserMenu` handler; on submit: parse URL, show "Connecting…" in pane header, call `SftpFs::connect`, `registry.register_remote`, `navigate_to`; on error: dismiss dialog, show error banner (FR-028)
 
 **Checkpoint**: Binary connects to SFTP server, lists remote directory, copies files bidirectionally, shows host-key dialog on first connect. `cargo test --workspace` clean.
 
