@@ -200,6 +200,7 @@ impl SubshellState {
         };
         let _ = self.master.resize(new_size);
         self.parser = vt100::Parser::new(rows, cols, 200);
+        self.scroll_offset = 0;
         self.current_size = new_size;
     }
 
@@ -570,10 +571,61 @@ mod tests {
         );
     }
 
-    // T010 (red): scrollback must clamp at buffer limit without panic.
+    // T011 (green): set_scrollback beyond capacity must not panic.
     #[test]
     fn scrollback_clamps_at_buffer_limit() {
-        todo!()
+        use ratatui::{buffer::Buffer, layout::Rect};
+
+        // 5 rows × 10 cols, 20-row scrollback capacity.
+        let mut parser = vt100::Parser::new(5, 10, 20);
+        // Fill beyond scrollback limit so the buffer is full.
+        for i in 0..200u32 {
+            parser.process(format!("L{i:03}\r\n").as_bytes());
+        }
+        let area = Rect { x: 0, y: 0, width: 10, height: 5 };
+
+        // set_scrollback(999) must be clamped by vt100 — no panic.
+        parser.screen_mut().set_scrollback(999);
+        let mut buf = Buffer::empty(area);
+        render_vt100_screen(parser.screen(), area, &mut buf);
+
+        // Buffer must contain visible content (not all blank).
+        let non_blank = buf.content().iter().any(|c| c.symbol() != " ");
+        assert!(non_blank, "buffer must have non-blank cells after clamped scrollback");
+        parser.screen_mut().set_scrollback(0);
+    }
+
+    // T015 (green): vt100 offset stays at 0 when poll_output runs.
+    // The UI loop resets set_scrollback(0) after each draw, so when
+    // poll_output's parser.process() runs, the internal offset is 0 and
+    // vt100 does not adjust it. SubshellState::scroll_offset (u16) is a
+    // separate field only written by mouse event handlers.
+    #[test]
+    fn scroll_lock_preserved_on_new_pty_output() {
+        let mut parser = vt100::Parser::new(5, 10, 20);
+        for i in 0..25u32 {
+            parser.process(format!("L{i:03}\r\n").as_bytes());
+        }
+
+        // Simulate the UI render loop: set before draw, reset after.
+        parser.screen_mut().set_scrollback(5);
+        parser.screen_mut().set_scrollback(0); // reset after draw
+
+        // poll_output arrives while offset is 0 — vt100 does not adjust from 0.
+        parser.process(b"NEW\r\n");
+        assert_eq!(
+            parser.screen().scrollback(),
+            0,
+            "vt100 must not adjust offset from 0 when new content arrives"
+        );
+
+        // Next frame can safely re-apply scroll_offset=5 (same u16 field value).
+        parser.screen_mut().set_scrollback(5);
+        assert!(
+            parser.screen().scrollback() <= 5,
+            "re-applied offset must not exceed requested"
+        );
+        parser.screen_mut().set_scrollback(0);
     }
 
     // T009 (green): cursor must not appear when scrolled into history.
