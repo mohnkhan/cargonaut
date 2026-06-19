@@ -208,6 +208,11 @@ impl SubshellState {
         self.parser.screen()
     }
 
+    /// Mutably borrow the VT100 screen (needed to call set_scrollback before draw).
+    pub(crate) fn screen_mut(&mut self) -> &mut vt100::Screen {
+        self.parser.screen_mut()
+    }
+
     /// Drop the old PTY and spawn a fresh shell. Resets `dead` and `scroll_offset`.
     pub(crate) fn respawn(
         &mut self,
