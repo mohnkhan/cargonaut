@@ -5274,4 +5274,16 @@ mod tests {
             "rapid second press must be skipped"
         );
     }
+
+    // ---------- open_file_editor decline paths (Feature 056 — US3) ----------
+
+    #[tokio::test]
+    async fn open_file_editor_declines_binary() {
+        todo!()
+    }
+
+    #[tokio::test]
+    async fn open_file_editor_declines_too_large() {
+        todo!()
+    }
 }
