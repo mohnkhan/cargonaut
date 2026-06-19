@@ -2201,6 +2201,40 @@ impl App {
         Ok(vec![Event::PaneUpdated(self.active)])
     }
 
+    /// Return the view model for the tab bar of the given pane side.
+    ///
+    /// Each entry has a 1-based `index`, a `label` (basename of cwd, ≤20 UTF-8
+    /// chars), and `is_active` set for the currently focused tab.
+    pub fn tab_bar_view(&self, id: PaneId) -> Vec<TabBarEntry> {
+        let idx = pane_idx(id);
+        let s = &self.sides[idx];
+        s.tabs
+            .iter()
+            .enumerate()
+            .map(|(i, tab)| {
+                let raw_label = tab
+                    .cwd
+                    .segments
+                    .last()
+                    .map(|seg| seg.as_str())
+                    .unwrap_or("/")
+                    .to_owned();
+                let label = if raw_label.chars().count() > 20 {
+                    let mut truncated: String = raw_label.chars().take(19).collect();
+                    truncated.push('…');
+                    truncated
+                } else {
+                    raw_label
+                };
+                TabBarEntry {
+                    index: i + 1,
+                    label,
+                    is_active: i == s.active_tab,
+                }
+            })
+            .collect()
+    }
+
     pub async fn undo_last_operation(&mut self) -> Result<Vec<Event>, AppError> {
         let entry = match self.undo_log.take() {
             None => {
