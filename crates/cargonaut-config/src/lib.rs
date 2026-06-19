@@ -69,6 +69,15 @@ pub struct UiConfig {
     pub history: HistoryConfig,
     /// FR-405 listing-mode settings.
     pub listing: ListingConfig,
+    /// FR-013 (Feature 054). Subshell panel height as a percentage of
+    /// content-area rows. Valid range 10–60; values outside are clamped
+    /// at load time. Default 33 (lower third of screen).
+    #[serde(default = "subshell_height_pct_default")]
+    pub subshell_height_pct: u8,
+}
+
+fn subshell_height_pct_default() -> u8 {
+    33
 }
 
 impl Default for UiConfig {
@@ -86,6 +95,7 @@ impl Default for UiConfig {
             zoxide: ZoxideMode::Auto,
             history: HistoryConfig::default(),
             listing: ListingConfig::default(),
+            subshell_height_pct: subshell_height_pct_default(),
         }
     }
 }
@@ -481,7 +491,7 @@ impl Config {
             use figment::providers::{Format, Toml};
             fig = fig.merge(Toml::file(&path));
         }
-        with_env(fig).extract().map_err(figment_err)
+        with_env(fig).extract().map_err(figment_err).map(Config::normalize)
     }
 
     /// Load from the given TOML file path layered on defaults. **Does not**
@@ -493,6 +503,7 @@ impl Config {
             .merge(Toml::file(path))
             .extract()
             .map_err(figment_err)
+            .map(Config::normalize)
     }
 
     /// Load from a TOML string layered on defaults. **Does not** apply env
@@ -504,6 +515,7 @@ impl Config {
             .merge(Toml::string(toml_text))
             .extract()
             .map_err(figment_err)
+            .map(Config::normalize)
     }
 
     /// Same as [`Self::load_from_str`] but also applies `CARGONAUT_*` env
@@ -515,6 +527,7 @@ impl Config {
         with_env(base_figment().merge(Toml::string(toml_text)))
             .extract()
             .map_err(figment_err)
+            .map(Config::normalize)
     }
 
     /// Render the JSON Schema for [`Config`] as a pretty-printed JSON string.
@@ -523,6 +536,12 @@ impl Config {
     pub fn json_schema_pretty() -> String {
         let schema = schemars::schema_for!(Config);
         serde_json::to_string_pretty(&schema).expect("schemars output is always valid JSON")
+    }
+
+    /// Post-load normalization: clamps fields that have valid ranges.
+    fn normalize(mut self) -> Self {
+        self.ui.subshell_height_pct = self.ui.subshell_height_pct.clamp(10, 60);
+        self
     }
 }
 
@@ -1243,5 +1262,19 @@ only_if = "test -d {path}"
     #[test]
     fn subshell_height_pct_defaults_to_33() {
         assert_eq!(Config::default().ui.subshell_height_pct, 33);
+    }
+
+    #[test]
+    fn subshell_height_pct_clamped_below_10() {
+        let toml_text = "[ui]\nsubshell_height_pct = 5\n";
+        let c = Config::load_from_str(toml_text).unwrap();
+        assert_eq!(c.ui.subshell_height_pct, 10);
+    }
+
+    #[test]
+    fn subshell_height_pct_clamped_above_60() {
+        let toml_text = "[ui]\nsubshell_height_pct = 80\n";
+        let c = Config::load_from_str(toml_text).unwrap();
+        assert_eq!(c.ui.subshell_height_pct, 60);
     }
 }
