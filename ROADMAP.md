@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-19 (Feature 055 closed #79 — subshell scrollback render; #40 F4 editor is the next active work item).
+**Last updated**: 2026-06-19 (Feature 056 closed #40 — built-in F4 text editor).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -55,7 +55,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
 | ~~[#39](https://github.com/mohnkhan/cargonaut/issues/39)~~ | ~~Internal file viewer F3 (text + hex + search)~~ | ~~L~~ | **Closed — Feature 051** |
-| [#40](https://github.com/mohnkhan/cargonaut/issues/40) | Internal full-screen editor F4 | XL | Feature 031 — F4 `$EDITOR` shell-out ships |
+| ~~[#40](https://github.com/mohnkhan/cargonaut/issues/40)~~ | ~~Internal full-screen editor F4~~ | ~~XL~~ | **Closed — Feature 056** |
 | ~~[#41](https://github.com/mohnkhan/cargonaut/issues/41)~~ | ~~Find-file (name + content) + external panelize~~ | ~~L~~ | **Closed — Feature 052** |
 | ~~[#43](https://github.com/mohnkhan/cargonaut/issues/43)~~ | ~~Compare directories + diff two tagged files~~ | ~~M~~ | **Closed — Feature 049** |
 | ~~[#44](https://github.com/mohnkhan/cargonaut/issues/44)~~ | ~~Persistent subshell integration (Ctrl-o)~~ | ~~L~~ | **Closed — Feature 054** |
