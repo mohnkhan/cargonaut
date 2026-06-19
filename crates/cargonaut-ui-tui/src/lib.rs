@@ -300,6 +300,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
     let mut active_dialog: Option<ActiveDialog> = None;
     let mut chord_buf: Vec<KeyChord> = Vec::new();
     let mut quit = false;
+    // Feature 054 (T022): track the last cwd we synced to the subshell.
+    let mut last_synced_cwd: Option<std::path::PathBuf> = None;
 
     // Feature 037: on launch, offer to resume any interrupted transfers
     // whose checkpoints survive in the pane directories. A scan failure is
@@ -324,6 +326,22 @@ async fn run_loop<B: ratatui::backend::Backend>(
         left.sync_from(app.pane(PaneId::Left));
         right.sync_from(app.pane(PaneId::Right));
         let active = app.active_pane();
+
+        // Feature 054 (T022-T025): cwd-sync to subshell on every loop iteration.
+        // Fire when the active pane's cwd changes, regardless of panel visibility
+        // (hidden subshell still receives the `cd` so it lands in the right dir
+        // when the panel is opened). Edge case T025: walk ancestors if path gone.
+        {
+            let active_cwd_vfs = &app.pane(active).cwd;
+            let active_cwd = vfs_path_to_local(active_cwd_vfs);
+            let changed = last_synced_cwd.as_ref().map_or(true, |prev| *prev != active_cwd);
+            if changed {
+                if let Some(s) = ui.subshell.as_mut() {
+                    s.sync_cwd(&active_cwd);
+                }
+                last_synced_cwd = Some(active_cwd);
+            }
+        }
 
         // Feature 052: if find_label is set, keep the synthetic listing by NOT
         // overwriting it with sync_from's fresh directory listing. sync_from is
