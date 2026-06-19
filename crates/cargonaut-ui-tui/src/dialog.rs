@@ -1181,6 +1181,13 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
         ],
     },
     HelpSection {
+        title: "Find File",
+        rows: &[HelpRow {
+            key: "M-?",
+            desc: "Find file by name glob or ripgrep content search, then panelize (find-file-popup)",
+        }],
+    },
+    HelpSection {
         title: "Orthodox-FM Compat (mc_keys=true)",
         rows: &[
             HelpRow {

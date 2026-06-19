@@ -406,3 +406,9 @@ action = "open-menu-bar"  # FR-404
 mode = "pane"
 key = "M-t"
 action = "cycle-listing-mode"  # FR-405
+
+# ── Find-file and panelize (Feature 052 — FR-001, issue #41) ─────────────────
+[[binding]]
+mode = "pane"
+key = "M-?"
+action = "find-file-popup"  # FR-001 (issue #41)

@@ -216,6 +216,9 @@ pub enum Command {
     ChmodRecursive,
     /// Recursively change ownership of a directory subtree (C-x O).
     ChownRecursive,
+    // Feature 052 — find-file and panelize
+    /// Open find-file overlay (Alt-?) — FR-001 (issue #41).
+    FindFilePopup,
 }
 
 // ============================================================
