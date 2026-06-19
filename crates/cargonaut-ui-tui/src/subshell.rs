@@ -86,12 +86,7 @@ impl SubshellState {
     /// The shell binary is taken from `$SHELL` or falls back to `/bin/sh`.
     /// A `tokio::task::spawn_blocking` reader task sends byte chunks via
     /// the returned `mpsc::Receiver`; EOF sends an empty `Vec<u8>` sentinel.
-    pub(crate) fn spawn(
-        shell: &str,
-        cwd: &Path,
-        rows: u16,
-        cols: u16,
-    ) -> anyhow::Result<Self> {
+    pub(crate) fn spawn(shell: &str, cwd: &Path, rows: u16, cols: u16) -> anyhow::Result<Self> {
         use portable_pty::{CommandBuilder, NativePtySystem, PtySystem as _};
 
         let pty_system = NativePtySystem::default();
@@ -214,7 +209,13 @@ impl SubshellState {
     }
 
     /// Drop the old PTY and spawn a fresh shell. Resets `dead` and `scroll_offset`.
-    pub(crate) fn respawn(&mut self, shell: &str, cwd: &Path, rows: u16, cols: u16) -> anyhow::Result<()> {
+    pub(crate) fn respawn(
+        &mut self,
+        shell: &str,
+        cwd: &Path,
+        rows: u16,
+        cols: u16,
+    ) -> anyhow::Result<()> {
         let fresh = Self::spawn(shell, cwd, rows, cols)?;
         self.master = fresh.master;
         self.writer = fresh.writer;
@@ -236,10 +237,7 @@ impl SubshellState {
 /// `app_cursor` reflects `parser.screen().application_cursor()`: when true,
 /// arrow keys use the application-cursor escape sequences (`\x1bOx`) rather
 /// than the normal ANSI sequences (`\x1b[x`).
-pub(crate) fn key_to_pty_bytes(
-    key: crossterm::event::KeyEvent,
-    app_cursor: bool,
-) -> Vec<u8> {
+pub(crate) fn key_to_pty_bytes(key: crossterm::event::KeyEvent, app_cursor: bool) -> Vec<u8> {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -350,7 +348,7 @@ pub(crate) fn render_vt100_screen(
     area: ratatui::layout::Rect,
     buf: &mut ratatui::buffer::Buffer,
 ) {
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Modifier, Style};
 
     let rows = screen.size().0;
     let cols = screen.size().1;
@@ -370,10 +368,18 @@ pub(crate) fn render_vt100_screen(
                 let bg = vt100_color_to_ratatui(cell.bgcolor());
 
                 let mut mods = Modifier::empty();
-                if cell.bold() { mods |= Modifier::BOLD; }
-                if cell.italic() { mods |= Modifier::ITALIC; }
-                if cell.underline() { mods |= Modifier::UNDERLINED; }
-                if cell.inverse() { mods |= Modifier::REVERSED; }
+                if cell.bold() {
+                    mods |= Modifier::BOLD;
+                }
+                if cell.italic() {
+                    mods |= Modifier::ITALIC;
+                }
+                if cell.underline() {
+                    mods |= Modifier::UNDERLINED;
+                }
+                if cell.inverse() {
+                    mods |= Modifier::REVERSED;
+                }
 
                 let style = Style::default().fg(fg).bg(bg).add_modifier(mods);
                 let buf_cell = buf.get_mut(buf_x, buf_y);
@@ -428,7 +434,10 @@ mod tests {
     // T010 (green): three-state cycle advance tests.
     #[test]
     fn advance_hidden_to_visible_fm_focus() {
-        assert_eq!(SubshellPhase::Hidden.advance(), SubshellPhase::VisibleFmFocus);
+        assert_eq!(
+            SubshellPhase::Hidden.advance(),
+            SubshellPhase::VisibleFmFocus
+        );
     }
 
     #[test]
@@ -504,7 +513,10 @@ mod tests {
     #[test]
     fn find_valid_ancestor_returns_existing() {
         let existing = std::path::Path::new("/tmp");
-        assert_eq!(find_valid_ancestor(existing), std::path::PathBuf::from("/tmp"));
+        assert_eq!(
+            find_valid_ancestor(existing),
+            std::path::PathBuf::from("/tmp")
+        );
     }
 
     #[test]

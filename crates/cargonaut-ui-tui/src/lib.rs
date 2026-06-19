@@ -334,7 +334,9 @@ async fn run_loop<B: ratatui::backend::Backend>(
         {
             let active_cwd_vfs = &app.pane(active).cwd;
             let active_cwd = vfs_path_to_local(active_cwd_vfs);
-            let changed = last_synced_cwd.as_ref().map_or(true, |prev| *prev != active_cwd);
+            let changed = last_synced_cwd
+                .as_ref()
+                .map_or(true, |prev| *prev != active_cwd);
             if changed {
                 if let Some(s) = ui.subshell.as_mut() {
                     s.sync_cwd(&active_cwd);
@@ -400,7 +402,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let mouse_captured = ui.mouse_enabled;
         // Feature 054: compute all subshell parameters before splitting ui borrows.
         let subshell_phase = ui.subshell_phase;
-        let subshell_dead = ui.subshell.as_ref().map_or(false, |s| s.dead);
+        let subshell_dead = ui.subshell.as_ref().is_some_and(|s| s.dead);
         let content_h = ui.layout.left.height;
         let height_pct = app.config().ui.subshell_height_pct;
         let subshell_rows: u16 = if content_h > 4 {
@@ -412,8 +414,7 @@ async fn run_loop<B: ratatui::backend::Backend>(
         };
         // Extract screen ref before split-borrows: NLL treats ui.subshell and
         // ui.menu / ui.fkeybar as disjoint field borrows.
-        let subshell_screen: Option<&vt100::Screen> =
-            ui.subshell.as_ref().map(|s| s.screen());
+        let subshell_screen: Option<&vt100::Screen> = ui.subshell.as_ref().map(|s| s.screen());
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
         let help_overlay = ui.help_overlay.as_ref().cloned();
@@ -1166,7 +1167,8 @@ async fn dispatch_ui_command(
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
                 let height_pct = app.config().ui.subshell_height_pct;
                 let panel_rows = ((content_height as u32 * height_pct as u32) / 100)
-                    .clamp(3, content_height.saturating_sub(5) as u32) as u16;
+                    .clamp(3, content_height.saturating_sub(5) as u32)
+                    as u16;
                 let cols = ui.layout.left.width + ui.layout.right.width;
                 let cols = if cols == 0 { 80 } else { cols };
                 let panel_rows = if panel_rows == 0 { 10 } else { panel_rows };
@@ -1177,15 +1179,13 @@ async fn dispatch_ui_command(
                             return Ok(());
                         }
                     }
-                    None => {
-                        match subshell::SubshellState::spawn(&shell, &cwd, panel_rows, cols) {
-                            Ok(s) => ui.subshell = Some(s),
-                            Err(e) => {
-                                *status = format!("Subshell spawn failed: {e}");
-                                return Ok(());
-                            }
+                    None => match subshell::SubshellState::spawn(&shell, &cwd, panel_rows, cols) {
+                        Ok(s) => ui.subshell = Some(s),
+                        Err(e) => {
+                            *status = format!("Subshell spawn failed: {e}");
+                            return Ok(());
                         }
-                    }
+                    },
                     Some(_) => {} // alive and hidden — just show it
                 }
             }
@@ -2503,11 +2503,11 @@ fn draw_frame(
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),              // menu bar
-                Constraint::Min(3),                 // panes
-                Constraint::Length(subshell_rows),  // subshell panel
-                Constraint::Length(1),              // status
-                Constraint::Length(1),              // function-key bar
+                Constraint::Length(1),             // menu bar
+                Constraint::Min(3),                // panes
+                Constraint::Length(subshell_rows), // subshell panel
+                Constraint::Length(1),             // status
+                Constraint::Length(1),             // function-key bar
             ])
             .split(area)
     } else {
@@ -2585,10 +2585,12 @@ fn draw_frame(
             _ => "",
         };
         Paragraph::new(format!(" [Shell] {phase_label}"))
-            .style(ratatui::style::Style::default()
-                .fg(theme.menu_fg)
-                .bg(theme.menu_bg)
-                .add_modifier(ratatui::style::Modifier::BOLD))
+            .style(
+                ratatui::style::Style::default()
+                    .fg(theme.menu_fg)
+                    .bg(theme.menu_bg)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )
             .render(header_rect, f.buffer_mut());
         if subshell_dead {
             Paragraph::new(" Shell exited — press Ctrl-o to restart")
@@ -5251,8 +5253,14 @@ mod tests {
     fn ctrl_o_debounce_ignores_rapid_press() {
         let mut ui = fresh_ui(Rect::default(), Rect::default(), false);
         // First call: no prior timestamp — must NOT skip.
-        assert!(!ui.ctrl_o_should_skip(), "first press should not be skipped");
+        assert!(
+            !ui.ctrl_o_should_skip(),
+            "first press should not be skipped"
+        );
         // Second call immediately after: must skip (elapsed < 50 ms).
-        assert!(ui.ctrl_o_should_skip(), "rapid second press must be skipped");
+        assert!(
+            ui.ctrl_o_should_skip(),
+            "rapid second press must be skipped"
+        );
     }
 }
