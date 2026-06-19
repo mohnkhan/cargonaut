@@ -1478,6 +1478,27 @@ impl App {
 
     async fn ascend_to_parent(&mut self) -> Result<Vec<Event>, AppError> {
         let id = self.active;
+
+        // FR-023: if we are at the root of a non-local backend (empty segments),
+        // pop out to the local parent directory of the archive / remote root.
+        let at_nonlocal_root = {
+            let p = self.pane(id);
+            p.cwd.segments.is_empty() && p.backend.scheme() != "file"
+        };
+        if at_nonlocal_root {
+            let decoded = self.pane(id).cwd.decode_authority();
+            if let Some(host_path_str) = decoded {
+                let archive = std::path::Path::new(&host_path_str);
+                if let Some(local_parent) = archive.parent() {
+                    let url = format!("file://{}", local_parent.display());
+                    if let Ok(local_vfs) = VfsPath::parse(&url) {
+                        return self.navigate_to(id, local_vfs, self.registry.local()).await;
+                    }
+                }
+            }
+            return Ok(vec![Event::Status("Already at root".into())]);
+        }
+
         let Some(parent) = self.pane(id).cwd.parent() else {
             return Ok(vec![Event::Status("Already at root".into())]);
         };
