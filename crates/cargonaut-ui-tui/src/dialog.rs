@@ -5175,4 +5175,89 @@ mod tests {
         );
     }
 
+    // ========================================================================
+    // Feature 052 T016+T017 (red→green) — cancel / abort tests
+    // ========================================================================
+
+    // T016a: cancel() resets state correctly.
+    #[tokio::test]
+    async fn cancel_resets_phase_and_clears_results() {
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..5usize {
+            std::fs::write(td.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.txt".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+
+        assert_eq!(d.phase, DialogPhase::Walking, "must be Walking after start_walk");
+        assert!(d.walk_rx.is_some(), "walk_rx must be Some while Walking");
+        assert!(d.abort_flag.is_some(), "abort_flag must be Some while Walking");
+
+        d.cancel();
+
+        assert_eq!(d.phase, DialogPhase::InputFocused, "cancel must reset to InputFocused");
+        assert!(d.walk_rx.is_none(), "walk_rx must be None after cancel");
+        assert!(d.results.is_empty(), "results must be cleared after cancel");
+    }
+
+    // T016b: SC-006 abort timing — walk aborted within 300ms.
+    #[tokio::test]
+    async fn cancel_aborts_walk_within_300ms() {
+        let td = tempfile::TempDir::new().unwrap();
+        // Create 10 files; each takes 50ms sleep in the delayed walk.
+        // Total: 500ms without abort. We cancel after ~10ms → well under 300ms.
+        for i in 0..10usize {
+            std::fs::write(td.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.txt".to_string();
+
+        d.start_walk_with_delay(
+            td.path().to_path_buf(),
+            &config,
+            std::time::Duration::from_millis(50),
+        );
+
+        let t0 = std::time::Instant::now();
+        d.cancel();
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(300),
+            "SC-006: cancel must return in <300ms; took {elapsed:?}"
+        );
+        assert_eq!(d.phase, DialogPhase::InputFocused);
+    }
+
+    // ========================================================================
+    // Feature 052 T018+T019 (red→green) — Esc does not set find_label
+    // These test the dialog-level behavior. The lib.rs-level T018 tests
+    // are in lib.rs.
+    // ========================================================================
+
+    #[test]
+    fn esc_returns_cancelled_outcome() {
+        let mut d = FindFileDialog::new(false);
+        let outcome = d.handle_key(KeyCode::Esc, &cargonaut_config::Config::default());
+        assert!(
+            matches!(outcome, FindOutcome::Cancelled),
+            "Esc must return Cancelled outcome"
+        );
+    }
+
+    #[test]
+    fn cancelled_outcome_does_not_set_panelize() {
+        let mut d = FindFileDialog::new(false);
+        d.results = vec![std::path::PathBuf::from("/tmp/foo.toml")];
+        d.phase = DialogPhase::ResultsFocused;
+        let outcome = d.handle_key(KeyCode::Esc, &cargonaut_config::Config::default());
+        assert!(
+            matches!(outcome, FindOutcome::Cancelled),
+            "Esc from ResultsFocused must return Cancelled, not Panelize"
+        );
+    }
+
 }

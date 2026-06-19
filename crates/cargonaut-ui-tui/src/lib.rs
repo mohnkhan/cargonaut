@@ -4484,4 +4484,68 @@ mod tests {
         )
         .await;
     }
+
+    // ======================================================================
+    // Feature 052 T018+T019 (red→green) — Esc from FindFile does not panelize
+    // ======================================================================
+
+    // T018: After Esc from FindFile dialog, find_label is NOT set.
+    #[tokio::test]
+    async fn esc_from_find_dialog_does_not_set_find_label() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect { x: 0, y: 1, width: 40, height: 22 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut status = String::new();
+        let mut quit = false;
+        let mut chord_buf = Vec::new();
+
+        // Open the dialog.
+        let mut dlg: Option<ActiveDialog> = None;
+        dispatch_ui_command(
+            Command::FindFilePopup,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(dlg, Some(ActiveDialog::FindFile { .. })));
+
+        // Press Esc.
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let esc_event = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::empty(),
+        );
+        handle_key(
+            esc_event,
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut chord_buf,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+
+        // T018: find_label must NOT be set after cancel.
+        assert!(
+            ui.find_label.is_none(),
+            "T018: Esc must not set find_label; got {:?}", ui.find_label
+        );
+        // T019: dialog must be dismissed.
+        assert!(
+            dlg.is_none(),
+            "T019: dialog must be None after Esc; got {dlg:?}"
+        );
+    }
 }
