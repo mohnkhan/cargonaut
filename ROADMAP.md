@@ -57,7 +57,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 | ~~[#41](https://github.com/mohnkhan/cargonaut/issues/41)~~ | ~~Find-file (name + content) + external panelize~~ | ~~L~~ | **Closed — Feature 052** |
 | ~~[#43](https://github.com/mohnkhan/cargonaut/issues/43)~~ | ~~Compare directories + diff two tagged files~~ | ~~M~~ | **Closed — Feature 049** |
 | [#44](https://github.com/mohnkhan/cargonaut/issues/44) | Persistent subshell integration (Ctrl-o) | L | Feature 031 §Out of Scope |
-| [#45](https://github.com/mohnkhan/cargonaut/issues/45) | Tabs: multiple panels per side | L | Feature 031 §Out of Scope |
+| ~~[#45](https://github.com/mohnkhan/cargonaut/issues/45)~~ | ~~Tabs: multiple panels per side~~ | ~~L~~ | **Closed — Feature 053** |
 | ~~[#47](https://github.com/mohnkhan/cargonaut/issues/47)~~ | ~~Bulk rename via editor + undo of file ops~~ | ~~M~~ | **Closed — Feature 050** |
 | [#48](https://github.com/mohnkhan/cargonaut/issues/48) | VFS backends: archives + remote (SFTP/FTP/sh) | XL | Feature 031 §Out of Scope — already Phase 2+ roadmapped |
 | ~~[#50](https://github.com/mohnkhan/cargonaut/issues/50)~~ | ~~User menu (F2) + hypertext help content~~ | ~~M~~ | **Closed — Feature 047** |
