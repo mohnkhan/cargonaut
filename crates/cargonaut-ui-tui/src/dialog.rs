@@ -5052,4 +5052,127 @@ mod tests {
         );
     }
 
+    // ========================================================================
+    // Feature 052 T012 (red→green) — start_walk content mode tests
+    // T013 implementation is in start_walk / spawn_content_walk (already impl).
+    // ========================================================================
+
+    // T012a: Basic content search — needle found in 1 of 2 files.
+    #[tokio::test]
+    async fn start_walk_content_mode_finds_needle() {
+        // Skip if rg is not available.
+        if !std::process::Command::new("rg")
+            .arg("--version")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            eprintln!("Skipping content search test: rg not found");
+            return;
+        }
+
+        let td = tempfile::TempDir::new().unwrap();
+        std::fs::write(td.path().join("match.txt"), b"needle in the haystack").unwrap();
+        std::fs::write(td.path().join("nomatch.txt"), b"nothing here").unwrap();
+
+        let mut config = cargonaut_config::Config::default();
+        config.search.ripgrep_path = "rg".to_string();
+
+        let mut d = FindFileDialog::new(true);
+        d.mode = SearchMode::Content;
+        d.input = "needle".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+
+        poll_until_done(&mut d, 30);
+
+        assert_eq!(
+            d.results.len(),
+            1,
+            "content search must find exactly 1 file; results={:?}", d.results
+        );
+        let result_name = d.results[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(result_name, "match.txt");
+    }
+
+    // T012b: Differential — compare start_walk Content results vs rg CLI output.
+    #[tokio::test]
+    async fn start_walk_content_mode_matches_rg_output() {
+        // Skip if rg is not available.
+        if !std::process::Command::new("rg")
+            .arg("--version")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            eprintln!("Skipping differential rg test: rg not found");
+            return;
+        }
+
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..5usize {
+            let content = if i % 2 == 0 { b"needle" as &[u8] } else { b"other" };
+            std::fs::write(td.path().join(format!("file{i}.txt")), content).unwrap();
+        }
+
+        let mut config = cargonaut_config::Config::default();
+        config.search.ripgrep_path = "rg".to_string();
+
+        // Get rg CLI output directly.
+        let rg_out = std::process::Command::new("rg")
+            .args([
+                "needle",
+                "--files-with-matches",
+                "--no-messages",
+                td.path().to_str().unwrap(),
+            ])
+            .output()
+            .expect("rg must run");
+        let mut rg_paths: Vec<String> = String::from_utf8_lossy(&rg_out.stdout)
+            .lines()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+            .collect();
+        rg_paths.sort();
+
+        // Get walk results.
+        let mut d = FindFileDialog::new(true);
+        d.mode = SearchMode::Content;
+        d.input = "needle".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 30);
+
+        let mut walk_paths: Vec<String> = d
+            .results
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        walk_paths.sort();
+
+        assert_eq!(
+            walk_paths, rg_paths,
+            "SC-003: start_walk Content mode must match rg output"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T014+T015 (red→green) — Tab toggle content unavailable
+    // ========================================================================
+
+    #[test]
+    fn tab_toggle_sets_notice_when_content_unavailable() {
+        let mut d = FindFileDialog::new(false);
+        assert!(!d.content_available, "content_available must be false");
+        d.handle_key(KeyCode::Tab, &cargonaut_config::Config::default());
+        assert_eq!(d.mode, SearchMode::Name, "mode must stay Name");
+        let notice = d.notice.as_deref().unwrap_or("");
+        assert!(
+            notice.contains("Content search unavailable"),
+            "notice must mention 'Content search unavailable'; got: {notice:?}"
+        );
+    }
+
 }
