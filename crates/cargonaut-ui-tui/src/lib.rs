@@ -210,6 +210,16 @@ enum ActiveDialog {
         /// The directory root the walk is anchored to.
         root: std::path::PathBuf,
     },
+    /// Feature 057 — SSH host-key verification prompt (US3).
+    ///
+    /// Shown when `SftpFs::connect` encounters an unknown server key.
+    /// Accept adds the key to `~/.ssh/known_hosts`; Reject aborts.
+    /// Constructed by T028/T029 F2-Connect flow; suppressed until then.
+    #[allow(dead_code)]
+    HostKeyVerify {
+        fingerprint: String,
+        accept_tx: tokio::sync::oneshot::Sender<bool>,
+    },
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -1153,6 +1163,24 @@ async fn handle_key(
                         ui.pending_panelize = Some((paths, pattern));
                     }
                     dialog::FindOutcome::Consumed => {}
+                }
+                return Ok(true);
+            }
+            ActiveDialog::HostKeyVerify { .. } => {
+                use crossterm::event::KeyCode;
+                let accept = match key.code {
+                    KeyCode::Enter | KeyCode::Char('a') | KeyCode::Char('y') => Some(true),
+                    KeyCode::Esc | KeyCode::Char('r') | KeyCode::Char('n') => Some(false),
+                    _ => None,
+                };
+                if let Some(accepted) = accept {
+                    // Take the dialog to gain ownership of accept_tx.
+                    if let Some(ActiveDialog::HostKeyVerify { accept_tx, .. }) =
+                        active_dialog.take()
+                    {
+                        let _ = accept_tx.send(accepted);
+                    }
+                    *mode = Mode::Pane;
                 }
                 return Ok(true);
             }
@@ -2921,6 +2949,15 @@ fn draw_frame(
             ActiveDialog::FileEditor { widget } => widget.render(area, f.buffer_mut(), theme),
             // Feature 052: find-file overlay — manages its own centering.
             ActiveDialog::FindFile { widget, .. } => widget.render(f, area, theme),
+            // Feature 057: host-key verification dialog — centred box.
+            ActiveDialog::HostKeyVerify { fingerprint, .. } => {
+                let hkd = dialog::HostKeyVerifyDialog::new(
+                    fingerprint.clone(),
+                    // Dummy sender for render-only path (real tx lives in enum).
+                    tokio::sync::oneshot::channel::<bool>().0,
+                );
+                hkd.render(f, darea);
+            }
         }
     }
 
@@ -5834,7 +5871,7 @@ mod tests {
     #[test]
     fn host_key_verify_widget_accept_sends_true() {
         // T027 green: dialog::HostKeyVerifyDialog must exist with an accept() method.
-        let (accept_tx, accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        let (accept_tx, mut accept_rx) = tokio::sync::oneshot::channel::<bool>();
         let mut widget = dialog::HostKeyVerifyDialog::new(
             "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
             accept_tx,
@@ -5847,7 +5884,7 @@ mod tests {
     #[test]
     fn host_key_verify_widget_reject_sends_false() {
         // T027 green: dialog::HostKeyVerifyDialog must exist with a reject() method.
-        let (accept_tx, accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        let (accept_tx, mut accept_rx) = tokio::sync::oneshot::channel::<bool>();
         let mut widget = dialog::HostKeyVerifyDialog::new(
             "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
             accept_tx,

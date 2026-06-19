@@ -6249,3 +6249,123 @@ mod tests {
         assert_eq!(result, Some(UnsavedChangesChoice::Cancel));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Feature 057 — HostKeyVerifyDialog
+// ---------------------------------------------------------------------------
+
+/// Modal dialog shown when the server's SSH host key is unknown.
+///
+/// Displays the SHA-256 fingerprint and two buttons: Accept (adds the key to
+/// `~/.ssh/known_hosts`) and Reject (aborts the connection).  The result is
+/// delivered over the oneshot channel from `cargonaut_vfs::HostKeyEvent`.
+pub struct HostKeyVerifyDialog {
+    fingerprint: String,
+    /// `None` after the user has acted (accept or reject).
+    accept_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    /// 0 = Accept focused, 1 = Reject focused.
+    focus: usize,
+}
+
+impl std::fmt::Debug for HostKeyVerifyDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostKeyVerifyDialog")
+            .field("fingerprint", &self.fingerprint)
+            .field("focus", &self.focus)
+            .finish_non_exhaustive()
+    }
+}
+
+impl HostKeyVerifyDialog {
+    /// Create a new dialog displaying `fingerprint`; the result is sent on `accept_tx`.
+    pub fn new(fingerprint: String, accept_tx: tokio::sync::oneshot::Sender<bool>) -> Self {
+        Self {
+            fingerprint,
+            accept_tx: Some(accept_tx),
+            focus: 0,
+        }
+    }
+
+    /// The SHA-256 fingerprint shown to the user.
+    pub fn fingerprint(&self) -> &str {
+        &self.fingerprint
+    }
+
+    /// Send `true` (accept) and consume the sender.
+    pub fn accept(&mut self) {
+        if let Some(tx) = self.accept_tx.take() {
+            let _ = tx.send(true);
+        }
+    }
+
+    /// Send `false` (reject) and consume the sender.
+    pub fn reject(&mut self) {
+        if let Some(tx) = self.accept_tx.take() {
+            let _ = tx.send(false);
+        }
+    }
+
+    /// Tab / arrow key cycles between Accept and Reject.
+    pub fn toggle_focus(&mut self) {
+        self.focus = 1 - self.focus;
+    }
+
+    /// Render the dialog into `area`.
+    pub fn render(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+        use ratatui::{
+            layout::{Constraint, Direction, Layout},
+            style::{Color, Modifier, Style},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+
+        let block = Block::default()
+            .title(" Unknown Host Key ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow));
+
+        let inner = block.inner(area);
+        f.render_widget(Clear, area);
+        f.render_widget(block, area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let msg = Paragraph::new(format!(
+            "The server's host key is not in known_hosts.\nFingerprint: {}",
+            self.fingerprint
+        ));
+        f.render_widget(msg, chunks[0]);
+
+        let accept_style = if self.focus == 0 {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        let reject_style = if self.focus == 1 {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Red)
+        };
+
+        f.render_widget(Paragraph::new("[ Accept ]").style(accept_style), chunks[2]);
+        f.render_widget(
+            Paragraph::new("[ Reject ]").style(reject_style),
+            chunks[3],
+        );
+    }
+}

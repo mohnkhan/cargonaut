@@ -128,8 +128,8 @@
 
 ### T026-T027: HostKeyVerify dialog (FR-014a)
 
-- [ ] T026 [US3] (red) Write failing test: `ActiveDialog::HostKeyVerify` renders a dialog showing the fingerprint string and two buttons Accept/Reject; pressing Enter on Accept sends `true` on the oneshot; pressing Esc or Reject sends `false` — in `crates/cargonaut-ui-tui/src/lib.rs` test module
-- [ ] T027 [US3] (green) Add `AppEvent::HostKeyVerification { fingerprint: String, accept_tx: oneshot::Sender<bool> }` to `cargonaut-core`; add `ActiveDialog::HostKeyVerify { fingerprint: String, accept_tx: ... }` variant to enum in `crates/cargonaut-ui-tui/src/lib.rs`; implement `HostKeyVerifyDialog` widget in `crates/cargonaut-ui-tui/src/dialog.rs` (two-button Accept/Reject layout); wire event dispatch in `handle_dialog_key`
+- [X] T026 [US3] (red) Write failing test: `ActiveDialog::HostKeyVerify` renders a dialog showing the fingerprint string and two buttons Accept/Reject; pressing Enter on Accept sends `true` on the oneshot; pressing Esc or Reject sends `false` — in `crates/cargonaut-ui-tui/src/lib.rs` test module
+- [X] T027 [US3] (green) Add `AppEvent::HostKeyVerification { fingerprint: String, accept_tx: oneshot::Sender<bool> }` to `cargonaut-core`; add `ActiveDialog::HostKeyVerify { fingerprint: String, accept_tx: ... }` variant to enum in `crates/cargonaut-ui-tui/src/lib.rs`; implement `HostKeyVerifyDialog` widget in `crates/cargonaut-ui-tui/src/dialog.rs` (two-button Accept/Reject layout); wire event dispatch in `handle_dialog_key`
 
 ### T028-T029: F2 "Connect SFTP…" + RemoteConnect dialog (FR-024..FR-027)
 
