@@ -2464,7 +2464,11 @@ fn tab_bar_line<'a>(
         }
         let entry_start = x - scroll_offset as isize;
         if entry_start < width as isize && entry_start + text.len() as isize > 0 {
-            let style = if e.is_active { active_style } else { inactive_style };
+            let style = if e.is_active {
+                active_style
+            } else {
+                inactive_style
+            };
             spans.push(Span::styled(text.clone(), style));
         }
         x += text.len() as isize;
@@ -2490,7 +2494,11 @@ fn draw_pane(
     // Feature 053: 3-constraint split — tab bar (1 row) + list+border + mini-status (1 row).
     let col = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(2), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(1),
+        ])
         .split(area);
     // Render tab bar in col[0].
     let tbl = tab_bar_line(tab_bar, col[0].width, theme);
@@ -4745,34 +4753,158 @@ mod tests {
         );
     }
 
+    // ===== Feature 053: T022 (red) — modal guard: tab keys swallowed by dialog =====
+    #[tokio::test]
+    async fn modal_guard_tab_keys_swallowed() {
+        use cargonaut_core::{Command as AppCommand, DialogKind, PaneId};
+        use crossterm::event::KeyCode;
+
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+
+        // Open a second tab so we have something to switch away from
+        app.dispatch(AppCommand::TabNew).await.unwrap();
+        let initial_left_tab = app
+            .tab_bar_view(PaneId::Left)
+            .iter()
+            .filter(|e| e.is_active)
+            .map(|e| e.index)
+            .next()
+            .unwrap();
+        let initial_left_count = app.tab_bar_view(PaneId::Left).len();
+
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        // Inject a confirm dialog
+        let mut dlg: Option<ActiveDialog> = Some(make_dialog(DialogKind::Confirm {
+            title: "Test".into(),
+            body: "modal guard test".into(),
+            on_confirm: Box::new(AppCommand::Quit),
+        }));
+
+        // Tab-next key (])
+        feed_key(
+            KeyCode::Char(']'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        // Tab-prev key ([)
+        feed_key(
+            KeyCode::Char('['),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        // Ctrl-t (new tab)
+        feed_key(
+            KeyCode::Char('t'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        // Ctrl-w (close tab)
+        feed_key(
+            KeyCode::Char('w'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+
+        // All tab operations must have been swallowed — dialog is still active
+        assert!(
+            dlg.is_some(),
+            "dialog should still be active after tab keys"
+        );
+
+        // Tab count and active tab should be unchanged
+        let current_count = app.tab_bar_view(PaneId::Left).len();
+        let current_tab = app
+            .tab_bar_view(PaneId::Left)
+            .iter()
+            .filter(|e| e.is_active)
+            .map(|e| e.index)
+            .next()
+            .unwrap();
+        assert_eq!(
+            current_count, initial_left_count,
+            "tab count should be unchanged"
+        );
+        assert_eq!(
+            current_tab, initial_left_tab,
+            "active tab should be unchanged"
+        );
+    }
+
     // ===== Feature 053: T015 (red) — tab_bar_line rendering tests =====
     // tab_bar_line does not exist yet; these compile-fail tests are the red state.
 
     #[test]
     fn tab_bar_line_renders_single_tab() {
         use cargonaut_core::TabBarEntry;
-        let entries = vec![TabBarEntry { index: 1, label: "foo".to_string(), is_active: true }];
+        let entries = vec![TabBarEntry {
+            index: 1,
+            label: "foo".to_string(),
+            is_active: true,
+        }];
         let line = tab_bar_line(&entries, 40, &Theme::default());
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("[1*]foo"), "tab bar should contain '[1*]foo', got: {text:?}");
+        assert!(
+            text.contains("[1*]foo"),
+            "tab bar should contain '[1*]foo', got: {text:?}"
+        );
     }
 
     #[test]
     fn tab_bar_line_renders_multiple_tabs_with_active_marker() {
         use cargonaut_core::TabBarEntry;
         let entries = vec![
-            TabBarEntry { index: 1, label: "bar".to_string(), is_active: false },
-            TabBarEntry { index: 2, label: "baz".to_string(), is_active: true },
+            TabBarEntry {
+                index: 1,
+                label: "bar".to_string(),
+                is_active: false,
+            },
+            TabBarEntry {
+                index: 2,
+                label: "baz".to_string(),
+                is_active: true,
+            },
         ];
         let line = tab_bar_line(&entries, 40, &Theme::default());
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("[1]bar"), "should contain '[1]bar', got: {text:?}");
-        assert!(text.contains("[2*]baz"), "should contain '[2*]baz', got: {text:?}");
+        assert!(
+            text.contains("[1]bar"),
+            "should contain '[1]bar', got: {text:?}"
+        );
+        assert!(
+            text.contains("[2*]baz"),
+            "should contain '[2*]baz', got: {text:?}"
+        );
     }
 
     #[tokio::test]
     async fn draw_pane_tab_bar_occupies_first_row() {
-        use cargonaut_core::{PaneId, TabBarEntry};
+        use cargonaut_core::PaneId;
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         let td_l = TempDir::new().unwrap();
@@ -4782,7 +4914,12 @@ mod tests {
         let backend = TestBackend::new(40, 8);
         let mut term = Terminal::new(backend).unwrap();
         let theme = Theme::default();
-        let area = Rect { x: 0, y: 0, width: 40, height: 8 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 8,
+        };
         term.draw(|f| {
             let pane_state = app.pane(PaneId::Left);
             let mut view = pane::PaneView::new(pane_state.cwd.clone(), pane_state.listing.clone());
@@ -4809,6 +4946,9 @@ mod tests {
             .take(width)
             .map(|c| c.symbol().chars().next().unwrap_or(' '))
             .collect();
-        assert!(first_row.contains("[1"), "first row should contain tab bar '[1', got: {first_row:?}");
+        assert!(
+            first_row.contains("[1"),
+            "first row should contain tab bar '[1', got: {first_row:?}"
+        );
     }
 }

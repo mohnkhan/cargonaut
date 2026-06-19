@@ -13,7 +13,7 @@
 // lands (T1.23 release polish), the ceiling check moves there and
 // this becomes a lower-bound guardrail.
 
-use cargonaut_core::App;
+use cargonaut_core::{App, Command};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -31,13 +31,23 @@ async fn main() {
     let baseline = read_rss_kib();
 
     let config = cargonaut_config::Config::default();
-    let _app = App::new(
+    let mut app = App::new(
         config,
         td_l.path().to_str().unwrap(),
         td_r.path().to_str().unwrap(),
     )
     .await
     .unwrap();
+
+    // Feature 053: open 4 additional tabs per side (5 total each) to exercise
+    // the SideState multi-tab memory layout under the SC-003 budget.
+    for _ in 0..4 {
+        app.dispatch(Command::TabNew).await.unwrap();
+    }
+    app.dispatch(Command::FocusRight).await.unwrap();
+    for _ in 0..4 {
+        app.dispatch(Command::TabNew).await.unwrap();
+    }
 
     // Synthetic "third pane" listing held alongside the App.
     let _third = populate_in_memory(10_000);
@@ -47,7 +57,7 @@ async fn main() {
     let peak = read_rss_kib();
 
     println!(
-        "baseline RSS: {baseline} KiB  ;  with App + 3rd listing: {peak} KiB  ;  delta: {} KiB",
+        "baseline RSS: {baseline} KiB  ;  with App (5-tab/side) + 3rd listing: {peak} KiB  ;  delta: {} KiB",
         peak.saturating_sub(baseline)
     );
 
@@ -57,10 +67,10 @@ async fn main() {
         .unwrap_or(64);
     let peak_mib = peak / 1024;
     if peak_mib > cap_mib {
-        eprintln!("SC-003 FAIL: peak {peak_mib} MiB > {cap_mib} MiB cap");
+        eprintln!("SC-003 FAIL: peak {peak_mib} MiB > {cap_mib} MiB cap (5-tab/side scenario)");
         std::process::exit(1);
     }
-    println!("SC-003 OK (in-process peak {peak_mib} MiB ≤ {cap_mib} MiB)");
+    println!("SC-003 OK (5-tab/side in-process peak {peak_mib} MiB ≤ {cap_mib} MiB)");
 }
 
 fn populate(td: &TempDir, n: usize) {

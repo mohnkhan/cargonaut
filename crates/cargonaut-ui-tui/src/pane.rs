@@ -86,7 +86,7 @@ impl PaneView {
         }
     }
 
-    /// Sync this view from the App's authoritative [`PaneState`]. Copies
+    /// Sync this view from the App's authoritative `PaneState`. Copies
     /// `cwd`, `listing`, `selected`, `show_hidden`, `filter`, and
     /// translates the App's absolute cursor index into a visible-relative
     /// position for ratatui's `ListState`. Called once per frame by the

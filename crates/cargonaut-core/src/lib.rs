@@ -675,8 +675,14 @@ impl App {
         right_tab.cursor = right_tab.default_cursor();
 
         let sides = [
-            SideState { tabs: vec![left_tab], active_tab: 0 },
-            SideState { tabs: vec![right_tab], active_tab: 0 },
+            SideState {
+                tabs: vec![left_tab],
+                active_tab: 0,
+            },
+            SideState {
+                tabs: vec![right_tab],
+                active_tab: 0,
+            },
         ];
 
         // Feature 042 — load the persisted hotlist (best-effort: a missing or
@@ -2141,16 +2147,6 @@ impl App {
 }
 
 impl App {
-    /// Feature 050 — undo the most recent reversible file operation.
-    ///
-    /// Consumes and clears `undo_log` regardless of outcome (`take()`).
-    /// - `None` → "Nothing to undo"
-    /// - `Rename` → reverse-rename each pair in the recorded directory
-    /// - `Copy` → delete each copy destination path
-    /// - `Move` → reverse-move scaffold (Move is not yet fully implemented in Feature 050)
-    /// - `Delete` → emits "cannot be undone" warning
-    ///
-    /// On success, clears selection on both panes and re-lists both.
     // ===== Feature 053: Tab operations =====
 
     fn tab_new(&mut self) -> Result<Vec<Event>, AppError> {
@@ -2235,6 +2231,9 @@ impl App {
             .collect()
     }
 
+    /// Undo the most recent reversible file operation (Feature 050).
+    ///
+    /// Consumes and clears `undo_log` regardless of outcome.
     pub async fn undo_last_operation(&mut self) -> Result<Vec<Event>, AppError> {
         let entry = match self.undo_log.take() {
             None => {
@@ -5431,13 +5430,18 @@ mod tests {
         // Public API unchanged: pane(PaneId) → &PaneState
         let left: &PaneState = app.pane(PaneId::Left);
         assert!(
-            left.cwd.display().ends_with(td_l.path().file_name().unwrap().to_str().unwrap()),
+            left.cwd
+                .display()
+                .ends_with(td_l.path().file_name().unwrap().to_str().unwrap()),
             "left cwd should be td_l: {}",
             left.cwd.display()
         );
         let right: &PaneState = app.pane(PaneId::Right);
         assert!(
-            right.cwd.display().ends_with(td_r.path().file_name().unwrap().to_str().unwrap()),
+            right
+                .cwd
+                .display()
+                .ends_with(td_r.path().file_name().unwrap().to_str().unwrap()),
             "right cwd should be td_r: {}",
             right.cwd.display()
         );
@@ -5533,7 +5537,10 @@ mod tests {
         app.dispatch(Command::TabNew).await.unwrap();
         // Left side should now have 2 tabs
         assert_eq!(app.sides[0].tabs.len(), 2, "expected 2 tabs after TabNew");
-        assert_eq!(app.sides[0].tabs[1].cwd, orig_cwd, "new tab cwd should match original");
+        assert_eq!(
+            app.sides[0].tabs[1].cwd, orig_cwd,
+            "new tab cwd should match original"
+        );
     }
 
     #[tokio::test]
@@ -5544,7 +5551,10 @@ mod tests {
         app.dispatch(Command::TabNew).await.unwrap();
         let new_tab = &app.sides[0].tabs[1];
         assert!(new_tab.filter.is_none(), "new tab filter should be None");
-        assert!(new_tab.selected.is_empty(), "new tab selection should be empty");
+        assert!(
+            new_tab.selected.is_empty(),
+            "new tab selection should be empty"
+        );
     }
 
     #[tokio::test]
@@ -5553,7 +5563,10 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::TabNew).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, 1, "active_tab should be 1 after TabNew");
+        assert_eq!(
+            app.sides[0].active_tab, 1,
+            "active_tab should be 1 after TabNew"
+        );
     }
 
     #[tokio::test]
@@ -5562,7 +5575,11 @@ mod tests {
         let td_r = TempDir::new().unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         let events = app.dispatch(Command::TabClose).await.unwrap();
-        assert_eq!(app.sides[0].tabs.len(), 1, "single tab should remain after TabClose");
+        assert_eq!(
+            app.sides[0].tabs.len(),
+            1,
+            "single tab should remain after TabClose"
+        );
         assert!(events.is_empty(), "single-tab close returns Ok(vec![])");
     }
 
@@ -5577,7 +5594,10 @@ mod tests {
         app.sides[0].active_tab = 0; // focus tab 0 (first)
         app.dispatch(Command::TabClose).await.unwrap();
         assert_eq!(app.sides[0].tabs.len(), 2, "should have 2 tabs after close");
-        assert_eq!(app.sides[0].active_tab, 0, "active_tab should be 0 (right successor)");
+        assert_eq!(
+            app.sides[0].active_tab, 0,
+            "active_tab should be 0 (right successor)"
+        );
     }
 
     #[tokio::test]
@@ -5587,7 +5607,7 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::TabNew).await.unwrap(); // tab 1
         app.dispatch(Command::TabNew).await.unwrap(); // tab 2 (active)
-        // Close rightmost tab (index 2); should wrap to index 1 (last of remaining)
+                                                      // Close rightmost tab (index 2); should wrap to index 1 (last of remaining)
         app.dispatch(Command::TabClose).await.unwrap();
         assert_eq!(app.sides[0].tabs.len(), 2, "should have 2 tabs");
         assert_eq!(app.sides[0].active_tab, 1, "active_tab should wrap to last");
@@ -5601,9 +5621,15 @@ mod tests {
         app.dispatch(Command::TabNew).await.unwrap(); // now 2 tabs, active=1
         app.sides[0].active_tab = 0; // reset to first
         app.dispatch(Command::TabNext).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, 1, "TabNext should advance to index 1");
+        assert_eq!(
+            app.sides[0].active_tab, 1,
+            "TabNext should advance to index 1"
+        );
         app.dispatch(Command::TabNext).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, 0, "TabNext should wrap from last to first");
+        assert_eq!(
+            app.sides[0].active_tab, 0,
+            "TabNext should wrap from last to first"
+        );
     }
 
     #[tokio::test]
@@ -5613,9 +5639,15 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::TabNew).await.unwrap(); // now 2 tabs, active=1
         app.dispatch(Command::TabPrev).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, 0, "TabPrev should go back to index 0");
+        assert_eq!(
+            app.sides[0].active_tab, 0,
+            "TabPrev should go back to index 0"
+        );
         app.dispatch(Command::TabPrev).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, 1, "TabPrev should wrap from first to last");
+        assert_eq!(
+            app.sides[0].active_tab, 1,
+            "TabPrev should wrap from first to last"
+        );
     }
 
     #[tokio::test]
@@ -5650,17 +5682,26 @@ mod tests {
     async fn cross_pane_copy_dest_is_active_tab_cwd() {
         let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
+        tokio::fs::write(td_r.path().join("file.txt"), b"hi")
+            .await
+            .unwrap();
         let (mut app, inner_cwd) = make_nested_app(&td_parent, &td_r).await;
         // Open tab 2; ascend into td_parent (test's own temp dir, not /tmp itself)
         app.dispatch(Command::TabNew).await.unwrap();
         app.dispatch(Command::Ascend).await.unwrap();
         let tab2_cwd = app.sides[0].tabs[1].cwd.display();
-        assert_ne!(tab2_cwd, inner_cwd, "tab 2 should have a different cwd after Ascend");
+        assert_ne!(
+            tab2_cwd, inner_cwd,
+            "tab 2 should have a different cwd after Ascend"
+        );
         // Switch back to tab 1 (active_tab = 0) and focus right
         app.dispatch(Command::TabPrev).await.unwrap();
         assert_eq!(app.sides[0].active_tab, 0);
-        assert_eq!(app.pane(PaneId::Left).cwd.display(), inner_cwd, "active tab should be inner");
+        assert_eq!(
+            app.pane(PaneId::Left).cwd.display(),
+            inner_cwd,
+            "active tab should be inner"
+        );
         app.dispatch(Command::FocusRight).await.unwrap();
         app.dispatch(Command::SelectionToggle).await.unwrap();
         let events = app.dispatch(Command::Copy).await.unwrap();
@@ -5682,7 +5723,9 @@ mod tests {
     async fn cross_pane_copy_after_tab_switch_uses_new_active() {
         let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
+        tokio::fs::write(td_r.path().join("file.txt"), b"hi")
+            .await
+            .unwrap();
         let (mut app, _inner_cwd) = make_nested_app(&td_parent, &td_r).await;
         // Open tab 2 and ascend to td_parent; keep tab 2 as active (active_tab = 1)
         app.dispatch(Command::TabNew).await.unwrap();
@@ -5733,7 +5776,9 @@ mod tests {
     async fn dialog_dest_captured_at_open_time() {
         let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
+        tokio::fs::write(td_r.path().join("file.txt"), b"hi")
+            .await
+            .unwrap();
         let (mut app, inner_cwd) = make_nested_app(&td_parent, &td_r).await;
         // Open tab 2 and ascend; switch back to tab 1 (active_tab = 0, cwd = inner)
         app.dispatch(Command::TabNew).await.unwrap();
@@ -5769,13 +5814,22 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         // Set filter on tab 0
         app.set_filter("xyz_no_match").unwrap();
-        assert!(app.pane(PaneId::Left).filter.is_some(), "tab 0 should have filter");
+        assert!(
+            app.pane(PaneId::Left).filter.is_some(),
+            "tab 0 should have filter"
+        );
         // Open tab 1 (inherits no filter)
         app.dispatch(Command::TabNew).await.unwrap();
-        assert!(app.pane(PaneId::Left).filter.is_none(), "tab 1 should have no filter");
+        assert!(
+            app.pane(PaneId::Left).filter.is_none(),
+            "tab 1 should have no filter"
+        );
         // Switch back to tab 0; filter should still be there
         app.dispatch(Command::TabPrev).await.unwrap();
-        assert!(app.pane(PaneId::Left).filter.is_some(), "tab 0 filter should persist");
+        assert!(
+            app.pane(PaneId::Left).filter.is_some(),
+            "tab 0 filter should persist"
+        );
     }
 
     #[tokio::test]
@@ -5785,30 +5839,53 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         // Cycle sort on tab 0 (NameAsc → ExtAsc per next_sort_key)
         app.dispatch(Command::CycleSortKey).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).sort, Sort::ExtAsc, "tab 0 sort should be ExtAsc");
+        assert_eq!(
+            app.pane(PaneId::Left).sort,
+            Sort::ExtAsc,
+            "tab 0 sort should be ExtAsc"
+        );
         // Open tab 1
         app.dispatch(Command::TabNew).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).sort, Sort::NameAsc, "tab 1 sort should be default NameAsc");
+        assert_eq!(
+            app.pane(PaneId::Left).sort,
+            Sort::NameAsc,
+            "tab 1 sort should be default NameAsc"
+        );
         // Switch back to tab 0; sort should still be ExtAsc
         app.dispatch(Command::TabPrev).await.unwrap();
-        assert_eq!(app.pane(PaneId::Left).sort, Sort::ExtAsc, "tab 0 sort should still be ExtAsc");
+        assert_eq!(
+            app.pane(PaneId::Left).sort,
+            Sort::ExtAsc,
+            "tab 0 sort should still be ExtAsc"
+        );
     }
 
     #[tokio::test]
     async fn tab_state_selection_is_isolated() {
         let td_l = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        tokio::fs::write(td_l.path().join("file.txt"), b"x").await.unwrap();
+        tokio::fs::write(td_l.path().join("file.txt"), b"x")
+            .await
+            .unwrap();
         let mut app = make_app(&td_l, &td_r).await;
         // Toggle selection on tab 0
         app.dispatch(Command::SelectionToggle).await.unwrap();
-        assert!(!app.pane(PaneId::Left).selected.is_empty(), "tab 0 should have a selection");
+        assert!(
+            !app.pane(PaneId::Left).selected.is_empty(),
+            "tab 0 should have a selection"
+        );
         // Open tab 1 (clean selection)
         app.dispatch(Command::TabNew).await.unwrap();
-        assert!(app.pane(PaneId::Left).selected.is_empty(), "tab 1 should have empty selection");
+        assert!(
+            app.pane(PaneId::Left).selected.is_empty(),
+            "tab 1 should have empty selection"
+        );
         // Switch back to tab 0; selection should persist
         app.dispatch(Command::TabPrev).await.unwrap();
-        assert!(!app.pane(PaneId::Left).selected.is_empty(), "tab 0 selection should persist");
+        assert!(
+            !app.pane(PaneId::Left).selected.is_empty(),
+            "tab 0 selection should persist"
+        );
     }
 
     #[tokio::test]
@@ -5818,7 +5895,10 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.set_filter("xyz").unwrap();
         app.dispatch(Command::TabNew).await.unwrap();
-        assert!(app.pane(PaneId::Left).filter.is_none(), "new tab should not inherit filter");
+        assert!(
+            app.pane(PaneId::Left).filter.is_none(),
+            "new tab should not inherit filter"
+        );
     }
 
     #[tokio::test]
@@ -5829,11 +5909,19 @@ mod tests {
         let default_show_hidden = app.pane(PaneId::Left).show_hidden;
         // Toggle show_hidden on tab 0
         app.dispatch(Command::ToggleHidden).await.unwrap();
-        assert_ne!(app.pane(PaneId::Left).show_hidden, default_show_hidden, "tab 0 show_hidden toggled");
+        assert_ne!(
+            app.pane(PaneId::Left).show_hidden,
+            default_show_hidden,
+            "tab 0 show_hidden toggled"
+        );
         // Open tab 1 — should start with config default
         app.dispatch(Command::TabNew).await.unwrap();
         let config_default = app.config().ui.show_hidden;
-        assert_eq!(app.pane(PaneId::Left).show_hidden, config_default, "tab 1 show_hidden should be config default");
+        assert_eq!(
+            app.pane(PaneId::Left).show_hidden,
+            config_default,
+            "tab 1 show_hidden should be config default"
+        );
     }
 
     #[tokio::test]
@@ -5858,8 +5946,14 @@ mod tests {
         );
         // Open tab 1 — history must be empty per data-model.md §Validation Rules
         app.dispatch(Command::TabNew).await.unwrap();
-        assert!(app.pane(PaneId::Left).dir_history_back.is_empty(), "tab 1 history should be empty");
-        assert!(app.pane(PaneId::Left).dir_history_fwd.is_empty(), "tab 1 fwd history should be empty");
+        assert!(
+            app.pane(PaneId::Left).dir_history_back.is_empty(),
+            "tab 1 history should be empty"
+        );
+        assert!(
+            app.pane(PaneId::Left).dir_history_fwd.is_empty(),
+            "tab 1 fwd history should be empty"
+        );
     }
 
     #[tokio::test]
@@ -5872,13 +5966,25 @@ mod tests {
         let right_at_before = app.sides[1].active_tab;
         // FocusSwap should change which pane is active, not which tab
         app.dispatch(Command::FocusSwap).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, left_at_before, "left active_tab unchanged by FocusSwap");
-        assert_eq!(app.sides[1].active_tab, right_at_before, "right active_tab unchanged by FocusSwap");
+        assert_eq!(
+            app.sides[0].active_tab, left_at_before,
+            "left active_tab unchanged by FocusSwap"
+        );
+        assert_eq!(
+            app.sides[1].active_tab, right_at_before,
+            "right active_tab unchanged by FocusSwap"
+        );
         // FocusLeft / FocusRight also should not change tabs
         app.dispatch(Command::FocusLeft).await.unwrap();
-        assert_eq!(app.sides[0].active_tab, left_at_before, "left active_tab unchanged by FocusLeft");
+        assert_eq!(
+            app.sides[0].active_tab, left_at_before,
+            "left active_tab unchanged by FocusLeft"
+        );
         app.dispatch(Command::FocusRight).await.unwrap();
-        assert_eq!(app.sides[1].active_tab, right_at_before, "right active_tab unchanged by FocusRight");
+        assert_eq!(
+            app.sides[1].active_tab, right_at_before,
+            "right active_tab unchanged by FocusRight"
+        );
     }
 
     // ===== Feature 053: T010 (red) — tab_bar_view tests (method does not exist yet) =====
@@ -5937,10 +6043,16 @@ mod tests {
         let mut app = make_app(&td_l, &td_r).await;
         app.dispatch(Command::TabNew).await.unwrap(); // active = 1
         let entries_before = app.tab_bar_view(PaneId::Left);
-        assert!(entries_before[1].is_active, "tab at index 1 should be active");
+        assert!(
+            entries_before[1].is_active,
+            "tab at index 1 should be active"
+        );
         app.dispatch(Command::TabNext).await.unwrap(); // wraps to 0
         let entries_after = app.tab_bar_view(PaneId::Left);
-        assert!(entries_after[0].is_active, "after TabNext, tab 0 should be active");
+        assert!(
+            entries_after[0].is_active,
+            "after TabNext, tab 0 should be active"
+        );
         assert!(!entries_after[1].is_active, "tab 1 should not be active");
     }
 }
