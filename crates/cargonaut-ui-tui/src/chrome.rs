@@ -431,6 +431,28 @@ pub fn mouse_indicator(session_supported: bool, captured: bool) -> &'static str 
 }
 
 // =====================================================================
+// Pane header title (FR-022)
+// =====================================================================
+
+/// Compute the pane block-border title string (FR-022).
+///
+/// For non-local backends (scheme != "file") the full VfsPath URI is shown
+/// so the user always knows which archive or remote host they are browsing.
+/// For local backends the last path segment (basename) is shown — it is
+/// shorter and the full path is already visible in the status bar.
+pub fn pane_header_title(pane: &PaneState) -> String {
+    if pane.backend.scheme() != "file" {
+        pane.cwd.display()
+    } else {
+        pane.cwd
+            .segments
+            .last()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "/".to_string())
+    }
+}
+
+// =====================================================================
 // Mini-status (per-pane)
 // =====================================================================
 
@@ -528,7 +550,7 @@ mod tests {
     use smol_str::SmolStr;
     use std::collections::BTreeSet;
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     fn render_to_string(w: u16, h: u16, f: impl FnOnce(Rect, &mut Buffer)) -> String {
         let backend = TestBackend::new(w, h);

@@ -384,6 +384,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let dialog_ref = active_dialog.as_mut();
         let ms_left = chrome::mini_status_line(app.pane(PaneId::Left));
         let ms_right = chrome::mini_status_line(app.pane(PaneId::Right));
+        let title_left = chrome::pane_header_title(app.pane(PaneId::Left));
+        let title_right = chrome::pane_header_title(app.pane(PaneId::Right));
         let view_mode = app.view_mode();
         let qv_preview = if view_mode == cargonaut_core::ViewMode::QuickView {
             compute_preview(app)
@@ -442,6 +444,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 fkeybar,
                 &ms_left,
                 &ms_right,
+                &title_left,
+                &title_right,
                 help_overlay.as_ref(),
                 view_mode,
                 &qv_preview,
@@ -2699,6 +2703,8 @@ fn draw_frame(
     fkeybar: &FunctionKeyBar,
     ms_left: &str,
     ms_right: &str,
+    title_left: &str,
+    title_right: &str,
     help_overlay: Option<&dialog::HelpOverlay>,
     view_mode: cargonaut_core::ViewMode,
     qv_preview: &str,
@@ -2770,6 +2776,7 @@ fn draw_frame(
             ms_left,
             pane_layout,
             tab_bar_left,
+            title_left,
         )
     };
     let right_inner = if qv && active == PaneId::Left {
@@ -2784,6 +2791,7 @@ fn draw_frame(
             ms_right,
             pane_layout,
             tab_bar_right,
+            title_right,
         )
     };
 
@@ -2979,6 +2987,7 @@ fn draw_pane(
     mini_status: &str,
     layout: pane::PaneLayout,
     tab_bar: &[cargonaut_core::TabBarEntry],
+    pane_title: &str,
 ) -> Rect {
     use ratatui::widgets::Widget;
     // Feature 053: 3-constraint split — tab bar (1 row) + list+border + mini-status (1 row).
@@ -2993,10 +3002,11 @@ fn draw_pane(
     // Render tab bar in col[0].
     let tbl = tab_bar_line(tab_bar, col[0].width, theme);
     Paragraph::new(tbl).render(col[0], f.buffer_mut());
-    let title = view.cwd.display();
     // US1 (FR-002): panel background + focus-colored border from the theme.
+    // FR-022: title is computed by chrome::pane_header_title — full URI for
+    // non-local backends, basename for local ones.
     let block = Block::default()
-        .title(title)
+        .title(pane_title)
         .borders(Borders::ALL)
         .border_style(theme.border_style(focused))
         .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
@@ -5427,6 +5437,7 @@ mod tests {
                 "",
                 pane::PaneLayout::Brief,
                 &entries,
+                &pane_state.cwd.display(),
             );
         })
         .unwrap();
