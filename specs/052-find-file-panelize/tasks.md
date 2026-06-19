@@ -363,7 +363,7 @@ the active panel to its previous listing unchanged.
   If coverage drops below 80%, add tests to recover the threshold before proceeding
   to T034. (This is a constitution MUST gate — not skippable.)
 
-- [ ] T034 [POLISH] Close GitHub issue #41: reference the merged PR. Update
+- [X] T034 [POLISH] Close GitHub issue #41: reference the merged PR. Update
   `ROADMAP.md` to mark the issue as resolved (remove it from the open deferred
   items list). No new deferral needed — this feature resolves the tracked gap.
   Run after T032 and T033 are committed; this is the final step before PR merge.
