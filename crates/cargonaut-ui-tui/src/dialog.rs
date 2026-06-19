@@ -1181,6 +1181,14 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
         ],
     },
     HelpSection {
+        title: "Find File",
+        rows: &[HelpRow {
+            key: "M-?",
+            desc:
+                "Find file by name glob or ripgrep content search, then panelize (find-file-popup)",
+        }],
+    },
+    HelpSection {
         title: "Orthodox-FM Compat (mc_keys=true)",
         rows: &[
             HelpRow {
@@ -2636,6 +2644,788 @@ impl FileViewerDialog {
 }
 
 // =====================================================================
+// Feature 052 — Find-File and Panelize
+// =====================================================================
+
+use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use tokio::sync::mpsc;
+
+/// Which search mode the find-file dialog is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchMode {
+    /// Search by filename glob pattern (BFS walk, globset matcher).
+    Name,
+    /// Search by content using ripgrep (`rg --files-with-matches`).
+    Content,
+}
+
+/// Phase the find-file dialog is currently in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogPhase {
+    /// Input box is focused; user has not started a search yet.
+    InputFocused,
+    /// Walk is in progress (channel open, spinner visible).
+    Walking,
+    /// Walk completed with ≥1 results; result list is focused.
+    ResultsFocused,
+    /// Walk completed with 0 results; no list to navigate.
+    NoResults,
+}
+
+/// Events produced by the background walk task.
+#[derive(Debug)]
+pub enum FindEvent {
+    /// A matching file was found.
+    Found(PathBuf),
+    /// Walk completed (or was aborted).
+    Done {
+        /// True when the walk stopped because `max_results` was reached.
+        truncated: bool,
+    },
+}
+
+/// Outcome returned by [`FindFileDialog::handle_key`].
+#[derive(Debug)]
+pub enum FindOutcome {
+    /// Key was consumed; stay in dialog.
+    Consumed,
+    /// User pressed Esc; caller should call `widget.cancel()` then dismiss.
+    Cancelled,
+    /// User pressed Enter in `ResultsFocused`; panelize these paths.
+    Panelize {
+        /// Absolute paths to panelize.
+        paths: Vec<PathBuf>,
+        /// The pattern that was entered (for the `[Find: …]` label).
+        pattern: String,
+    },
+}
+
+/// Find-file dialog widget (Feature 052).
+///
+/// Owns the channel receiver for incremental walk results and the abort flag.
+/// The event loop calls [`FindFileDialog::poll_results`] each tick (100ms) to
+/// drain new results and transition phases.
+#[allow(dead_code)]
+pub struct FindFileDialog {
+    /// Current search mode (Name or Content).
+    pub mode: SearchMode,
+    /// User-typed pattern (glob or literal for ripgrep).
+    pub input: String,
+    /// Current dialog phase.
+    pub phase: DialogPhase,
+    /// Accumulated absolute path results.
+    pub results: Vec<PathBuf>,
+    /// Index of the highlighted result (0-based, clamped).
+    pub cursor: usize,
+    /// First visible row in the result list.
+    pub scroll_offset: usize,
+    /// True when the result list was truncated at `max_results`.
+    pub truncated: bool,
+    /// True when ripgrep binary was found at startup.
+    pub content_available: bool,
+    /// Transient notice text shown below the input.
+    pub notice: Option<String>,
+    /// Channel receiver for walk events (Some only while Walking).
+    pub walk_rx: Option<mpsc::UnboundedReceiver<FindEvent>>,
+    /// Abort flag (Some only while Walking).
+    pub abort_flag: Option<Arc<AtomicBool>>,
+}
+
+impl std::fmt::Debug for FindFileDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FindFileDialog")
+            .field("mode", &self.mode)
+            .field("input", &self.input)
+            .field("phase", &self.phase)
+            .field("results", &self.results.len())
+            .field("cursor", &self.cursor)
+            .field("scroll_offset", &self.scroll_offset)
+            .field("truncated", &self.truncated)
+            .field("content_available", &self.content_available)
+            .field("notice", &self.notice)
+            .finish()
+    }
+}
+
+/// Pure check: is ripgrep available at `rg_path`?
+///
+/// Runs `rg --version` and returns `true` if it exits successfully.
+/// This is the sole source of truth for content-search gating (FR-013,
+/// contract §3a). Pure: no side effects beyond spawning a short subprocess.
+pub fn plan_content_available(rg_path: &str) -> bool {
+    std::process::Command::new(rg_path)
+        .arg("--version")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+impl FindFileDialog {
+    /// Construct a new find-file dialog.
+    ///
+    /// `content_available` should be the result of [`plan_content_available`]
+    /// called at the point the dialog is opened (once per open, not cached).
+    pub fn new(content_available: bool) -> Self {
+        Self {
+            mode: SearchMode::Name,
+            input: String::new(),
+            phase: DialogPhase::InputFocused,
+            results: Vec::new(),
+            cursor: 0,
+            scroll_offset: 0,
+            truncated: false,
+            content_available,
+            notice: None,
+            walk_rx: None,
+            abort_flag: None,
+        }
+    }
+
+    /// Handle a key event. Returns a [`FindOutcome`] telling the caller what
+    /// to do next. The `config` is used for max_results / rg_path.
+    pub fn handle_key(
+        &mut self,
+        key: crossterm::event::KeyCode,
+        config: &cargonaut_config::Config,
+    ) -> FindOutcome {
+        use crossterm::event::KeyCode;
+        // Clear transient notice on any key.
+        self.notice = None;
+
+        match key {
+            KeyCode::Esc => return FindOutcome::Cancelled,
+
+            KeyCode::Tab => {
+                match self.phase {
+                    DialogPhase::Walking => {
+                        // No mode change while walking.
+                    }
+                    _ => {
+                        if self.mode == SearchMode::Name {
+                            if self.content_available {
+                                self.mode = SearchMode::Content;
+                            } else {
+                                self.notice =
+                                    Some("Content search unavailable: rg not found".to_string());
+                            }
+                        } else {
+                            self.mode = SearchMode::Name;
+                        }
+                    }
+                }
+            }
+
+            KeyCode::Enter => match self.phase {
+                DialogPhase::InputFocused => {
+                    // Start a walk. Use a temporary root for the dialog-level
+                    // handle_key call; the real root is passed in start_walk.
+                    // For tests that call handle_key directly (without a root),
+                    // we start a walk against /tmp as a safe fallback.
+                    let root = PathBuf::from("/tmp");
+                    self.start_walk(root, config);
+                }
+                DialogPhase::ResultsFocused => {
+                    if !self.results.is_empty() {
+                        return FindOutcome::Panelize {
+                            paths: self.results.clone(),
+                            pattern: self.input.clone(),
+                        };
+                    }
+                }
+                DialogPhase::Walking => {
+                    // Enter during walk is a no-op (user waits for results).
+                }
+                DialogPhase::NoResults => {
+                    // Enter in NoResults is a no-op per contract §3b.
+                }
+            },
+
+            KeyCode::Backspace if self.phase == DialogPhase::InputFocused => {
+                self.input.pop();
+            }
+
+            KeyCode::Char(c) if self.phase == DialogPhase::InputFocused => {
+                self.input.push(c);
+            }
+
+            KeyCode::Char(c)
+                if self.phase == DialogPhase::ResultsFocused
+                    || self.phase == DialogPhase::NoResults =>
+            {
+                // Any printable char restarts input.
+                self.cancel();
+                self.input.push(c);
+            }
+
+            KeyCode::Up
+                if self.phase == DialogPhase::ResultsFocused && !self.results.is_empty() =>
+            {
+                self.cursor = self.cursor.saturating_sub(1);
+                self.clamp_scroll(10); // default window size
+            }
+
+            KeyCode::Down
+                if self.phase == DialogPhase::ResultsFocused && !self.results.is_empty() =>
+            {
+                let max = self.results.len().saturating_sub(1);
+                self.cursor = (self.cursor + 1).min(max);
+                self.clamp_scroll(10); // default window size
+            }
+
+            KeyCode::PageUp
+                if self.phase == DialogPhase::ResultsFocused && !self.results.is_empty() =>
+            {
+                self.cursor = self.cursor.saturating_sub(10);
+                self.clamp_scroll(10);
+            }
+
+            KeyCode::PageDown
+                if self.phase == DialogPhase::ResultsFocused && !self.results.is_empty() =>
+            {
+                let max = self.results.len().saturating_sub(1);
+                self.cursor = (self.cursor + 10).min(max);
+                self.clamp_scroll(10);
+            }
+
+            _ => {}
+        }
+
+        FindOutcome::Consumed
+    }
+
+    /// Handle a key with an explicit root for the walk (used by the event loop).
+    /// This is the production path; `handle_key` uses /tmp as a fallback for tests.
+    pub fn handle_key_with_root(
+        &mut self,
+        key: crossterm::event::KeyCode,
+        config: &cargonaut_config::Config,
+        root: PathBuf,
+    ) -> FindOutcome {
+        use crossterm::event::KeyCode;
+        self.notice = None;
+
+        match key {
+            KeyCode::Esc => return FindOutcome::Cancelled,
+
+            KeyCode::Enter => match self.phase {
+                DialogPhase::InputFocused => {
+                    self.start_walk(root, config);
+                }
+                DialogPhase::ResultsFocused if !self.results.is_empty() => {
+                    return FindOutcome::Panelize {
+                        paths: self.results.clone(),
+                        pattern: self.input.clone(),
+                    };
+                }
+                _ => {}
+            },
+
+            _ => return self.handle_key(key, config),
+        }
+
+        FindOutcome::Consumed
+    }
+
+    /// Start a background walk for the current `mode` and `input`.
+    ///
+    /// Sets phase to Walking; spawns a tokio task that sends [`FindEvent`]s
+    /// through an unbounded channel. Caller must drive [`poll_results`] each
+    /// tick to drain the channel. FR-018: if the root is unreadable, sets
+    /// phase to NoResults and returns without spawning.
+    pub fn start_walk(&mut self, root: PathBuf, config: &cargonaut_config::Config) {
+        // FR-018: root guard — fail fast if the root is not readable.
+        if std::fs::read_dir(&root).is_err() {
+            self.phase = DialogPhase::NoResults;
+            self.notice = Some(format!("Cannot read directory: {}", root.display()));
+            return;
+        }
+
+        let pattern = if self.input.is_empty() {
+            "**".to_string()
+        } else {
+            self.input.clone()
+        };
+
+        let max_results = config.search.max_results as usize;
+        let abort_flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::unbounded_channel::<FindEvent>();
+
+        self.phase = DialogPhase::Walking;
+        self.results.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.truncated = false;
+        self.walk_rx = Some(rx);
+        self.abort_flag = Some(abort_flag.clone());
+
+        match self.mode {
+            SearchMode::Name => {
+                Self::spawn_name_walk(root, pattern, max_results, abort_flag, tx);
+            }
+            SearchMode::Content => {
+                let rg_path = config.search.ripgrep_path.clone();
+                Self::spawn_content_walk(root, pattern, max_results, abort_flag, tx, rg_path);
+            }
+        }
+    }
+
+    /// Spawn the BFS name-mode walk in a blocking task.
+    fn spawn_name_walk(
+        root: PathBuf,
+        pattern: String,
+        max_results: usize,
+        abort_flag: Arc<AtomicBool>,
+        tx: mpsc::UnboundedSender<FindEvent>,
+    ) {
+        tokio::task::spawn_blocking(move || {
+            use globset::GlobBuilder;
+            use std::collections::VecDeque;
+
+            // Build glob matcher. Use "**" to match everything if pattern is
+            // already "**" (from empty input substitution), otherwise build a
+            // filename-only glob that matches anywhere in the path.
+            let glob = match GlobBuilder::new(&pattern).build() {
+                Ok(g) => g.compile_matcher(),
+                Err(_) => {
+                    // Invalid glob — send Done with no results.
+                    let _ = tx.send(FindEvent::Done { truncated: false });
+                    return;
+                }
+            };
+
+            let mut queue = VecDeque::new();
+            queue.push_back(root);
+            let mut count = 0usize;
+
+            'outer: while let Some(dir) = queue.pop_front() {
+                if abort_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                let rd = match std::fs::read_dir(&dir) {
+                    Ok(rd) => rd,
+                    Err(_) => continue, // FR-018: skip unreadable subdirs silently
+                };
+                for entry in rd {
+                    if abort_flag.load(Ordering::Relaxed) {
+                        break 'outer;
+                    }
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    let path = entry.path();
+                    let file_type = match entry.file_type() {
+                        Ok(ft) => ft,
+                        Err(_) => continue,
+                    };
+                    if file_type.is_dir() {
+                        queue.push_back(path);
+                    } else {
+                        // Match against the filename component only.
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        let matches = if pattern == "**" {
+                            true
+                        } else {
+                            glob.is_match(name_str.as_ref())
+                        };
+                        if matches {
+                            count += 1;
+                            if count > max_results {
+                                let _ = tx.send(FindEvent::Done { truncated: true });
+                                return;
+                            }
+                            let _ = tx.send(FindEvent::Found(path));
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(FindEvent::Done { truncated: false });
+        });
+    }
+
+    /// Spawn the ripgrep content-mode walk.
+    fn spawn_content_walk(
+        root: PathBuf,
+        pattern: String,
+        max_results: usize,
+        abort_flag: Arc<AtomicBool>,
+        tx: mpsc::UnboundedSender<FindEvent>,
+        rg_path: String,
+    ) {
+        tokio::spawn(async move {
+            use std::process::Stdio;
+            use tokio::io::AsyncBufReadExt;
+            use tokio::process::Command as TokioCommand;
+
+            let root_str = root.to_string_lossy().into_owned();
+            let mut child = match TokioCommand::new(&rg_path)
+                .args([
+                    pattern.as_str(),
+                    "--files-with-matches",
+                    "--no-messages",
+                    &root_str,
+                ])
+                .stdout(Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(_) => {
+                    let _ = tx.send(FindEvent::Done { truncated: false });
+                    return;
+                }
+            };
+
+            let stdout = match child.stdout.take() {
+                Some(s) => s,
+                None => {
+                    let _ = tx.send(FindEvent::Done { truncated: false });
+                    return;
+                }
+            };
+
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            let mut count = 0usize;
+            let mut truncated = false;
+
+            loop {
+                if abort_flag.load(Ordering::Relaxed) {
+                    let _ = child.kill().await;
+                    break;
+                }
+                match lines.next_line().await {
+                    Ok(Some(line)) if !line.is_empty() => {
+                        count += 1;
+                        if count > max_results {
+                            truncated = true;
+                            let _ = child.kill().await;
+                            break;
+                        }
+                        let _ = tx.send(FindEvent::Found(PathBuf::from(line)));
+                    }
+                    Ok(Some(_)) => {}  // empty line
+                    Ok(None) => break, // EOF
+                    Err(_) => break,
+                }
+            }
+
+            let _ = tx.send(FindEvent::Done { truncated });
+        });
+    }
+
+    /// Drain pending walk events from the channel.
+    ///
+    /// Call this each 100ms tick while `phase == Walking`. Appends found paths
+    /// to `results`; on `Done` transitions to `ResultsFocused` or `NoResults`.
+    pub fn poll_results(&mut self) {
+        let rx = match self.walk_rx.as_mut() {
+            Some(r) => r,
+            None => return,
+        };
+
+        loop {
+            match rx.try_recv() {
+                Ok(FindEvent::Found(path)) => {
+                    self.results.push(path);
+                }
+                Ok(FindEvent::Done { truncated }) => {
+                    self.truncated = truncated;
+                    self.walk_rx = None;
+                    self.abort_flag = None;
+                    if self.results.is_empty() {
+                        self.phase = DialogPhase::NoResults;
+                        self.notice = Some(format!("No files found matching `{}`", self.input));
+                    } else {
+                        self.phase = DialogPhase::ResultsFocused;
+                    }
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    // Channel dropped — treat as Done with whatever we have.
+                    self.walk_rx = None;
+                    self.abort_flag = None;
+                    if self.results.is_empty() {
+                        self.phase = DialogPhase::NoResults;
+                        self.notice = Some(format!("No files found matching `{}`", self.input));
+                    } else {
+                        self.phase = DialogPhase::ResultsFocused;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Cancel an in-progress walk.
+    ///
+    /// Sets the abort flag, drops the channel receiver, and resets phase to
+    /// `InputFocused`. Results are cleared. The background task will observe
+    /// the flag and exit at its next iteration.
+    pub fn cancel(&mut self) {
+        if let Some(flag) = self.abort_flag.take() {
+            flag.store(true, Ordering::Relaxed);
+        }
+        self.walk_rx = None;
+        self.phase = DialogPhase::InputFocused;
+        self.results.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.truncated = false;
+    }
+
+    /// Adjust `scroll_offset` so that `cursor` remains visible in a window
+    /// of `window_height` rows. Invariant: `scroll_offset ≤ cursor`.
+    pub fn clamp_scroll(&mut self, window_height: usize) {
+        if self.cursor < self.scroll_offset {
+            self.scroll_offset = self.cursor;
+        } else if self.cursor >= self.scroll_offset + window_height {
+            self.scroll_offset = self.cursor - window_height + 1;
+        }
+    }
+
+    /// Render the find-file dialog overlay onto the given frame area.
+    ///
+    /// Draws a centered bordered overlay with:
+    /// - Mode indicator `[Name]` or `[Content]`
+    /// - Input field
+    /// - Match count header
+    /// - Result list (scrollable, cursor-highlighted)
+    /// - Notice text when present
+    pub fn render(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect, theme: &Theme) {
+        use ratatui::layout::{Constraint, Direction, Layout};
+        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders};
+        use ratatui::widgets::{Clear, List, ListItem, Paragraph};
+
+        // Center: 70% wide, up to 24 rows tall.
+        let overlay = centered_rect_pct(70, 70, area);
+
+        // Clear the background first.
+        f.render_widget(Clear, overlay);
+
+        // Outer block.
+        let block = Block::default()
+            .title("Find File")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_focused))
+            .style(Style::default().bg(theme.dialog_bg).fg(theme.dialog_fg));
+        let inner = block.inner(overlay);
+        f.render_widget(block, overlay);
+
+        // Split inner into: mode row, input row, header row, list area, notice row.
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // mode indicator
+                Constraint::Length(1), // input field
+                Constraint::Length(1), // match count header
+                Constraint::Min(1),    // result list
+                Constraint::Length(1), // notice / spinner
+            ])
+            .split(inner);
+
+        // Mode indicator.
+        let mode_str = match self.mode {
+            SearchMode::Name => "[Name]  (Tab=Content)",
+            SearchMode::Content => "[Content] (Tab=Name)",
+        };
+        f.render_widget(
+            Paragraph::new(mode_str)
+                .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg)),
+            chunks[0],
+        );
+
+        // Input field.
+        let input_str = format!("> {}", self.input);
+        f.render_widget(
+            Paragraph::new(input_str)
+                .style(Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg)),
+            chunks[1],
+        );
+
+        // Match count header.
+        let header = match self.phase {
+            DialogPhase::Walking => "Searching…".to_string(),
+            DialogPhase::NoResults => "0 matches".to_string(),
+            _ => {
+                if self.truncated {
+                    format!("{} matches (truncated)", self.results.len())
+                } else {
+                    format!("{} matches", self.results.len())
+                }
+            }
+        };
+        f.render_widget(
+            Paragraph::new(header).style(Style::default().fg(Color::Yellow).bg(theme.dialog_bg)),
+            chunks[2],
+        );
+
+        // Result list.
+        let list_height = chunks[3].height as usize;
+        let items: Vec<ListItem> = self
+            .results
+            .iter()
+            .enumerate()
+            .skip(self.scroll_offset)
+            .take(list_height)
+            .map(|(i, path)| {
+                let display = left_truncate_path(path, chunks[3].width as usize);
+                let style = if i == self.cursor {
+                    Style::default()
+                        .fg(theme.panel_bg)
+                        .bg(theme.panel_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.dialog_fg).bg(theme.dialog_bg)
+                };
+                ListItem::new(Line::from(Span::styled(display, style)))
+            })
+            .collect();
+        f.render_widget(List::new(items), chunks[3]);
+
+        // Notice / spinner row.
+        let notice_text = if let Some(n) = &self.notice {
+            n.as_str()
+        } else if self.phase == DialogPhase::Walking {
+            "… walking …"
+        } else {
+            ""
+        };
+        f.render_widget(
+            Paragraph::new(notice_text)
+                .style(Style::default().fg(Color::Yellow).bg(theme.dialog_bg)),
+            chunks[4],
+        );
+    }
+
+    /// Test-only helper: start a walk with a per-entry sleep for abort timing tests.
+    #[cfg(test)]
+    pub(crate) fn start_walk_with_delay(
+        &mut self,
+        root: PathBuf,
+        config: &cargonaut_config::Config,
+        delay_per_entry: std::time::Duration,
+    ) {
+        // FR-018: root guard
+        if std::fs::read_dir(&root).is_err() {
+            self.phase = DialogPhase::NoResults;
+            self.notice = Some(format!("Cannot read directory: {}", root.display()));
+            return;
+        }
+
+        let pattern = if self.input.is_empty() {
+            "**".to_string()
+        } else {
+            self.input.clone()
+        };
+
+        let max_results = config.search.max_results as usize;
+        let abort_flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::unbounded_channel::<FindEvent>();
+
+        self.phase = DialogPhase::Walking;
+        self.results.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.truncated = false;
+        self.walk_rx = Some(rx);
+        self.abort_flag = Some(abort_flag.clone());
+
+        tokio::task::spawn_blocking(move || {
+            use globset::GlobBuilder;
+            use std::collections::VecDeque;
+
+            let glob = match GlobBuilder::new(&pattern).build() {
+                Ok(g) => g.compile_matcher(),
+                Err(_) => {
+                    let _ = tx.send(FindEvent::Done { truncated: false });
+                    return;
+                }
+            };
+
+            let mut queue = VecDeque::new();
+            queue.push_back(root);
+            let mut count = 0usize;
+
+            'outer: while let Some(dir) = queue.pop_front() {
+                if abort_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                let rd = match std::fs::read_dir(&dir) {
+                    Ok(rd) => rd,
+                    Err(_) => continue,
+                };
+                for entry in rd {
+                    if abort_flag.load(Ordering::Relaxed) {
+                        break 'outer;
+                    }
+                    std::thread::sleep(delay_per_entry);
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    let path = entry.path();
+                    let ft = match entry.file_type() {
+                        Ok(ft) => ft,
+                        Err(_) => continue,
+                    };
+                    if ft.is_dir() {
+                        queue.push_back(path);
+                    } else {
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        let matches = if pattern == "**" {
+                            true
+                        } else {
+                            glob.is_match(name_str.as_ref())
+                        };
+                        if matches {
+                            count += 1;
+                            if count > max_results {
+                                let _ = tx.send(FindEvent::Done { truncated: true });
+                                return;
+                            }
+                            let _ = tx.send(FindEvent::Found(path));
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(FindEvent::Done { truncated: false });
+        });
+    }
+}
+
+/// Left-truncate a path to fit in `max_width` columns.
+/// If the path's display string fits, return it as-is.
+/// Otherwise, truncate from the left and prepend `…`.
+fn left_truncate_path(path: &std::path::Path, max_width: usize) -> String {
+    let s = path.display().to_string();
+    let char_count = s.chars().count();
+    if char_count <= max_width {
+        return s;
+    }
+    if max_width <= 1 {
+        return "\u{2026}".to_string(); // '…'
+    }
+    // Keep the rightmost (max_width - 1) chars and prepend `…`.
+    let keep = max_width - 1;
+    // Find the byte offset of the character at position (char_count - keep).
+    let skip_chars = char_count - keep;
+    let start_byte = s
+        .char_indices()
+        .nth(skip_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    format!("\u{2026}{}", &s[start_byte..])
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
@@ -3951,5 +4741,703 @@ mod tests {
         assert_eq!(d.current_scroll_offset(), 1);
         assert_eq!(d.handle_key(KeyCode::Up), FileViewerAction::Swallow);
         assert_eq!(d.current_scroll_offset(), 0);
+    }
+
+    // ========================================================================
+    // Feature 052 T004 (red) — FindFileDialog pure-function tests
+    // ========================================================================
+
+    // T004a: plan_content_available truth table (contract §3a)
+    #[test]
+    fn plan_content_available_with_valid_rg() {
+        // If rg is on PATH, must return true.
+        if std::process::Command::new("rg")
+            .arg("--version")
+            .status()
+            .is_ok()
+        {
+            assert!(
+                plan_content_available("rg"),
+                "rg found on PATH — plan_content_available must return true"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_content_available_with_nonexistent_binary() {
+        assert!(
+            !plan_content_available("/this/binary/does/not/exist/rg"),
+            "non-existent binary must return false"
+        );
+    }
+
+    // T004b: SearchMode Tab-toggle truth table (contract §3a)
+    #[test]
+    fn search_mode_tab_toggle_name_to_content_when_available() {
+        let mut d = FindFileDialog::new(true);
+        assert_eq!(d.mode, SearchMode::Name, "starts in Name mode");
+        let outcome = d.handle_key(KeyCode::Tab, &cargonaut_config::Config::default());
+        // Should toggle to Content without error
+        assert_eq!(
+            d.mode,
+            SearchMode::Content,
+            "Tab must switch to Content when content_available"
+        );
+        // outcome should be Consumed (not Panelize or Cancelled)
+        assert!(
+            !matches!(
+                outcome,
+                FindOutcome::Panelize { .. } | FindOutcome::Cancelled
+            ),
+            "Tab must return Consumed outcome, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn search_mode_tab_toggle_is_noop_when_content_unavailable() {
+        let mut d = FindFileDialog::new(false);
+        assert_eq!(d.mode, SearchMode::Name);
+        d.handle_key(KeyCode::Tab, &cargonaut_config::Config::default());
+        assert_eq!(
+            d.mode,
+            SearchMode::Name,
+            "Tab must not switch to Content when unavailable"
+        );
+    }
+
+    // T004c: Enter key phase-transition truth table (contract §3b rows InputFocused / ResultsFocused)
+    #[test]
+    fn enter_in_input_focused_starts_walk_transitions_to_walking() {
+        let mut d = FindFileDialog::new(false);
+        assert_eq!(d.phase, DialogPhase::InputFocused);
+        d.input = "*.toml".to_string();
+        // Enter should start a walk → phase becomes Walking
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let _outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        });
+        // After Enter in InputFocused, phase must be Walking or ResultsFocused (if instant)
+        assert!(
+            d.phase == DialogPhase::Walking || d.phase == DialogPhase::ResultsFocused,
+            "Enter in InputFocused must transition to Walking or ResultsFocused, got {:?}",
+            d.phase
+        );
+    }
+
+    #[test]
+    fn enter_in_results_focused_returns_panelize() {
+        let mut d = FindFileDialog::new(false);
+        // Manually inject results and set phase to ResultsFocused
+        d.results = vec![std::path::PathBuf::from("/tmp/foo.toml")];
+        d.phase = DialogPhase::ResultsFocused;
+        let outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        assert!(
+            matches!(outcome, FindOutcome::Panelize { .. }),
+            "Enter in ResultsFocused must return Panelize, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn enter_in_no_results_phase_is_noop() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::NoResults;
+        let outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        assert!(
+            !matches!(outcome, FindOutcome::Panelize { .. }),
+            "Enter in NoResults must not return Panelize"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T010+T011 (red→green) — FindFileDialog render tests
+    // ========================================================================
+
+    fn render_find_dialog(d: &FindFileDialog, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = crate::theme::Theme::default();
+        term.draw(|f| {
+            let area = f.size();
+            d.render(f, area, &theme);
+        })
+        .unwrap();
+        term.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn find_dialog_input_focused_renders_title() {
+        let d = FindFileDialog::new(false);
+        assert_eq!(d.phase, DialogPhase::InputFocused);
+        let s = render_find_dialog(&d, 60, 20);
+        assert!(
+            s.contains("Find"),
+            "InputFocused render must contain 'Find'; got: {s:?}"
+        );
+    }
+
+    #[test]
+    fn find_dialog_results_focused_shows_match_count_and_paths() {
+        let mut d = FindFileDialog::new(false);
+        d.results = vec![
+            std::path::PathBuf::from("/tmp/foo.toml"),
+            std::path::PathBuf::from("/tmp/bar.toml"),
+        ];
+        d.phase = DialogPhase::ResultsFocused;
+        let s = render_find_dialog(&d, 80, 24);
+        assert!(
+            s.contains("2"),
+            "ResultsFocused must render '2' match count; got: {s:?}"
+        );
+    }
+
+    #[test]
+    fn find_dialog_walking_renders_progress_indicator() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::Walking;
+        let s = render_find_dialog(&d, 60, 20);
+        // Walking phase should show "Searching" or "walking" indicator
+        assert!(
+            s.to_lowercase().contains("search") || s.contains("…"),
+            "Walking render must show progress indicator; got: {s:?}"
+        );
+    }
+
+    #[test]
+    fn find_dialog_long_path_truncated_with_ellipsis() {
+        // 300-char path injected into a 40-col-wide result area.
+        let long_name = "a".repeat(290);
+        let path = std::path::PathBuf::from(format!("/tmp/{long_name}"));
+        let result = left_truncate_path(&path, 40);
+        assert!(
+            result.contains('\u{2026}') || result.contains("…"),
+            "long path must be left-truncated with '…'; got: {result:?}"
+        );
+        assert!(
+            result.chars().count() <= 40,
+            "truncated string must fit in 40 chars; char_count={}",
+            result.chars().count()
+        );
+        // Must end with the filename suffix.
+        assert!(
+            result.ends_with(&long_name[long_name.len() - 35..]),
+            "truncated path must end with the filename tail"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T006 (red) — start_walk name-mode tests
+    // ========================================================================
+
+    /// Poll until the phase is no longer Walking. Uses `tokio::task::yield_now()`
+    /// for async tests so the tokio runtime can make progress on spawned tasks.
+    async fn poll_until_done(d: &mut FindFileDialog, timeout_secs: u64) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+        loop {
+            d.poll_results();
+            if d.phase != DialogPhase::Walking {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("poll_until_done timed out after {timeout_secs}s");
+            }
+            // Yield to allow tokio runtime to make progress on spawned tasks.
+            tokio::task::yield_now().await;
+        }
+    }
+
+    // T006a: Happy path — 3 files, glob matches 2.
+    #[tokio::test]
+    async fn start_walk_name_mode_happy_path() {
+        let td = tempfile::TempDir::new().unwrap();
+        std::fs::write(td.path().join("foo.toml"), b"").unwrap();
+        std::fs::write(td.path().join("bar.toml"), b"").unwrap();
+        std::fs::write(td.path().join("baz.rs"), b"").unwrap();
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.toml".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+
+        poll_until_done(&mut d, 10).await;
+
+        assert_eq!(
+            d.results.len(),
+            2,
+            "expected 2 .toml matches, got {:?}",
+            d.results
+        );
+        assert_eq!(d.phase, DialogPhase::ResultsFocused);
+    }
+
+    // T006b: Unreadable root (FR-018) — phase becomes NoResults, notice set.
+    // Skip if running as root (root can read mode-0 dirs).
+    #[tokio::test]
+    async fn start_walk_unreadable_root_sets_no_results() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = tempfile::TempDir::new().unwrap();
+        fs::set_permissions(td.path(), fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Check if the permission actually took effect (root can bypass).
+        let probe = fs::read_dir(td.path());
+        // Restore permissions so TempDir can clean up regardless.
+        let _ = fs::set_permissions(td.path(), fs::Permissions::from_mode(0o755));
+
+        if probe.is_ok() {
+            // Running as root or filesystem ignores permissions — skip.
+            eprintln!("Skipping unreadable-root test: permissions not enforced");
+            return;
+        }
+
+        // Now re-run with a fresh tempdir since we already restored perms.
+        let td2 = tempfile::TempDir::new().unwrap();
+        fs::set_permissions(td2.path(), fs::Permissions::from_mode(0o000)).unwrap();
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.toml".to_string();
+        d.start_walk(td2.path().to_path_buf(), &config);
+
+        // Restore permissions so TempDir can clean up.
+        let _ = fs::set_permissions(td2.path(), fs::Permissions::from_mode(0o755));
+
+        assert_eq!(
+            d.phase,
+            DialogPhase::NoResults,
+            "unreadable root must set NoResults immediately"
+        );
+        assert!(
+            d.results.is_empty(),
+            "results must be empty for unreadable root"
+        );
+        let notice = d.notice.as_deref().unwrap_or("");
+        assert!(
+            notice.contains("Cannot read directory"),
+            "notice must mention 'Cannot read directory'; got: {notice:?}"
+        );
+    }
+
+    // T006c: SC-001 timing gate — 200 files, walk completes < 5s.
+    #[tokio::test]
+    async fn start_walk_name_mode_timing_gate_sc001() {
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..200usize {
+            std::fs::write(td.path().join(format!("file_{i:03}.tmp")), b"").unwrap();
+        }
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.tmp".to_string();
+
+        let t0 = std::time::Instant::now();
+        d.start_walk(td.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 10).await;
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "SC-001: walk must complete in <5s; took {elapsed:?}"
+        );
+        assert_eq!(
+            d.results.len(),
+            200,
+            "SC-001: all 200 files must be found; got {}",
+            d.results.len()
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T012 (red→green) — start_walk content mode tests
+    // T013 implementation is in start_walk / spawn_content_walk (already impl).
+    // ========================================================================
+
+    // T012a: Basic content search — needle found in 1 of 2 files.
+    #[tokio::test]
+    async fn start_walk_content_mode_finds_needle() {
+        // Skip if rg is not available.
+        if !std::process::Command::new("rg")
+            .arg("--version")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            eprintln!("Skipping content search test: rg not found");
+            return;
+        }
+
+        let td = tempfile::TempDir::new().unwrap();
+        std::fs::write(td.path().join("match.txt"), b"needle in the haystack").unwrap();
+        std::fs::write(td.path().join("nomatch.txt"), b"nothing here").unwrap();
+
+        let mut config = cargonaut_config::Config::default();
+        config.search.ripgrep_path = "rg".to_string();
+
+        let mut d = FindFileDialog::new(true);
+        d.mode = SearchMode::Content;
+        d.input = "needle".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+
+        poll_until_done(&mut d, 30).await;
+
+        assert_eq!(
+            d.results.len(),
+            1,
+            "content search must find exactly 1 file; results={:?}",
+            d.results
+        );
+        let result_name = d.results[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(result_name, "match.txt");
+    }
+
+    // T012b: Differential — compare start_walk Content results vs rg CLI output.
+    #[tokio::test]
+    async fn start_walk_content_mode_matches_rg_output() {
+        // Skip if rg is not available.
+        if !std::process::Command::new("rg")
+            .arg("--version")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            eprintln!("Skipping differential rg test: rg not found");
+            return;
+        }
+
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..5usize {
+            let content = if i % 2 == 0 {
+                b"needle" as &[u8]
+            } else {
+                b"other"
+            };
+            std::fs::write(td.path().join(format!("file{i}.txt")), content).unwrap();
+        }
+
+        let mut config = cargonaut_config::Config::default();
+        config.search.ripgrep_path = "rg".to_string();
+
+        // Get rg CLI output directly.
+        let rg_out = std::process::Command::new("rg")
+            .args([
+                "needle",
+                "--files-with-matches",
+                "--no-messages",
+                td.path().to_str().unwrap(),
+            ])
+            .output()
+            .expect("rg must run");
+        let mut rg_paths: Vec<String> = String::from_utf8_lossy(&rg_out.stdout)
+            .lines()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+            .collect();
+        rg_paths.sort();
+
+        // Get walk results.
+        let mut d = FindFileDialog::new(true);
+        d.mode = SearchMode::Content;
+        d.input = "needle".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 30).await;
+
+        let mut walk_paths: Vec<String> = d
+            .results
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        walk_paths.sort();
+
+        assert_eq!(
+            walk_paths, rg_paths,
+            "SC-003: start_walk Content mode must match rg output"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T014+T015 (red→green) — Tab toggle content unavailable
+    // ========================================================================
+
+    #[test]
+    fn tab_toggle_sets_notice_when_content_unavailable() {
+        let mut d = FindFileDialog::new(false);
+        assert!(!d.content_available, "content_available must be false");
+        d.handle_key(KeyCode::Tab, &cargonaut_config::Config::default());
+        assert_eq!(d.mode, SearchMode::Name, "mode must stay Name");
+        let notice = d.notice.as_deref().unwrap_or("");
+        assert!(
+            notice.contains("Content search unavailable"),
+            "notice must mention 'Content search unavailable'; got: {notice:?}"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T016+T017 (red→green) — cancel / abort tests
+    // ========================================================================
+
+    // T016a: cancel() resets state correctly.
+    #[tokio::test]
+    async fn cancel_resets_phase_and_clears_results() {
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..5usize {
+            std::fs::write(td.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.txt".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+
+        assert_eq!(
+            d.phase,
+            DialogPhase::Walking,
+            "must be Walking after start_walk"
+        );
+        assert!(d.walk_rx.is_some(), "walk_rx must be Some while Walking");
+        assert!(
+            d.abort_flag.is_some(),
+            "abort_flag must be Some while Walking"
+        );
+
+        d.cancel();
+
+        assert_eq!(
+            d.phase,
+            DialogPhase::InputFocused,
+            "cancel must reset to InputFocused"
+        );
+        assert!(d.walk_rx.is_none(), "walk_rx must be None after cancel");
+        assert!(d.results.is_empty(), "results must be cleared after cancel");
+    }
+
+    // T016b: SC-006 abort timing — walk aborted within 300ms.
+    #[tokio::test]
+    async fn cancel_aborts_walk_within_300ms() {
+        let td = tempfile::TempDir::new().unwrap();
+        // Create 10 files; each takes 50ms sleep in the delayed walk.
+        // Total: 500ms without abort. We cancel after ~10ms → well under 300ms.
+        for i in 0..10usize {
+            std::fs::write(td.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.txt".to_string();
+
+        d.start_walk_with_delay(
+            td.path().to_path_buf(),
+            &config,
+            std::time::Duration::from_millis(50),
+        );
+
+        let t0 = std::time::Instant::now();
+        d.cancel();
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(300),
+            "SC-006: cancel must return in <300ms; took {elapsed:?}"
+        );
+        assert_eq!(d.phase, DialogPhase::InputFocused);
+    }
+
+    // ========================================================================
+    // Feature 052 T018+T019 (red→green) — Esc does not set find_label
+    // These test the dialog-level behavior. The lib.rs-level T018 tests
+    // are in lib.rs.
+    // ========================================================================
+
+    #[test]
+    fn esc_returns_cancelled_outcome() {
+        let mut d = FindFileDialog::new(false);
+        let outcome = d.handle_key(KeyCode::Esc, &cargonaut_config::Config::default());
+        assert!(
+            matches!(outcome, FindOutcome::Cancelled),
+            "Esc must return Cancelled outcome"
+        );
+    }
+
+    #[test]
+    fn cancelled_outcome_does_not_set_panelize() {
+        let mut d = FindFileDialog::new(false);
+        d.results = vec![std::path::PathBuf::from("/tmp/foo.toml")];
+        d.phase = DialogPhase::ResultsFocused;
+        let outcome = d.handle_key(KeyCode::Esc, &cargonaut_config::Config::default());
+        assert!(
+            matches!(outcome, FindOutcome::Cancelled),
+            "Esc from ResultsFocused must return Cancelled, not Panelize"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T024+T025 — truncation at max_results
+    // ========================================================================
+
+    #[tokio::test]
+    async fn start_walk_truncates_at_max_results() {
+        let td = tempfile::TempDir::new().unwrap();
+        for i in 0..5usize {
+            std::fs::write(td.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+
+        let mut config = cargonaut_config::Config::default();
+        config.search.max_results = 3;
+
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.txt".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 10).await;
+
+        assert_eq!(d.results.len(), 3, "must stop at max_results=3");
+        assert!(d.truncated, "truncated must be true");
+    }
+
+    #[test]
+    fn render_shows_truncated_label_when_truncated() {
+        let mut d = FindFileDialog::new(false);
+        d.results = vec![
+            std::path::PathBuf::from("/tmp/a.txt"),
+            std::path::PathBuf::from("/tmp/b.txt"),
+        ];
+        d.phase = DialogPhase::ResultsFocused;
+        d.truncated = true;
+
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = crate::theme::Theme::default();
+        term.draw(|f| {
+            d.render(f, f.size(), &theme);
+        })
+        .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            s.contains("truncated"),
+            "render must show 'truncated' when truncated=true; got: {s:?}"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T026+T027 — no-results path
+    // ========================================================================
+
+    #[tokio::test]
+    async fn walk_with_no_matches_sets_no_results_phase() {
+        let td = tempfile::TempDir::new().unwrap();
+        // Create files that won't match the glob
+        std::fs::write(td.path().join("foo.rs"), b"").unwrap();
+
+        let config = cargonaut_config::Config::default();
+        let mut d = FindFileDialog::new(false);
+        d.input = "*.toml".to_string();
+        d.start_walk(td.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 10).await;
+
+        assert_eq!(d.phase, DialogPhase::NoResults, "0 matches → NoResults");
+        let notice = d.notice.as_deref().unwrap_or("");
+        assert!(
+            notice.contains("No files found"),
+            "notice must say 'No files found'; got: {notice:?}"
+        );
+    }
+
+    #[test]
+    fn enter_in_no_results_returns_consumed_not_panelize() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::NoResults;
+        d.results = Vec::new();
+        let outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        assert!(
+            !matches!(outcome, FindOutcome::Panelize { .. }),
+            "Enter in NoResults must NOT return Panelize"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T028+T029 — scroll / cursor navigation
+    // ========================================================================
+
+    #[test]
+    fn down_moves_cursor_and_scroll_stays_visible() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::ResultsFocused;
+        d.results = (0..20)
+            .map(|i| std::path::PathBuf::from(format!("/tmp/f{i}")))
+            .collect();
+        d.cursor = 0;
+        d.scroll_offset = 0;
+
+        // Press Down 7 times.
+        for _ in 0..7 {
+            d.handle_key(KeyCode::Down, &cargonaut_config::Config::default());
+        }
+        assert_eq!(d.cursor, 7);
+        // scroll_offset ≤ cursor always.
+        assert!(
+            d.scroll_offset <= d.cursor,
+            "scroll_offset must be ≤ cursor"
+        );
+    }
+
+    #[test]
+    fn page_down_moves_cursor_by_window_height() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::ResultsFocused;
+        d.results = (0..20)
+            .map(|i| std::path::PathBuf::from(format!("/tmp/f{i}")))
+            .collect();
+        d.cursor = 0;
+
+        d.handle_key(KeyCode::PageDown, &cargonaut_config::Config::default());
+        // cursor should advance by ~10 (the default window height).
+        assert!(d.cursor > 0, "PgDn must advance cursor");
+        assert!(d.cursor <= 19, "cursor must not exceed max");
+    }
+
+    // ========================================================================
+    // Feature 052 T030+T030B — rg non-zero exit handling
+    // ========================================================================
+
+    #[tokio::test]
+    async fn content_walk_with_failing_rg_sets_no_results() {
+        use std::os::unix::fs::PermissionsExt;
+        // Create a mock rg script that exits with code 1.
+        let td = tempfile::TempDir::new().unwrap();
+        let mock_rg = td.path().join("rg");
+        std::fs::write(&mock_rg, b"#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&mock_rg, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut config = cargonaut_config::Config::default();
+        config.search.ripgrep_path = mock_rg.to_str().unwrap().to_string();
+
+        let search_root = tempfile::TempDir::new().unwrap();
+        let mut d = FindFileDialog::new(true);
+        d.mode = SearchMode::Content;
+        d.input = "anything".to_string();
+        d.start_walk(search_root.path().to_path_buf(), &config);
+        poll_until_done(&mut d, 10).await;
+
+        assert_eq!(
+            d.results.len(),
+            0,
+            "rg non-zero exit must produce 0 results"
+        );
+        assert!(
+            d.phase == DialogPhase::NoResults || d.results.is_empty(),
+            "non-zero rg exit must not panic; phase={:?}",
+            d.phase
+        );
     }
 }

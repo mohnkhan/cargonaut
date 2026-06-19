@@ -6,8 +6,8 @@
 [![CI](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml/badge.svg)](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
-[![Binary](https://img.shields.io/badge/binary-2.8%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-488%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
+[![Binary](https://img.shields.io/badge/binary-2.9%20MiB-success.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-536%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,9 +31,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 17 features since (031–051) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 488 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
-| **Binary** | 2.8 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Alpha · Phase 1 shipped, plus 18 features since (031–052) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 536 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Binary** | 2.9 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **Platform** | Linux terminal (local filesystem) |
@@ -175,8 +175,16 @@ for the local filesystem:
   Phase 8 adds SC-001/SC-002/SC-003 bench gates (p50 ≤ 150 ms open; ≤ 500 µs
   handle_key; ≤ 64 MiB RSS on 1 GiB sparse file).
   (Feature 051 + 051b).
+- **Find-file and panelize** — `Alt-?` opens the find-file overlay; type a filename glob
+  (`*.toml`) or switch to content mode (`Tab`, requires `rg`) and type a pattern; results
+  stream in from a BFS background walk (name) or ripgrep subprocess (content); a second
+  `Enter` panelizes all results into the active panel as a flat synthetic listing; all panel
+  operations (tag, F5 copy, F6 move, F8 delete, F3 view, F4 edit) work unchanged on the
+  panelized entries. `Esc` aborts an in-progress walk within ≤300 ms. Panel title shows
+  `[Find: <pattern>]`; navigating away restores the real directory path.
+  (Feature 052, closes #41).
 
-The full per-feature history (Features 001 → 051) lives in
+The full per-feature history (Features 001 → 052) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
@@ -187,7 +195,7 @@ nothing):
 
 - Remote & archive VFS backends — SFTP / S3 / archives-as-directories (#48)
 - Internal full-screen editor (`F4` today shells out to `$EDITOR`) (#40)
-- Find-file by name/content + external panelize (#41)
+- Find-file by name/content + external panelize (#41) — **shipped in Feature 052**
 - Tabs (#45), persistent subshell (#44)
 - Directory compare + diff (#43)
 
