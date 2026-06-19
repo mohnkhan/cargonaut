@@ -1558,6 +1558,52 @@ async fn dispatch_ui_command(
                     return Ok(());
                 }
 
+                // Feature 057 US2: .tar/.tar.gz/.tgz/.tar.bz2/.tbz2/.tar.xz/.txz open as tar:// backends.
+                if let Some(compression) = cargonaut_vfs::TarCompression::from_extension(&display_name.to_lowercase()) {
+                    let id = app.active_pane();
+                    let archive_path = raw_path.clone();
+                    let tar_result = tokio::task::spawn_blocking(move || {
+                        cargonaut_vfs::TarFs::open(archive_path, compression)
+                    })
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()));
+                    match tar_result {
+                        Ok(Ok(tar_fs)) => {
+                            let encoded_auth = encode_archive_authority(
+                                raw_path.to_str().unwrap_or(""),
+                            );
+                            let tar_url = format!("tar://{encoded_auth}/");
+                            match cargonaut_vfs::VfsPath::parse(&tar_url) {
+                                Ok(tar_path) => {
+                                    match app
+                                        .navigate_into(
+                                            id,
+                                            tar_path,
+                                            std::sync::Arc::new(tar_fs),
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            *status = format!("Cannot browse archive: {e}");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    *status = format!("Archive path encoding error: {e}");
+                                }
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            *status = format!("Cannot open archive: {e}");
+                        }
+                        Err(e) => {
+                            *status = format!("Archive open failed: {e}");
+                        }
+                    }
+                    return Ok(());
+                }
+
                 match open_file_viewer(raw_path, display_name).await {
                     Ok(widget) => {
                         *active_dialog = Some(ActiveDialog::FileViewer { widget });
