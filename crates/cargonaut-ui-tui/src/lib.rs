@@ -5601,6 +5601,142 @@ mod tests {
         );
     }
 
+    // ---------- Feature 057 US2: DescendOrOpen on .tar files (T021a red) ----------
+
+    /// Write a minimal valid uncompressed TAR archive containing one file.
+    fn write_valid_tar(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let f = std::fs::File::create(&p).unwrap();
+        let mut builder = tar::Builder::new(f);
+        let content = b"hello tar\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder.append_data(&mut header, "hello.txt", content.as_slice()).unwrap();
+        builder.finish().unwrap();
+        p
+    }
+
+    /// Write a minimal valid gzip-compressed TAR archive.
+    fn write_valid_tar_gz(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let f = std::fs::File::create(&p).unwrap();
+        let gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+        let mut builder = tar::Builder::new(gz);
+        let content = b"gz hello\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder.append_data(&mut header, "gz_hello.txt", content.as_slice()).unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        p
+    }
+
+    // T021a [US2] (red): DescendOrOpen on a .tar file navigates pane to tar:// cwd.
+    // Fails until T021b extends the DescendOrOpen handler for TAR extensions.
+    #[tokio::test]
+    async fn descend_or_open_tar_navigates_into_archive() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_tar(td_l.path(), "archive.tar");
+        let mut app = app_with(&td_l, &td_r).await;
+        // Cursor 0 = "..", cursor 1 = archive.tar
+        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "tar",
+            "DescendOrOpen on a .tar file must navigate pane to tar:// (got: {}; status: {status:?})",
+            app.active_pane_state().cwd.display()
+        );
+        assert!(dlg.is_none(), "no dialog must be open after tar navigation");
+    }
+
+    // T021a stub: DescendOrOpen on a .tar.gz file navigates pane to tar:// cwd.
+    #[tokio::test]
+    async fn descend_or_open_tar_gz_navigates_into_archive() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_tar_gz(td_l.path(), "archive.tar.gz");
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "tar",
+            "DescendOrOpen on a .tar.gz file must navigate pane to tar:// (got: {}; status: {status:?})",
+            app.active_pane_state().cwd.display()
+        );
+        assert!(dlg.is_none(), "no dialog must be open after tar.gz navigation");
+    }
+
+    // T021a stub: .tgz extension also navigates to tar://.
+    #[tokio::test]
+    async fn descend_or_open_tgz_navigates_into_archive() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_tar_gz(td_l.path(), "archive.tgz");
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "tar",
+            "DescendOrOpen on a .tgz file must navigate pane to tar:// (got: {})",
+            app.active_pane_state().cwd.display()
+        );
+    }
+
     // ---------- open_file_editor decline paths (Feature 056 — US3) ----------
 
     #[tokio::test]
