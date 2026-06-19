@@ -5284,4 +5284,27 @@ mod tests {
         assert_eq!(result[0], ("first.txt".to_string(), "1st.txt".to_string()));
         assert_eq!(result[1], ("third.txt".to_string(), "3rd.txt".to_string()));
     }
+
+    // ===== Feature 053: Pane Tabs — T002 (red) type-shape tests =====
+    // These tests fail to compile until T003 adds SideState and TabBarEntry.
+
+    #[test]
+    fn side_state_struct_shape() {
+        // Compile-fails until SideState { tabs, active_tab } is defined.
+        let _check: fn(Vec<PaneState>, usize) -> SideState =
+            |tabs, active_tab| SideState { tabs, active_tab };
+    }
+
+    #[test]
+    fn tab_bar_entry_struct_shape() {
+        // Compile-fails until TabBarEntry { index, label, is_active } is defined.
+        let e = TabBarEntry {
+            index: 1usize,
+            label: "foo".to_string(),
+            is_active: true,
+        };
+        assert_eq!(e.index, 1);
+        assert_eq!(e.label, "foo");
+        assert!(e.is_active);
+    }
 }
