@@ -85,13 +85,13 @@ on the panelized files.
 
 - [ ] T005 [US1] (green) In `crates/cargonaut-ui-tui/src/dialog.rs`, implement
   `SearchMode` enum, `DialogPhase` enum, `FindEvent` enum, `FindOutcome` enum,
-  and `FindFileDialog` struct with all fields from data-model.md. Implement
+  and `FindFileDialog` struct with all fields from data-model.md (including the `cursor: usize` highlighted-result field added by H2 remediation). Implement
   `plan_content_available(rg_path: &str) -> bool` (pure: checks `Command::new(rg_path).arg("--version").status().is_ok()`).
   Implement `FindFileDialog::new(content_available: bool) -> Self` and
   `FindFileDialog::handle_key` for the phase transitions tested in T004.
   All new public items carry doc comments. Make T004 pass.
 
-- [ ] T006 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add two failing
+- [ ] T006 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add three failing
   tests for `FindFileDialog::start_walk` (name mode): (a) Happy path: create a
   `tempfile` dir with 3 known files, call `start_walk` with a glob matching 2 of them,
   poll `poll_results()` in a loop, assert `results.len() == 2` and `phase ==
@@ -100,6 +100,12 @@ on the panelized files.
   to set mode 0o000 (no read), call `start_walk` with root = that dir, poll results;
   assert `results.len() == 0`, `phase == NoResults`, and `notice` contains "Cannot read
   directory". (Skip on platforms where permission removal is ineffective, e.g. root user.)
+  (c) **SC-001 timing gate** (CI gate for Constitution §II): create a `tempfile` dir
+  with 200 files (all named `file_NNN.tmp`), call `start_walk` with pattern `*.tmp`
+  (matches all 200), record `std::time::Instant::now()` before the call, poll
+  `poll_results()` in a loop until `phase != Walking`, assert elapsed < 5 s and
+  `results.len() == 200`. This integration test is the CI gate for SC-001 (≤5 s name
+  search) per Constitution §II — run unconditionally (no `#[ignore]`).
 
 - [ ] T007 [US1] (green) Implement `FindFileDialog::start_walk` for Name mode
   in `crates/cargonaut-ui-tui/src/dialog.rs`: first check `std::fs::read_dir(&root)`
@@ -108,7 +114,7 @@ on the panelized files.
   guard). Otherwise spawn `tokio::task::spawn_blocking` running a BFS
   (`std::collections::VecDeque<PathBuf>`) over `std::fs::read_dir`; match each
   filename with `globset::GlobBuilder::new(pattern)?.build()?.compile_matcher()`;
-  check `abort_flag` at each iteration; silently skip unreadable subdirs
+  check `abort_flag.load(Ordering::Relaxed)` at each iteration (Relaxed ordering is correct for a best-effort cancellation flag — no synchronization point is needed); silently skip unreadable subdirs
   (FR-018 subdir guard); send `FindEvent::Found(path)` for matches,
   `FindEvent::Done { truncated }` when walk ends or `max_results` reached.
   Implement `FindFileDialog::poll_results()` to drain `walk_rx` via `try_recv()`
@@ -147,6 +153,10 @@ on the panelized files.
   - In the 100ms tick handler, call `widget.poll_results()` when `active_dialog`
     is `ActiveDialog::FindFile`.
   - Clear `find_label` in `navigate_to` when a real directory is loaded.
+  - **FR-010 status bar render (M1 — explicit step)**: In the active pane's status-bar
+    render path in `lib.rs`, read `ui.find_label`: when `Some(s)`, render `[Find: s]`
+    in place of the current directory path string; when `None`, render the directory path
+    as before. The passive pane's status bar is unaffected.
   Make T008 pass.
 
 - [ ] T010 [US1] (red) In `crates/cargonaut-ui-tui/src/dialog.rs` (or `lib.rs`
@@ -203,7 +213,10 @@ known to match files; results equal `rg <pattern> --files-with-matches <root>` o
   `Child` is held in `abort_flag`-checked loop; `cancel()` calls `child.kill().await`
   and drops the handle. Non-zero exit from `rg` (binary files, permission errors)
   is treated as end-of-stream: send `FindEvent::Done { truncated: false }` with
-  whatever results were collected so far (never panics). Make T012 pass.
+  whatever results were collected so far (never panics).
+  **Note (L2)**: `rg --files-with-matches` deduplicates inherently (one path per matched
+  file regardless of how many lines match); no additional dedup step is needed in the
+  result accumulation loop. Make T012 pass.
 
 - [ ] T014 [US2] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for Tab-toggle when `content_available=false`: pressing Tab
@@ -233,7 +246,7 @@ the active panel to its previous listing unchanged.
   call `cancel()` immediately after; assert `walk_rx` is `None` and `abort_flag`
   holds `true` (or is dropped); assert `phase` is `InputFocused` and `results`
   is empty. For the ≤300 ms abort timing (SC-006), use a test-only helper:
-  expose a `#[cfg(test)] fn start_walk_with_delay(root, config, delay_per_entry: Duration)`
+  expose a `#[cfg(test)] pub(crate) fn start_walk_with_delay(root, config, delay_per_entry: Duration)`
   that inserts `std::thread::sleep(delay_per_entry)` per BFS entry (test-only code path,
   not production). Start the delayed walk, call `cancel()`, measure elapsed time,
   assert < 300ms. This isolates the sleep to the test helper — production `start_walk`
@@ -309,9 +322,11 @@ the active panel to its previous listing unchanged.
   cursor stays visible; pressing `PgDn` advances by ~window height.
 
 - [ ] T029 [POLISH] (green) Implement scroll navigation in `FindFileDialog::handle_key`
-  (`crates/cargonaut-ui-tui/src/dialog.rs`): `Up`/`Down` move cursor within
-  results (clamped to `results.len()-1`); `PgUp`/`PgDn` scroll by visible
-  window height; `scroll_offset` tracks the first visible index. Make T028 pass.
+  (`crates/cargonaut-ui-tui/src/dialog.rs`): `Up`/`Down` move `cursor` (the
+  highlighted-result index from data-model.md — H2 addition) within results, clamped to
+  `results.len()-1`; `PgUp`/`PgDn` move cursor by visible window height; update
+  `scroll_offset` after each cursor move to keep cursor in the visible window
+  (`scroll_offset ≤ cursor ≤ scroll_offset + window_height - 1`). Make T028 pass.
 
 - [ ] T030 [POLISH] (red) In `crates/cargonaut-ui-tui/src/dialog.rs`, add a
   failing test for `rg` non-zero exit path (FR-012/FR-018 graceful degradation):

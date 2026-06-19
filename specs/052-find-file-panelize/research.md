@@ -24,9 +24,11 @@
 
 ## R-003: Content search (ripgrep) invocation
 
-- **Decision**: `tokio::task::spawn_blocking` + `std::process::Command::new(rg_path).args([pattern, "--files-with-matches", "--no-messages", root_path_str])`. Parse stdout line-by-line for file paths.
-- **Rationale**: ripgrep handles binary-file filtering, gitignore-aware walks, and Unicode automatically. `--files-with-matches` gives file-level output (spec requirement). `--no-messages` suppresses binary-file notices. Matches existing external-tool invocation pattern (`std::process::Command` used throughout lib.rs).
-- **Abort mechanism**: Spawn with `std::process::Command::spawn()` → hold `std::process::Child`; on abort, call `child.kill()`. The reading loop (`BufReader::lines()`) terminates naturally when the child is killed.
+- **Decision**: `tokio::process::Command::new(rg_path).args([pattern, "--files-with-matches", "--no-messages", root_path_str]).stdout(Stdio::piped()).spawn()`. Read stdout line-by-line via `tokio::io::AsyncBufReadExt`. Send `FindEvent::Found(path)` per line, then `FindEvent::Done { truncated }` at end-of-stream.
+- **Rationale**: `tokio::process::Command` (not `std::process::Command`) is mandated because it supports `kill_on_drop` for async-native cancellation — `child.kill().await` cleanly terminates the subprocess without a blocking thread. ripgrep handles binary-file filtering, gitignore-aware walks, and Unicode automatically. `--files-with-matches` gives file-level output (spec requirement). `--no-messages` suppresses binary-file notices. **`rg --files-with-matches` deduplicates by design** (one path per matched file); no additional dedup step is needed.
+- **Abort mechanism**: Hold `tokio::process::Child`; `cancel()` calls `child.kill().await` and drops the handle. Non-zero rg exit (binary files, permission errors) is treated as end-of-stream: send `Done { truncated: false }` with accumulated results (never panics).
+- **Ripgrep availability check**: At dialog open time, check `std::process::Command::new(rg_path).arg("--version").status()` succeeds. Cache as `FindFileDialog::content_available: bool`. If false, Tab to Content mode is a no-op.
+- **Note (H3 resolution)**: An earlier draft of this document referenced `std::process::Command + spawn_blocking`. The authoritative implementation instruction is `tokio::process::Command` (tasks.md T013) — this entry has been updated to match.
 - **Ripgrep availability check**: At dialog open time, check `std::process::Command::new(rg_path).arg("--version").status()` succeeds. Cache the result in `FindFileDialog::content_available: bool`. If false, Tab to Content mode is a no-op.
 
 ---

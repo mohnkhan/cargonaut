@@ -2,6 +2,8 @@
 
 **Feature**: 052-find-file-panelize | **Date**: 2026-06-19
 
+> **Terminology note (M2)**: The component is canonically called the **find-file dialog** throughout the codebase (`dialog.rs`, `FindFileDialog`, `ActiveDialog::FindFile`). The terms "overlay" and "popup" appear in the spec and issue title as informal synonyms; use "dialog" in all new code and comments.
+
 ---
 
 ## Entities
@@ -36,7 +38,7 @@ DialogPhase
 - `InputFocused` + Enter → `Walking`
 - `Walking` + `FindEvent::Done { truncated: false }`, count ≥ 1 → `ResultsFocused`
 - `Walking` + `FindEvent::Done { .. }`, count = 0 → `NoResults`
-- `NoResults` + any keystroke → `InputFocused` (notice cleared)
+- `NoResults` + any printable key → `InputFocused` (notice cleared; the key character is delivered to the input field so typing resumes in-place)
 - `ResultsFocused` + Enter → `Panelize` outcome (dialog closes)
 - Any phase + Esc → dialog closes, walk aborted if running
 
@@ -63,8 +65,9 @@ All state for the overlay dialog. Lives in `dialog.rs`.
 | `mode` | `SearchMode` | Active search mode (Name or Content) |
 | `input` | `String` | Raw user-typed pattern |
 | `phase` | `DialogPhase` | Current state-machine phase |
-| `results` | `Vec<PathBuf>` | Accumulated matching paths (relative to search root) |
-| `scroll_offset` | `usize` | First visible result row index |
+| `results` | `Vec<PathBuf>` | Accumulated matching paths (absolute, store-absolute — FR-006; render strips root prefix for display) |
+| `cursor` | `usize` | Index of the highlighted result (0-based, clamped to `results.len().saturating_sub(1)`; 0 when results is empty) |
+| `scroll_offset` | `usize` | First visible result row index (scroll window; kept ≤ cursor) |
 | `truncated` | `bool` | True when results hit `max_results` cap |
 | `content_available` | `bool` | True when rg binary resolved at dialog open time |
 | `notice` | `Option<String>` | Transient notice text ("No files found…", "Content search unavailable…") |
@@ -166,7 +169,9 @@ FindFile {
 ## Invariants
 
 - `results.len() ≤ config.search.max_results` at all times.
+- All paths in `results` are absolute (`store-absolute`); the render function strips the search root prefix for display (`display-relative` — FR-006).
 - `walk_rx` and `abort_flag` are both `Some` iff `phase == Walking`.
-- `scroll_offset < results.len()` always (clamped on results change).
+- `cursor ≤ results.len().saturating_sub(1)` always; `cursor == 0` when `results` is empty.
+- `scroll_offset ≤ cursor` always (scroll window adjusted to keep cursor in view).
 - Panelize is only reachable from `ResultsFocused` phase, guaranteeing `results.len() ≥ 1`.
 - `find_label` is cleared by `navigate_to` whenever the active pane loads a real directory listing.
