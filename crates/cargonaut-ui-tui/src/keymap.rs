@@ -43,6 +43,8 @@ pub enum Mode {
     Subshell,
     /// Previewer pane has focus (FR-209).
     Preview,
+    /// Internal text editor has focus (Feature 056 — F4 built-in editor).
+    Editor,
 }
 
 /// Every recognized action a binding can resolve to. Strings in the TOML
@@ -223,6 +225,11 @@ pub enum Command {
     // Feature 052 — find-file and panelize
     /// Open find-file overlay (Alt-?) — FR-001 (issue #41).
     FindFilePopup,
+    // Feature 056 — internal F4 editor
+    /// Save the file being edited (F2 / Ctrl-S in editor mode).
+    SaveFile,
+    /// Quit the built-in editor (F10 / Esc / q in editor mode).
+    EditorQuit,
 }
 
 // ============================================================

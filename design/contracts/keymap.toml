@@ -422,3 +422,29 @@ action = "cycle-listing-mode"  # FR-405
 mode = "pane"
 key = "M-?"
 action = "find-file-popup"  # FR-001 (issue #41)
+
+# ── Internal editor (Feature 056 — FR-005, FR-006, issue #40) ────────────────
+[[binding]]
+mode = "editor"
+key = "F2"
+action = "save-file"  # FR-005
+
+[[binding]]
+mode = "editor"
+key = "C-s"
+action = "save-file"  # FR-005
+
+[[binding]]
+mode = "editor"
+key = "F10"
+action = "editor-quit"  # FR-006
+
+[[binding]]
+mode = "editor"
+key = "Esc"
+action = "editor-quit"  # FR-006
+
+[[binding]]
+mode = "editor"
+key = "q"
+action = "editor-quit"  # FR-006
