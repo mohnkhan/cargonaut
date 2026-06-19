@@ -117,5 +117,5 @@ When editing this file or adding project-wide conventions, follow the discipline
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/055-subshell-scrollback/plan.md
+at specs/056-f4-internal-editor/plan.md
 <!-- SPECKIT END -->

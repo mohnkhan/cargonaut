@@ -14,10 +14,10 @@ pub(crate) mod subshell;
 pub mod theme;
 pub use chrome::{FunctionKeyBar, MenuBar};
 pub use dialog::{
-    ConfirmDialog, ConfirmOutcome, FileViewerAction, FileViewerDialog, HotlistAction,
-    HotlistDialog, HotlistRow, InputOutcome, JobRow, PathInputAction, PathInputDialog,
-    ResumableSummary, ResumeChoice, ResumePromptDialog, TasksAction, TasksPanelDialog,
-    TextInputDialog, ViewMode,
+    ConfirmDialog, ConfirmOutcome, FileEditorAction, FileEditorDialog, FileViewerAction,
+    FileViewerDialog, HotlistAction, HotlistDialog, HotlistRow, InputOutcome, JobRow, LineEnding,
+    PathInputAction, PathInputDialog, ResumableSummary, ResumeChoice, ResumePromptDialog,
+    TasksAction, TasksPanelDialog, TextInputDialog, ViewMode,
 };
 pub use keymap::{
     parse_key_chord, parse_key_sequence, Command, KeyChord, KeySequence, Keymap, KeymapError, Mode,
@@ -196,6 +196,11 @@ enum ActiveDialog {
     FileViewer {
         /// The file viewer widget.
         widget: dialog::FileViewerDialog,
+    },
+    /// Feature 056 — built-in text editor (F4) replacing the external `$EDITOR` shell-out.
+    FileEditor {
+        /// The file editor widget.
+        widget: dialog::FileEditorDialog,
     },
     /// Feature 052 — find-file overlay (Alt-?). Searches by name glob or
     /// ripgrep content; result list panelizes into the active pane.
@@ -1056,6 +1061,74 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 056: built-in text editor (F4).
+            // SaveFile and EditorQuit are handled via keymap lookup; raw editing
+            // keys (navigation, character input) fall through to widget.handle_key().
+            ActiveDialog::FileEditor { widget } => {
+                // (a) Chord accumulation.
+                chord_buf.push(KeyChord {
+                    code: key.code,
+                    modifiers: key.modifiers,
+                });
+                // (b) Keymap lookup against Mode::Editor.
+                let action = match keymap.lookup_sequence(Mode::Editor, chord_buf) {
+                    SeqLookup::Command(cmd) => {
+                        chord_buf.clear();
+                        match cmd {
+                            Command::SaveFile => {
+                                match widget.save() {
+                                    Ok(()) => {
+                                        *status = "Saved".into();
+                                    }
+                                    Err(e) => {
+                                        widget.status_msg = Some(format!("Save failed: {e}"));
+                                    }
+                                }
+                                dialog::FileEditorAction::Swallow
+                            }
+                            Command::EditorQuit => {
+                                if widget.is_dirty() {
+                                    widget.show_unsaved_dialog();
+                                    dialog::FileEditorAction::UnsavedPromptShowing
+                                } else {
+                                    dialog::FileEditorAction::Close
+                                }
+                            }
+                            _ => dialog::FileEditorAction::Swallow,
+                        }
+                    }
+                    SeqLookup::Pending => {
+                        *status = format!("Chord: {chord_buf:?}");
+                        return Ok(true);
+                    }
+                    SeqLookup::NoMatch => {
+                        chord_buf.clear();
+                        // Fall through to raw editing key handling.
+                        widget.handle_key(key.code, key.modifiers)
+                    }
+                };
+                // (c) FileEditorAction dispatch.
+                match action {
+                    dialog::FileEditorAction::Close | dialog::FileEditorAction::DiscardAndClose => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        chord_buf.clear();
+                    }
+                    dialog::FileEditorAction::SaveAndClose => {
+                        if let Err(e) = widget.save() {
+                            *status = format!("Save failed: {e}");
+                            // Keep editor open so user can retry.
+                        } else {
+                            *active_dialog = None;
+                            *mode = Mode::Pane;
+                            chord_buf.clear();
+                        }
+                    }
+                    dialog::FileEditorAction::Swallow
+                    | dialog::FileEditorAction::UnsavedPromptShowing => {}
+                }
+                return Ok(true);
+            }
             // Feature 052: find-file overlay receives raw key events.
             ActiveDialog::FindFile { widget, root } => {
                 let config = app.config().clone();
@@ -1448,7 +1521,38 @@ async fn dispatch_ui_command(
             // Directory: fall through to core Descend.
         }
         Command::Edit => {
-            queue_external(app, ui, status, ExternalTool::Editor);
+            // Feature 056: open the built-in full-screen editor instead of shelling out.
+            if active_dialog.is_some() {
+                return Ok(());
+            }
+            let p = app.active_pane_state();
+            let Some(idx) = p.focused_entry_index() else {
+                *status = "Nothing to edit".into();
+                return Ok(());
+            };
+            let Some(entry) = p.listing.entries.get(idx) else {
+                return Ok(());
+            };
+            if matches!(entry.meta.kind, cargonaut_vfs::VfsKind::Dir) {
+                *status = "Not a file".into();
+                return Ok(());
+            }
+            let display_name = entry.name.to_string();
+            let raw_path: std::path::PathBuf = {
+                let cwd = p.cwd.display().to_string();
+                let local = cwd.strip_prefix("file://").unwrap_or(&cwd);
+                std::path::PathBuf::from(local).join(&display_name)
+            };
+            let _ = p;
+            match open_file_editor(raw_path, display_name).await {
+                Ok(widget) => {
+                    *active_dialog = Some(ActiveDialog::FileEditor { widget });
+                    *mode = Mode::Editor;
+                }
+                Err(e) => {
+                    *status = format!("Cannot open: {e}");
+                }
+            }
             return Ok(());
         }
         // Feature 049 US2 (FR-005 through FR-008): C-x C-d diff two tagged files.
@@ -1628,38 +1732,6 @@ pub(crate) fn panelize_into_pane(
         sort: Sort::NameAsc,
     });
     ui.find_label = Some(pattern.to_string());
-}
-
-/// Which external tool F4 (editor) launches. F3 uses the built-in viewer (Feature 051).
-#[derive(Debug, Clone, Copy)]
-enum ExternalTool {
-    Editor,
-}
-
-/// Resolve the external editor tool + focused file and queue it for run_loop to execute
-/// (suspending the TUI). No-op with a status message if nothing suitable is focused.
-fn queue_external(app: &App, ui: &mut UiState, status: &mut String, _tool: ExternalTool) {
-    let p = app.active_pane_state();
-    let Some(idx) = p.focused_entry_index() else {
-        *status = "Nothing to open".into();
-        return;
-    };
-    let Some(e) = p.listing.entries.get(idx) else {
-        return;
-    };
-    if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir) {
-        *status = format!("{} is a directory", e.name);
-        return;
-    }
-    let path = p.cwd.join(e.name.as_str());
-    let disp = path.display();
-    let local = disp.strip_prefix("file://").unwrap_or(&disp).to_string();
-    let program = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-    ui.pending_external = Some(PendingExternal {
-        program,
-        args: vec![local],
-        kind: PendingExternalKind::FileOpen,
-    });
 }
 
 /// Feature 049 US2 — validate tagged-file selection and queue the configured
@@ -2316,6 +2388,79 @@ pub async fn open_file_viewer(
     ))
 }
 
+/// Feature 056 — open a file in the built-in editor (FR-007..FR-010, US3 safety limits).
+///
+/// Performs the same binary and size checks as `open_file_viewer`:
+/// - Declines binary files (non-UTF-8 sample) with an I/O error.
+/// - Declines files larger than `STREAMING_THRESHOLD_BYTES` (10 MiB) with an I/O error.
+/// - Detects LF vs CRLF line endings and records them for round-trip preservation.
+pub async fn open_file_editor(
+    raw_path: std::path::PathBuf,
+    display_name: String,
+) -> std::io::Result<dialog::FileEditorDialog> {
+    let resolved = tokio::task::spawn_blocking({
+        let p = raw_path.clone();
+        move || std::fs::canonicalize(&p)
+    })
+    .await
+    .map_err(|e| std::io::Error::other(e.to_string()))??;
+
+    // Read a sample for binary detection (up to BINARY_DETECT_BYTES or the full file).
+    let sample = tokio::task::spawn_blocking({
+        let p = resolved.clone();
+        move || -> std::io::Result<(Vec<u8>, u64)> {
+            use std::io::Read;
+            let mut f = std::fs::File::open(&p)?;
+            let size = f.metadata()?.len();
+            let mut buf = vec![0u8; dialog::BINARY_DETECT_BYTES.min(size as usize)];
+            f.read_exact(&mut buf)?;
+            Ok((buf, size))
+        }
+    })
+    .await
+    .map_err(|e| std::io::Error::other(e.to_string()))??;
+    let (sample_bytes, file_size) = sample;
+
+    if !is_valid_utf8_sample(&sample_bytes) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "binary file cannot be opened in the text editor",
+        ));
+    }
+    if file_size as usize > dialog::STREAMING_THRESHOLD_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "file is too large ({} bytes, max {} MiB)",
+                file_size,
+                dialog::STREAMING_THRESHOLD_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
+
+    let bytes = tokio::task::spawn_blocking({
+        let p = resolved.clone();
+        move || std::fs::read(&p)
+    })
+    .await
+    .map_err(|e| std::io::Error::other(e.to_string()))??;
+
+    let content = String::from_utf8_lossy(&bytes);
+    // Detect line ending from the first occurrence found.
+    let line_ending = if content.contains("\r\n") {
+        dialog::LineEnding::Crlf
+    } else {
+        dialog::LineEnding::Lf
+    };
+
+    Ok(dialog::FileEditorDialog::new(
+        resolved,
+        display_name,
+        content.into_owned(),
+        line_ending,
+    ))
+}
+
 /// Feature 042 — parse a bookmark-add prompt into `(group, name)`. Text of the
 /// form `group/name` splits on the first `/` (both sides trimmed); text with no
 /// `/` is the name with no group.
@@ -2657,6 +2802,8 @@ fn draw_frame(
             ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
             // Feature 051: full-screen overlay — use `area`, not the centred `darea`.
             ActiveDialog::FileViewer { widget } => widget.render(f, area, theme),
+            // Feature 056: full-screen editor — use `area`; render updates viewport_height.
+            ActiveDialog::FileEditor { widget } => widget.render(area, f.buffer_mut(), theme),
             // Feature 052: find-file overlay — manages its own centering.
             ActiveDialog::FindFile { widget, .. } => widget.render(f, area, theme),
         }
@@ -5273,5 +5420,30 @@ mod tests {
             ui.ctrl_o_should_skip(),
             "rapid second press must be skipped"
         );
+    }
+
+    // ---------- open_file_editor decline paths (Feature 056 — US3) ----------
+
+    #[tokio::test]
+    async fn open_file_editor_declines_binary() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        // Write null bytes — will fail the UTF-8 sample check.
+        std::fs::write(f.path(), b"\x00\xff\xfe binary data").unwrap();
+        let result = open_file_editor(f.path().to_path_buf(), "bin".into()).await;
+        assert!(result.is_err(), "binary file should be rejected");
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn open_file_editor_declines_too_large() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        // Write just over the 10 MiB limit.
+        let big = vec![b'a'; dialog::STREAMING_THRESHOLD_BYTES + 1];
+        std::fs::write(f.path(), &big).unwrap();
+        let result = open_file_editor(f.path().to_path_buf(), "large.txt".into()).await;
+        assert!(result.is_err(), "oversized file should be rejected");
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 }

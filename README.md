@@ -6,8 +6,8 @@
 [![CI](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml/badge.svg)](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
-[![Binary](https://img.shields.io/badge/binary-2.9%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-536%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
+[![Binary](https://img.shields.io/badge/binary-3.0%20MiB-success.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-605%20unit%20%2B%2012%20integration-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 21 features since (031–055) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 595 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 22 features since (031–056) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 605 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 3.0 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -209,7 +209,15 @@ for the local filesystem:
   adjusted); resets `scroll_offset` on panel resize. 4 new unit tests.
   (Feature 055, closes #79).
 
-The full per-feature history (Features 001 → 055) lives in
+- **Built-in F4 text editor** — replaces the `$EDITOR` shell-out with an in-process full-screen
+  TUI editor (`FileEditorDialog`): line-by-line editing with cursor navigation (arrows, Home/End,
+  Ctrl-Home/Ctrl-End, PageUp/Down, Backspace, Delete, Enter), F2/Ctrl-S to save (preserves
+  LF/CRLF line endings), F10/Esc/q to quit with a 3-choice unsaved-changes guard (Save/Discard/
+  Cancel, default Cancel). Binary files and files >10 MiB are declined with a status message.
+  Deletes the now-dead `ExternalTool` enum and `queue_external` fn. 10 new green tests.
+  (Feature 056, closes #40).
+
+The full per-feature history (Features 001 → 056) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
