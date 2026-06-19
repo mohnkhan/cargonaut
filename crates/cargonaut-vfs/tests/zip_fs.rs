@@ -255,3 +255,21 @@ async fn zip_fs_listing_is_cached_between_calls() {
         "listing must be consistent across calls"
     );
 }
+
+#[test]
+fn corrupt_zip_open_fails_within_one_second() {
+    // SC-006: ZipFs::open on corrupt bytes must return Err within 1 second.
+    use std::time::{Duration, Instant};
+    let corrupt = b"PK\x03\x04garbage not a real zip archive";
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), corrupt).unwrap();
+    let start = Instant::now();
+    let result = cargonaut_vfs::ZipFs::open(tmp.path().to_path_buf());
+    let elapsed = start.elapsed();
+    assert!(result.is_err(), "corrupt bytes must fail");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "corrupt zip detection must be fast (got {:?})",
+        elapsed
+    );
+}

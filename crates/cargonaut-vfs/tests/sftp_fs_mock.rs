@@ -11,16 +11,11 @@
 
 use async_trait::async_trait;
 use cargonaut_vfs::{
-    ByteRange, DirEntry, DirListing, Sort, VfsBackend, VfsCaps, VfsError, VfsKind, VfsMetadata,
-    VfsPath, WriteMode,
-    // T023 red: these do not exist yet → compile error
+    ByteRange, Sort, VfsBackend, VfsCaps, VfsError, VfsKind, VfsMetadata, VfsPath, WriteMode,
     SftpCredentials, SftpOps,
 };
-use futures::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use smol_str::SmolStr;
+use futures::AsyncWriteExt;
 use std::collections::HashMap;
-use std::io::Cursor;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tracing_subscriber::prelude::*;
@@ -28,6 +23,7 @@ use tracing_subscriber::prelude::*;
 // ─── Mock SftpOps implementation ─────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct MockEntry {
     name: String,
     size: u64,
@@ -40,6 +36,7 @@ struct MockEntry {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum MockAction {
     /// Return the DirListing for the path.
     Listing(Vec<MockEntry>),
@@ -102,7 +99,7 @@ impl MockSftpOps {
         self
     }
 
-    fn with_transport_failures(mut self, count: usize) -> Self {
+    fn with_transport_failures(self, count: usize) -> Self {
         *self.transport_fail_count.lock().unwrap() = count;
         self
     }
@@ -436,7 +433,6 @@ async fn sftp_fs_transport_failure_retries_up_to_3_times_then_io() {
 #[tokio::test]
 async fn sftp_fs_transport_failure_succeeds_after_retry() {
     // 2 transport failures then success — within the 3-retry budget
-    let entry = dir_entry("root_entry");
     let ops = MockSftpOps::new()
         .with_transport_failures(2)
         .with_stat("/ok.txt", file_entry("ok.txt", 42));

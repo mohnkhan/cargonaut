@@ -57,6 +57,8 @@ mode = "pane"
 key = "Up"
 action = "cursor-up"
 
+# Feature 057: enter on .zip/.tar/.tar.gz/.tar.bz2/.tar.xz files mounts an
+# archive backend and navigates the pane into it (browse-only, read-only).
 [[binding]]
 mode = "pane"
 key = "Enter"

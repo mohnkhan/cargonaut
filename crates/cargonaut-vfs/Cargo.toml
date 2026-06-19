@@ -45,5 +45,11 @@ suppaftp = { version = "8", features = ["tokio"], optional = true }
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "rt"] }
 tracing-subscriber = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+zip = { version = "2" }
+
+[[bench]]
+name = "archive_listing"
+harness = false
