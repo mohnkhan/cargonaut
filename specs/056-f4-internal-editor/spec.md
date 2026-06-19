@@ -113,6 +113,6 @@ A user accidentally presses F4 on a binary file, a very large file, or a directo
 - **Line endings**: The file is read and written with its original line endings preserved (LF or CRLF detected on first read; saved identically).
 - **File size limit default**: 10 MiB. This is configurable through the existing `cargonaut-config` system (a new `ui.editor_max_file_mib` key with default 10).
 - **No undo in P1**: Undo/redo is a known gap — deferred to a follow-up feature. The spec notes this explicitly so users set expectations correctly.
-- **Tab display**: Tabs are displayed as 4 spaces visually; written back as literal `\t` bytes. Tab width is not configurable in this feature.
+- **Tab display**: Tabs are displayed as 4 hard-coded visual spaces; written back as literal `\t` bytes on disk. Tab width is fixed at 4 and is not user-configurable in this feature.
 - **Concurrency**: The file is opened by the TUI event loop. No background I/O thread is needed for saving (files ≤10 MiB save synchronously in ≪1 ms on local storage).
 - **The existing F3 built-in viewer (Feature 051) is unaffected**: only the F4 code path changes.
