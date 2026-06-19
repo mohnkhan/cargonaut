@@ -31,14 +31,16 @@ nix = { workspace = true }
 tracing = { workspace = true }
 
 # Archives feature deps
-zip = { version = "2", optional = true }
+# Use deflate-only (pure-Rust via miniz_oxide) to avoid zstd-sys / xz2 C compilation
+# in the ZIP reader; bzip2/xz within ZIP archives are rare in practice.
+zip = { version = "2", default-features = false, features = ["deflate", "aes-crypto"], optional = true }
 tar = { version = "0.4", optional = true }
 flate2 = { version = "1.1", optional = true }
 bzip2 = { version = "0.6", optional = true }
 xz2 = { version = "0.1", optional = true }
 
 # Remote feature deps
-russh = { version = "0.61", features = ["aws-lc-rs"], optional = true }
+russh = { version = "0.61", default-features = false, features = ["ring", "rsa"], optional = true }
 russh-sftp = { version = "2.1", optional = true }
 suppaftp = { version = "8", features = ["tokio"], optional = true }
 
@@ -48,7 +50,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "rt"] }
 tracing-subscriber = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports"] }
-zip = { version = "2" }
+zip = { version = "2", default-features = false, features = ["deflate", "aes-crypto"] }
 
 [[bench]]
 name = "archive_listing"
