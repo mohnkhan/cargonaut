@@ -2212,6 +2212,10 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::RecursiveDirSize => AppCommand::RecursiveDirSize,
         U::CompareDirectories => AppCommand::CompareDirectories,
         U::UndoLastOp => AppCommand::UndoLastOp,
+        U::NewTab => AppCommand::TabNew,
+        U::CloseTab => AppCommand::TabClose,
+        U::TabNext => AppCommand::TabNext,
+        U::TabPrev => AppCommand::TabPrev,
         _ => return None,
     })
 }

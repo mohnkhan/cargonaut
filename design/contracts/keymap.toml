@@ -169,6 +169,16 @@ action = "close-tab"
 
 [[binding]]
 mode = "pane"
+key = "]"
+action = "tab-next"
+
+[[binding]]
+mode = "pane"
+key = "["
+action = "tab-prev"
+
+[[binding]]
+mode = "pane"
 key = "C-f"
 action = "filter-current-dir"
 
