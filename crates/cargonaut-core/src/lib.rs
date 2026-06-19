@@ -588,12 +588,13 @@ pub enum UndoEntry {
 // App
 // =====================================================================
 
-/// Application root. Owns config + two panes + transfer registry +
-/// active-dialog state. Dispatch is async because some commands (cd,
-/// copy) call into the VFS / transfer engine.
+/// Application root. Owns config + two pane sides (each with a tab list) +
+/// transfer registry + active-dialog state. Dispatch is async because some
+/// commands (cd, copy) call into the VFS / transfer engine.
 pub struct App {
     config: cargonaut_config::Config,
-    panes: [PaneState; 2],
+    /// Per-side tab state. Index 0 = Left, 1 = Right (via [`pane_idx`]).
+    sides: [SideState; 2],
     active: PaneId,
     local_fs: Arc<dyn VfsBackend>,
     transfers: HashMap<TransferId, TransferJob>,
@@ -638,35 +639,37 @@ impl App {
 
         let show_hidden = config.ui.show_hidden;
 
-        let mut panes = [
-            PaneState {
-                cwd: left_p,
-                listing: left_listing,
-                cursor: 0,
-                selected: BTreeSet::new(),
-                show_hidden,
-                sort: Sort::NameAsc,
-                filter: None,
-                dir_history_back: Vec::new(),
-                dir_history_fwd: Vec::new(),
-            },
-            PaneState {
-                cwd: right_p,
-                listing: right_listing,
-                cursor: 0,
-                selected: BTreeSet::new(),
-                show_hidden,
-                sort: Sort::NameAsc,
-                filter: None,
-                dir_history_back: Vec::new(),
-                dir_history_fwd: Vec::new(),
-            },
-        ];
+        let mut left_tab = PaneState {
+            cwd: left_p,
+            listing: left_listing,
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: Vec::new(),
+            dir_history_fwd: Vec::new(),
+        };
+        let mut right_tab = PaneState {
+            cwd: right_p,
+            listing: right_listing,
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: Vec::new(),
+            dir_history_fwd: Vec::new(),
+        };
         // Feature 040 (FR-014): start the cursor on the first real entry, past
         // the synthetic `..` row in a non-root directory.
-        for p in &mut panes {
-            p.cursor = p.default_cursor();
-        }
+        left_tab.cursor = left_tab.default_cursor();
+        right_tab.cursor = right_tab.default_cursor();
+
+        let sides = [
+            SideState { tabs: vec![left_tab], active_tab: 0 },
+            SideState { tabs: vec![right_tab], active_tab: 0 },
+        ];
 
         // Feature 042 — load the persisted hotlist (best-effort: a missing or
         // malformed state file degrades to an empty list, never blocks launch).
@@ -675,7 +678,7 @@ impl App {
 
         Ok(Self {
             config,
-            panes,
+            sides,
             active: PaneId::Left,
             local_fs,
             transfers: HashMap::new(),
@@ -736,13 +739,14 @@ impl App {
         self.active
     }
 
-    /// Read-only access to a specific pane.
+    /// Read-only access to a specific pane's active tab.
     pub fn pane(&self, id: PaneId) -> &PaneState {
         let idx = pane_idx(id);
-        &self.panes[idx]
+        let s = &self.sides[idx];
+        &s.tabs[s.active_tab]
     }
 
-    /// Read-only access to the active pane.
+    /// Read-only access to the active pane's active tab.
     pub fn active_pane_state(&self) -> &PaneState {
         self.pane(self.active)
     }
@@ -1337,12 +1341,16 @@ impl App {
 
     fn active_pane_mut(&mut self) -> &mut PaneState {
         let idx = pane_idx(self.active);
-        &mut self.panes[idx]
+        let s = &mut self.sides[idx];
+        let at = s.active_tab;
+        &mut s.tabs[at]
     }
 
     fn pane_mut(&mut self, id: PaneId) -> &mut PaneState {
         let idx = pane_idx(id);
-        &mut self.panes[idx]
+        let s = &mut self.sides[idx];
+        let at = s.active_tab;
+        &mut s.tabs[at]
     }
 
     /// Names of entries the user "means" by their current selection:
