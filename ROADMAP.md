@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-19 (Feature 051 closed #39 — built-in F3 viewer; Feature 047 closed #50 — user menu + help).
+**Last updated**: 2026-06-19 (Feature 054 closed #44 — persistent subshell Ctrl-o; opened #79 — scrollback render follow-up).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,7 +42,7 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| _(none — Tier 3 is clear; #49 closed by Feature 046, #30 closed by Feature 045, #70 closed by Feature 048)_ | | | |
+| [#79](https://github.com/mohnkhan/cargonaut/issues/79) | Subshell scrollback rendering: wire scroll_offset into render | S–M | Feature 054 US2 follow-up — scroll_offset tracked; render always starts at row 0 |
 
 ---
 
@@ -56,7 +56,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 | [#40](https://github.com/mohnkhan/cargonaut/issues/40) | Internal full-screen editor F4 | XL | Feature 031 — F4 `$EDITOR` shell-out ships |
 | ~~[#41](https://github.com/mohnkhan/cargonaut/issues/41)~~ | ~~Find-file (name + content) + external panelize~~ | ~~L~~ | **Closed — Feature 052** |
 | ~~[#43](https://github.com/mohnkhan/cargonaut/issues/43)~~ | ~~Compare directories + diff two tagged files~~ | ~~M~~ | **Closed — Feature 049** |
-| [#44](https://github.com/mohnkhan/cargonaut/issues/44) | Persistent subshell integration (Ctrl-o) | L | Feature 031 §Out of Scope |
+| ~~[#44](https://github.com/mohnkhan/cargonaut/issues/44)~~ | ~~Persistent subshell integration (Ctrl-o)~~ | ~~L~~ | **Closed — Feature 054** |
 | ~~[#45](https://github.com/mohnkhan/cargonaut/issues/45)~~ | ~~Tabs: multiple panels per side~~ | ~~L~~ | **Closed — Feature 053** |
 | ~~[#47](https://github.com/mohnkhan/cargonaut/issues/47)~~ | ~~Bulk rename via editor + undo of file ops~~ | ~~M~~ | **Closed — Feature 050** |
 | [#48](https://github.com/mohnkhan/cargonaut/issues/48) | VFS backends: archives + remote (SFTP/FTP/sh) | XL | Feature 031 §Out of Scope — already Phase 2+ roadmapped |

@@ -491,7 +491,10 @@ impl Config {
             use figment::providers::{Format, Toml};
             fig = fig.merge(Toml::file(&path));
         }
-        with_env(fig).extract().map_err(figment_err).map(Config::normalize)
+        with_env(fig)
+            .extract()
+            .map_err(figment_err)
+            .map(Config::normalize)
     }
 
     /// Load from the given TOML file path layered on defaults. **Does not**
