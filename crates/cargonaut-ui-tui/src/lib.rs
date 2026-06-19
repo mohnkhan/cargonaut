@@ -5807,4 +5807,53 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
+
+    // ---------- HostKeyVerify dialog (Feature 057 — T026 red) ----------
+
+    /// T026 (red): `ActiveDialog::HostKeyVerify` must exist with `fingerprint`
+    /// and `accept_tx` fields.  The corresponding `HostKeyVerifyDialog` widget
+    /// must expose an `accept()` and `reject()` method (called by the key
+    /// handler in T027 green).  These tests compile-fail until T027 adds the
+    /// variant and widget.
+
+    #[test]
+    fn host_key_verify_dialog_variant_holds_fingerprint() {
+        let (accept_tx, _accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        // T027 green: this variant must exist.
+        let dlg: Option<ActiveDialog> = Some(ActiveDialog::HostKeyVerify {
+            fingerprint: "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
+            accept_tx,
+        });
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::HostKeyVerify { ref fingerprint, .. })
+                if fingerprint.starts_with("SHA256:")
+        ));
+    }
+
+    #[test]
+    fn host_key_verify_widget_accept_sends_true() {
+        // T027 green: dialog::HostKeyVerifyDialog must exist with an accept() method.
+        let (accept_tx, accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        let mut widget = dialog::HostKeyVerifyDialog::new(
+            "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
+            accept_tx,
+        );
+        widget.accept();
+        let accepted = accept_rx.try_recv().expect("accept() must send immediately");
+        assert!(accepted, "accept() must send true");
+    }
+
+    #[test]
+    fn host_key_verify_widget_reject_sends_false() {
+        // T027 green: dialog::HostKeyVerifyDialog must exist with a reject() method.
+        let (accept_tx, accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        let mut widget = dialog::HostKeyVerifyDialog::new(
+            "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
+            accept_tx,
+        );
+        widget.reject();
+        let accepted = accept_rx.try_recv().expect("reject() must send immediately");
+        assert!(!accepted, "reject() must send false");
+    }
 }
