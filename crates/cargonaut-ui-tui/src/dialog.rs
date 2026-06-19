@@ -3959,4 +3959,97 @@ mod tests {
         assert_eq!(d.handle_key(KeyCode::Up), FileViewerAction::Swallow);
         assert_eq!(d.current_scroll_offset(), 0);
     }
+
+    // ========================================================================
+    // Feature 052 T004 (red) — FindFileDialog pure-function tests
+    // ========================================================================
+
+    // T004a: plan_content_available truth table (contract §3a)
+    #[test]
+    fn plan_content_available_with_valid_rg() {
+        // If rg is on PATH, must return true.
+        if std::process::Command::new("rg")
+            .arg("--version")
+            .status()
+            .is_ok()
+        {
+            assert!(
+                plan_content_available("rg"),
+                "rg found on PATH — plan_content_available must return true"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_content_available_with_nonexistent_binary() {
+        assert!(
+            !plan_content_available("/this/binary/does/not/exist/rg"),
+            "non-existent binary must return false"
+        );
+    }
+
+    // T004b: SearchMode Tab-toggle truth table (contract §3a)
+    #[test]
+    fn search_mode_tab_toggle_name_to_content_when_available() {
+        let mut d = FindFileDialog::new(true);
+        assert_eq!(d.mode, SearchMode::Name, "starts in Name mode");
+        let outcome = d.handle_key(KeyCode::Tab, &cargonaut_config::Config::default());
+        // Should toggle to Content without error
+        assert_eq!(d.mode, SearchMode::Content, "Tab must switch to Content when content_available");
+        // outcome should be Consumed (not Panelize or Cancelled)
+        assert!(
+            !matches!(outcome, FindOutcome::Panelize { .. } | FindOutcome::Cancelled),
+            "Tab must return Consumed outcome, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn search_mode_tab_toggle_is_noop_when_content_unavailable() {
+        let mut d = FindFileDialog::new(false);
+        assert_eq!(d.mode, SearchMode::Name);
+        d.handle_key(KeyCode::Tab, &cargonaut_config::Config::default());
+        assert_eq!(d.mode, SearchMode::Name, "Tab must not switch to Content when unavailable");
+    }
+
+    // T004c: Enter key phase-transition truth table (contract §3b rows InputFocused / ResultsFocused)
+    #[test]
+    fn enter_in_input_focused_starts_walk_transitions_to_walking() {
+        let mut d = FindFileDialog::new(false);
+        assert_eq!(d.phase, DialogPhase::InputFocused);
+        d.input = "*.toml".to_string();
+        // Enter should start a walk → phase becomes Walking
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let _outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        });
+        // After Enter in InputFocused, phase must be Walking or ResultsFocused (if instant)
+        assert!(
+            d.phase == DialogPhase::Walking || d.phase == DialogPhase::ResultsFocused,
+            "Enter in InputFocused must transition to Walking or ResultsFocused, got {:?}", d.phase
+        );
+    }
+
+    #[test]
+    fn enter_in_results_focused_returns_panelize() {
+        let mut d = FindFileDialog::new(false);
+        // Manually inject results and set phase to ResultsFocused
+        d.results = vec![std::path::PathBuf::from("/tmp/foo.toml")];
+        d.phase = DialogPhase::ResultsFocused;
+        let outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        assert!(
+            matches!(outcome, FindOutcome::Panelize { .. }),
+            "Enter in ResultsFocused must return Panelize, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn enter_in_no_results_phase_is_noop() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::NoResults;
+        let outcome = d.handle_key(KeyCode::Enter, &cargonaut_config::Config::default());
+        assert!(
+            !matches!(outcome, FindOutcome::Panelize { .. }),
+            "Enter in NoResults must not return Panelize"
+        );
+    }
 }
