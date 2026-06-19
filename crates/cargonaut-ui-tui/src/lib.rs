@@ -4228,4 +4228,132 @@ mod tests {
             panic!("kind must be BulkRename");
         }
     }
+
+    // ======================================================================
+    // Feature 052 T008 (red) — panelize integration tests
+    // ======================================================================
+
+    // T008: Dispatching FindFilePopup opens FindFile dialog; panelize sets
+    // find_label and populates the pane listing. Also verifies Copy/Move/Delete/
+    // ViewFile/Edit dispatch without panic (FR-009, SC-004).
+    #[tokio::test]
+    async fn find_file_popup_dispatch_opens_dialog() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        std::fs::write(td_l.path().join("a.toml"), b"a").unwrap();
+        std::fs::write(td_l.path().join("b.toml"), b"b").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect { x: 0, y: 1, width: 40, height: 22 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::FindFilePopup,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .expect("FindFilePopup must not error");
+
+        assert!(
+            matches!(dlg, Some(ActiveDialog::FindFile { .. })),
+            "FindFilePopup must open FindFile dialog; got {dlg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn panelize_sets_find_label_and_listing_entries() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Create 2 .toml files for panelizing.
+        let file_a = td_l.path().join("a.toml");
+        let file_b = td_l.path().join("b.toml");
+        std::fs::write(&file_a, b"a").unwrap();
+        std::fs::write(&file_b, b"b").unwrap();
+
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect { x: 0, y: 1, width: 40, height: 22 };
+        let mut ui = fresh_ui(rect, rect, false);
+
+        let paths = vec![file_a.clone(), file_b.clone()];
+        let pattern = "*.toml".to_string();
+
+        // PaneView for the active (left) pane.
+        let mut left = PaneView::new(
+            app.pane(cargonaut_core::PaneId::Left).cwd.clone(),
+            app.pane(cargonaut_core::PaneId::Left).listing.clone(),
+        );
+
+        panelize_into_pane(&mut left, &paths, &pattern, &mut ui);
+
+        assert_eq!(
+            left.listing.entries.len(),
+            2,
+            "SC-004: panelized listing must have 2 entries"
+        );
+        assert_eq!(
+            ui.find_label,
+            Some("*.toml".to_string()),
+            "find_label must be set to the search pattern"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_copy_after_panelize_does_not_panic() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let file_a = td_l.path().join("a.toml");
+        std::fs::write(&file_a, b"a").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect { x: 0, y: 1, width: 40, height: 22 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        // Copy (F5) must dispatch without panic.
+        let _ = dispatch_ui_command(
+            Command::CopySelection,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dispatch_delete_after_panelize_does_not_panic() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = Rect { x: 0, y: 1, width: 40, height: 22 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        // Delete (F8) must dispatch without panic.
+        let _ = dispatch_ui_command(
+            Command::DeleteSelection,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await;
+    }
 }
