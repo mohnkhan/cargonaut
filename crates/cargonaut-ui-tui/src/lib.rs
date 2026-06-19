@@ -1507,6 +1507,53 @@ async fn dispatch_ui_command(
                     std::path::PathBuf::from(local).join(&display_name)
                 };
                 let _ = p;
+
+                // Feature 057 US1: .zip files open as archive backends, not in the viewer.
+                if display_name.to_lowercase().ends_with(".zip") {
+                    let id = app.active_pane();
+                    let archive_path = raw_path.clone();
+                    let zip_result = tokio::task::spawn_blocking(move || {
+                        cargonaut_vfs::ZipFs::open(archive_path)
+                    })
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()));
+                    match zip_result {
+                        Ok(Ok(zip_fs)) => {
+                            let encoded_auth = encode_archive_authority(
+                                raw_path.to_str().unwrap_or(""),
+                            );
+                            let zip_url = format!("zip://{encoded_auth}/");
+                            match cargonaut_vfs::VfsPath::parse(&zip_url) {
+                                Ok(zip_path) => {
+                                    match app
+                                        .navigate_into(
+                                            id,
+                                            zip_path,
+                                            std::sync::Arc::new(zip_fs),
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            *status = format!("Cannot browse archive: {e}");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    *status = format!("Archive path encoding error: {e}");
+                                }
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            *status = format!("Cannot open archive: {e}");
+                        }
+                        Err(e) => {
+                            *status = format!("Archive open failed: {e}");
+                        }
+                    }
+                    return Ok(());
+                }
+
                 match open_file_viewer(raw_path, display_name).await {
                     Ok(widget) => {
                         *active_dialog = Some(ActiveDialog::FileViewer { widget });
@@ -2583,6 +2630,20 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
 ///
 /// Joins segments with `/`; prepends `/` for the root. Non-`file` scheme
 /// paths (sftp, s3) fall back to `/` since the subshell can't cd to them.
+/// Percent-encode a host filesystem path for use as a `VfsPath` authority.
+/// Only `%` and `/` are encoded; all other bytes are passed through unchanged.
+fn encode_archive_authority(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() * 3);
+    for c in path.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '/' => out.push_str("%2F"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn vfs_path_to_local(vpath: &cargonaut_vfs::types::VfsPath) -> std::path::PathBuf {
     if vpath.scheme != "file" {
         return std::path::PathBuf::from("/");

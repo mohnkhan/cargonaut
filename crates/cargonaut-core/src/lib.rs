@@ -1367,6 +1367,20 @@ impl App {
 
     /// Reload the active pane's listing from disk. Cursor + selection are
     /// preserved if the cursor is still in bounds; otherwise clamped.
+    /// Navigate a pane to `path` using an explicitly-supplied `backend`.
+    ///
+    /// Called by the UI layer when mounting an archive backend (zip://, tar://)
+    /// or connecting to a remote backend (sftp://, ftp://) before navigating.
+    pub async fn navigate_into(
+        &mut self,
+        id: PaneId,
+        path: VfsPath,
+        backend: Arc<dyn VfsBackend>,
+    ) -> Result<Vec<Event>, AppError> {
+        self.navigate_to(id, path, backend).await
+    }
+
+    /// Re-list the active pane's directory and clamp the cursor.
     pub async fn refresh_active_pane(&mut self) -> Result<Vec<Event>, AppError> {
         let id = self.active;
         let cwd = self.pane(id).cwd.clone();
