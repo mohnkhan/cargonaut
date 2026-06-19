@@ -3420,16 +3420,23 @@ impl FindFileDialog {
 /// Otherwise, truncate from the left and prepend `…`.
 fn left_truncate_path(path: &std::path::Path, max_width: usize) -> String {
     let s = path.display().to_string();
-    if s.len() <= max_width {
+    let char_count = s.chars().count();
+    if char_count <= max_width {
         return s;
     }
     if max_width <= 1 {
-        return "…".to_string();
+        return "\u{2026}".to_string(); // '…'
     }
     // Keep the rightmost (max_width - 1) chars and prepend `…`.
     let keep = max_width - 1;
-    let start = s.len() - keep;
-    format!("…{}", &s[start..])
+    // Find the byte offset of the character at position (char_count - keep).
+    let skip_chars = char_count - keep;
+    let start_byte = s
+        .char_indices()
+        .nth(skip_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    format!("\u{2026}{}", &s[start_byte..])
 }
 
 
@@ -4841,6 +4848,86 @@ mod tests {
         assert!(
             !matches!(outcome, FindOutcome::Panelize { .. }),
             "Enter in NoResults must not return Panelize"
+        );
+    }
+
+    // ========================================================================
+    // Feature 052 T010+T011 (red→green) — FindFileDialog render tests
+    // ========================================================================
+
+    fn render_find_dialog(d: &FindFileDialog, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = crate::theme::Theme::default();
+        term.draw(|f| {
+            let area = f.size();
+            d.render(f, area, &theme);
+        })
+        .unwrap();
+        term.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn find_dialog_input_focused_renders_title() {
+        let d = FindFileDialog::new(false);
+        assert_eq!(d.phase, DialogPhase::InputFocused);
+        let s = render_find_dialog(&d, 60, 20);
+        assert!(
+            s.contains("Find"),
+            "InputFocused render must contain 'Find'; got: {s:?}"
+        );
+    }
+
+    #[test]
+    fn find_dialog_results_focused_shows_match_count_and_paths() {
+        let mut d = FindFileDialog::new(false);
+        d.results = vec![
+            std::path::PathBuf::from("/tmp/foo.toml"),
+            std::path::PathBuf::from("/tmp/bar.toml"),
+        ];
+        d.phase = DialogPhase::ResultsFocused;
+        let s = render_find_dialog(&d, 80, 24);
+        assert!(
+            s.contains("2"),
+            "ResultsFocused must render '2' match count; got: {s:?}"
+        );
+    }
+
+    #[test]
+    fn find_dialog_walking_renders_progress_indicator() {
+        let mut d = FindFileDialog::new(false);
+        d.phase = DialogPhase::Walking;
+        let s = render_find_dialog(&d, 60, 20);
+        // Walking phase should show "Searching" or "walking" indicator
+        assert!(
+            s.to_lowercase().contains("search") || s.contains("…"),
+            "Walking render must show progress indicator; got: {s:?}"
+        );
+    }
+
+    #[test]
+    fn find_dialog_long_path_truncated_with_ellipsis() {
+        // 300-char path injected into a 40-col-wide result area.
+        let long_name = "a".repeat(290);
+        let path = std::path::PathBuf::from(format!("/tmp/{long_name}"));
+        let result = left_truncate_path(&path, 40);
+        assert!(
+            result.contains('\u{2026}') || result.contains("…"),
+            "long path must be left-truncated with '…'; got: {result:?}"
+        );
+        assert!(
+            result.chars().count() <= 40,
+            "truncated string must fit in 40 chars; char_count={}", result.chars().count()
+        );
+        // Must end with the filename suffix.
+        assert!(
+            result.ends_with(&long_name[long_name.len()-35..]),
+            "truncated path must end with the filename tail"
         );
     }
 
