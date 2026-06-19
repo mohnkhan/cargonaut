@@ -15,6 +15,7 @@ use std::pin::Pin;
 ///
 /// Full implementation: Task T013 (Phase 3).
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct ZipFs {
     /// Absolute path to the archive file on the host filesystem.
     pub(crate) archive_path: PathBuf,

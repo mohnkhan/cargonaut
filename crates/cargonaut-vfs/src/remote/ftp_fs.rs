@@ -14,6 +14,7 @@ use std::pin::Pin;
 ///
 /// Full implementation: Task T031 (Phase 6).
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct FtpFs {
     /// `"user@host:port"` authority string.
     pub(crate) authority: smol_str::SmolStr,

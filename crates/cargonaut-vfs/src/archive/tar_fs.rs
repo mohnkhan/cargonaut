@@ -46,6 +46,7 @@ impl TarCompression {
 ///
 /// Full implementation: Task T020 (Phase 4).
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct TarFs {
     /// Absolute path to the archive file on the host filesystem.
     pub(crate) archive_path: PathBuf,
