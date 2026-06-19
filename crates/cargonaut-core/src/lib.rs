@@ -5630,29 +5630,40 @@ mod tests {
     // ===== Feature 053: T019 (red) — cross-pane operation tests =====
     // Verify that cross-pane ops use each side's ACTIVE tab.
 
+    // Helper: make an app rooted in `inner/` (a subdir of td_parent) to avoid /tmp listing races.
+    // Ascending from `inner/` lands in td_parent (the test's own temp dir), not in /tmp.
+    async fn make_nested_app(td_parent: &TempDir, td_r: &TempDir) -> (App, String) {
+        let inner = td_parent.path().join("inner");
+        tokio::fs::create_dir_all(&inner).await.unwrap();
+        let app = App::new(
+            cargonaut_config::Config::default(),
+            inner.to_str().unwrap(),
+            td_r.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        let inner_cwd = app.pane(PaneId::Left).cwd.display();
+        (app, inner_cwd)
+    }
+
     #[tokio::test]
     async fn cross_pane_copy_dest_is_active_tab_cwd() {
-        // left tab 0 = td_l; left tab 1 = parent of td_l (via Ascend after TabNew)
-        let td_l = TempDir::new().unwrap();
+        let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        // Write a file to right pane so we have something to copy
         tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
-        let mut app = make_app(&td_l, &td_r).await;
-        // Open tab 2 on left (active_tab = 1, cwd = td_l)
+        let (mut app, inner_cwd) = make_nested_app(&td_parent, &td_r).await;
+        // Open tab 2; ascend into td_parent (test's own temp dir, not /tmp itself)
         app.dispatch(Command::TabNew).await.unwrap();
-        // Navigate tab 2 up (Ascend)
         app.dispatch(Command::Ascend).await.unwrap();
-        let tab1_cwd = app.sides[0].tabs[0].cwd.display();
         let tab2_cwd = app.sides[0].tabs[1].cwd.display();
-        assert_ne!(tab1_cwd, tab2_cwd, "tabs should have different cwds");
-        // Switch left to tab 1 (active_tab = 0) and focus right
+        assert_ne!(tab2_cwd, inner_cwd, "tab 2 should have a different cwd after Ascend");
+        // Switch back to tab 1 (active_tab = 0) and focus right
         app.dispatch(Command::TabPrev).await.unwrap();
         assert_eq!(app.sides[0].active_tab, 0);
+        assert_eq!(app.pane(PaneId::Left).cwd.display(), inner_cwd, "active tab should be inner");
         app.dispatch(Command::FocusRight).await.unwrap();
-        // Select the file and dispatch Copy (opens dialog)
         app.dispatch(Command::SelectionToggle).await.unwrap();
         let events = app.dispatch(Command::Copy).await.unwrap();
-        // The dialog body must mention tab 0's cwd (td_l), not tab 1's cwd
         let body = events.iter().find_map(|e| {
             if let Event::DialogRequested(DialogKind::Confirm { body, .. }) = e {
                 Some(body.clone())
@@ -5661,30 +5672,22 @@ mod tests {
             }
         });
         let body = body.expect("expected DialogRequested event");
-        // The dialog body should say the copy goes TO tab 0's cwd (td_l).
-        // We check the active left pane's cwd directly equals tab 0's cwd.
-        assert_eq!(
-            app.pane(PaneId::Left).cwd.display(),
-            tab1_cwd,
-            "active left pane cwd should be tab 0 cwd after TabPrev"
-        );
         assert!(
-            body.contains(&tab1_cwd),
-            "copy dialog body should contain tab 0 cwd ({tab1_cwd}), got: {body}"
+            body.contains(&inner_cwd),
+            "copy dialog body should contain active tab cwd ({inner_cwd}), got: {body}"
         );
     }
 
     #[tokio::test]
     async fn cross_pane_copy_after_tab_switch_uses_new_active() {
-        let td_l = TempDir::new().unwrap();
+        let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
-        let mut app = make_app(&td_l, &td_r).await;
-        // Open tab 2 on left; navigate to parent
+        let (mut app, _inner_cwd) = make_nested_app(&td_parent, &td_r).await;
+        // Open tab 2 and ascend to td_parent; keep tab 2 as active (active_tab = 1)
         app.dispatch(Command::TabNew).await.unwrap();
         app.dispatch(Command::Ascend).await.unwrap();
-        let tab2_cwd = app.sides[0].tabs[1].cwd.display(); // parent of td_l
-        // Keep tab 2 active (active_tab = 1); focus right
+        let tab2_cwd = app.sides[0].tabs[1].cwd.display();
         assert_eq!(app.sides[0].active_tab, 1);
         app.dispatch(Command::FocusRight).await.unwrap();
         app.dispatch(Command::SelectionToggle).await.unwrap();
@@ -5705,24 +5708,20 @@ mod tests {
 
     #[tokio::test]
     async fn sync_other_panel_uses_active_tab_cwd() {
-        let td_l = TempDir::new().unwrap();
+        let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
-        let mut app = make_app(&td_l, &td_r).await;
-        // Open tab 2 on left; navigate to parent (now left tab 2 cwd = parent of td_l)
+        let (mut app, _inner_cwd) = make_nested_app(&td_parent, &td_r).await;
+        // Open tab 2; ascend to td_parent; switch back to tab 1; then switch to tab 2
         app.dispatch(Command::TabNew).await.unwrap();
         app.dispatch(Command::Ascend).await.unwrap();
         let tab2_cwd = app.sides[0].tabs[1].cwd.display();
-        // Switch back to left tab 1 to set up: active_tab = 0 on left
         app.dispatch(Command::TabPrev).await.unwrap();
         assert_eq!(app.sides[0].active_tab, 0);
-        // Now switch to left tab 2 (TabNext → active_tab = 1)
         app.dispatch(Command::TabNext).await.unwrap();
         assert_eq!(app.sides[0].active_tab, 1);
-        // Focus right; dispatch SyncOtherPanelPath (copies OTHER pane's cwd into active)
-        // SyncOtherPanelPath copies the OTHER pane's active tab cwd into the ACTIVE pane
+        // Focus right; dispatch SyncOtherPanelPath (syncs right to OTHER pane = left's active tab)
         app.dispatch(Command::FocusRight).await.unwrap();
         app.dispatch(Command::SyncOtherPanelPath).await.unwrap();
-        // Right pane's cwd should now match left's active tab (tab 2) cwd
         assert_eq!(
             app.pane(PaneId::Right).cwd.display(),
             tab2_cwd,
@@ -5732,18 +5731,18 @@ mod tests {
 
     #[tokio::test]
     async fn dialog_dest_captured_at_open_time() {
-        // Verify that dialog body captures the destination at dialog-open time.
-        let td_l = TempDir::new().unwrap();
+        let td_parent = TempDir::new().unwrap();
         let td_r = TempDir::new().unwrap();
         tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
-        let mut app = make_app(&td_l, &td_r).await;
-        // Left pane is focused; open tab 2 (cwd = td_l, same as tab 1)
+        let (mut app, inner_cwd) = make_nested_app(&td_parent, &td_r).await;
+        // Open tab 2 and ascend; switch back to tab 1 (active_tab = 0, cwd = inner)
         app.dispatch(Command::TabNew).await.unwrap();
         app.dispatch(Command::Ascend).await.unwrap();
-        // Switch left back to tab 0 (active_tab = 0, cwd = td_l)
         app.dispatch(Command::TabPrev).await.unwrap();
-        let dest_at_open = app.sides[0].tabs[app.sides[0].active_tab].cwd.display();
-        // Focus right, select file, open copy dialog
+        assert_eq!(app.sides[0].active_tab, 0);
+        let dest_at_open = app.pane(PaneId::Left).cwd.display();
+        assert_eq!(dest_at_open, inner_cwd);
+        // Focus right; select file; open copy dialog
         app.dispatch(Command::FocusRight).await.unwrap();
         app.dispatch(Command::SelectionToggle).await.unwrap();
         let events = app.dispatch(Command::Copy).await.unwrap();
@@ -5755,11 +5754,131 @@ mod tests {
             }
         });
         let body = body.expect("expected DialogRequested");
-        // Dialog body must contain the destination cwd at dialog-open time
         assert!(
             body.contains(&dest_at_open),
             "dialog body should capture dst at open time ({dest_at_open}), got: {body}"
         );
+    }
+
+    // ===== Feature 053: T021 (red) — state isolation tests =====
+
+    #[tokio::test]
+    async fn tab_state_filter_is_isolated() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Set filter on tab 0
+        app.set_filter("xyz_no_match").unwrap();
+        assert!(app.pane(PaneId::Left).filter.is_some(), "tab 0 should have filter");
+        // Open tab 1 (inherits no filter)
+        app.dispatch(Command::TabNew).await.unwrap();
+        assert!(app.pane(PaneId::Left).filter.is_none(), "tab 1 should have no filter");
+        // Switch back to tab 0; filter should still be there
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert!(app.pane(PaneId::Left).filter.is_some(), "tab 0 filter should persist");
+    }
+
+    #[tokio::test]
+    async fn tab_state_sort_is_isolated() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Cycle sort on tab 0 (NameAsc → ExtAsc per next_sort_key)
+        app.dispatch(Command::CycleSortKey).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::ExtAsc, "tab 0 sort should be ExtAsc");
+        // Open tab 1
+        app.dispatch(Command::TabNew).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::NameAsc, "tab 1 sort should be default NameAsc");
+        // Switch back to tab 0; sort should still be ExtAsc
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert_eq!(app.pane(PaneId::Left).sort, Sort::ExtAsc, "tab 0 sort should still be ExtAsc");
+    }
+
+    #[tokio::test]
+    async fn tab_state_selection_is_isolated() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::write(td_l.path().join("file.txt"), b"x").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Toggle selection on tab 0
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        assert!(!app.pane(PaneId::Left).selected.is_empty(), "tab 0 should have a selection");
+        // Open tab 1 (clean selection)
+        app.dispatch(Command::TabNew).await.unwrap();
+        assert!(app.pane(PaneId::Left).selected.is_empty(), "tab 1 should have empty selection");
+        // Switch back to tab 0; selection should persist
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert!(!app.pane(PaneId::Left).selected.is_empty(), "tab 0 selection should persist");
+    }
+
+    #[tokio::test]
+    async fn tab_new_does_not_inherit_filter() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.set_filter("xyz").unwrap();
+        app.dispatch(Command::TabNew).await.unwrap();
+        assert!(app.pane(PaneId::Left).filter.is_none(), "new tab should not inherit filter");
+    }
+
+    #[tokio::test]
+    async fn tab_state_show_hidden_is_isolated() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        let default_show_hidden = app.pane(PaneId::Left).show_hidden;
+        // Toggle show_hidden on tab 0
+        app.dispatch(Command::ToggleHidden).await.unwrap();
+        assert_ne!(app.pane(PaneId::Left).show_hidden, default_show_hidden, "tab 0 show_hidden toggled");
+        // Open tab 1 — should start with config default
+        app.dispatch(Command::TabNew).await.unwrap();
+        let config_default = app.config().ui.show_hidden;
+        assert_eq!(app.pane(PaneId::Left).show_hidden, config_default, "tab 1 show_hidden should be config default");
+    }
+
+    #[tokio::test]
+    async fn tab_state_history_is_isolated() {
+        // Use a nested dir so we can ascend without landing in /tmp
+        let td_parent = TempDir::new().unwrap();
+        let inner = td_parent.path().join("inner");
+        tokio::fs::create_dir_all(&inner).await.unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = App::new(
+            cargonaut_config::Config::default(),
+            inner.to_str().unwrap(),
+            td_r.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        // Navigate up to td_parent; this builds back history in tab 0
+        app.dispatch(Command::Ascend).await.unwrap();
+        assert!(
+            !app.pane(PaneId::Left).dir_history_back.is_empty(),
+            "tab 0 should have back history after Ascend"
+        );
+        // Open tab 1 — history must be empty per data-model.md §Validation Rules
+        app.dispatch(Command::TabNew).await.unwrap();
+        assert!(app.pane(PaneId::Left).dir_history_back.is_empty(), "tab 1 history should be empty");
+        assert!(app.pane(PaneId::Left).dir_history_fwd.is_empty(), "tab 1 fwd history should be empty");
+    }
+
+    #[tokio::test]
+    async fn focus_swap_key_does_not_change_tabs() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        app.dispatch(Command::TabNew).await.unwrap(); // 2 tabs on left, active=1
+        let left_at_before = app.sides[0].active_tab;
+        let right_at_before = app.sides[1].active_tab;
+        // FocusSwap should change which pane is active, not which tab
+        app.dispatch(Command::FocusSwap).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, left_at_before, "left active_tab unchanged by FocusSwap");
+        assert_eq!(app.sides[1].active_tab, right_at_before, "right active_tab unchanged by FocusSwap");
+        // FocusLeft / FocusRight also should not change tabs
+        app.dispatch(Command::FocusLeft).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, left_at_before, "left active_tab unchanged by FocusLeft");
+        app.dispatch(Command::FocusRight).await.unwrap();
+        assert_eq!(app.sides[1].active_tab, right_at_before, "right active_tab unchanged by FocusRight");
     }
 
     // ===== Feature 053: T010 (red) — tab_bar_view tests (method does not exist yet) =====
