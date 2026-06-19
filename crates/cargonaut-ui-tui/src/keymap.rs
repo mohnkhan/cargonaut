@@ -117,6 +117,10 @@ pub enum Command {
     NewTab,
     /// Close the current tab (Ctrl-w).
     CloseTab,
+    /// Cycle to the next tab on the active side (]).
+    TabNext,
+    /// Cycle to the previous tab on the active side ([).
+    TabPrev,
     /// Open the filter prompt for the current dir (Ctrl-f).
     FilterCurrentDir,
     /// Undo the last destructive operation (Ctrl-z).

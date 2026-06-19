@@ -5,8 +5,8 @@
 //! shown on launch when `scan_resumable` finds an orphan checkpoint.
 //!
 //! Each dialog is a small state machine: it owns its focus + answer
-//! state, exposes [`Dialog::handle_key`] for input, and renders via
-//! [`Dialog::render`]. The App's event loop (T1.19) routes keys to the
+//! state, exposes `handle_key` for input, and renders via
+//! `render`. The App's event loop (T1.19) routes keys to the
 //! active dialog when `Mode::Dialog` is the active input mode.
 
 use crate::theme::Theme;
@@ -368,7 +368,7 @@ pub enum ResumeChoice {
 }
 
 /// One row in the resume-prompt list: a brief summary derived from a
-/// [`cargonaut_transfer::ResumableTransfer`]. The App builds these
+/// `cargonaut_transfer::ResumableTransfer`. The App builds these
 /// before constructing the dialog.
 #[derive(Debug, Clone)]
 pub struct ResumableSummary {
@@ -1004,6 +1004,14 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
             HelpRow {
                 key: "C-w",
                 desc: "Close current tab (close-tab)",
+            },
+            HelpRow {
+                key: "]",
+                desc: "Next tab on active side (tab-next)",
+            },
+            HelpRow {
+                key: "[",
+                desc: "Previous tab on active side (tab-prev)",
             },
             HelpRow {
                 key: "C-o",
@@ -2933,7 +2941,7 @@ impl FindFileDialog {
     /// Start a background walk for the current `mode` and `input`.
     ///
     /// Sets phase to Walking; spawns a tokio task that sends [`FindEvent`]s
-    /// through an unbounded channel. Caller must drive [`poll_results`] each
+    /// through an unbounded channel. Caller must drive `poll_results` each
     /// tick to drain the channel. FR-018: if the root is unreadable, sets
     /// phase to NoResults and returns without spawning.
     pub fn start_walk(&mut self, root: PathBuf, config: &cargonaut_config::Config) {

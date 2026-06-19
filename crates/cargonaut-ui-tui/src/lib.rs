@@ -337,6 +337,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
             String::new()
         };
         let progress = progress_summary(app);
+        // Feature 053: compute tab bar view models before the draw closure
+        // so `app` isn't borrowed inside the closure.
+        let tab_bar_left = app.tab_bar_view(PaneId::Left);
+        let tab_bar_right = app.tab_bar_view(PaneId::Right);
         let mut layout = FrameLayout::default();
         // Feature 041 US2 (FR-005): capture state for the persistent indicator,
         // read out before the partial borrow of `ui` below.
@@ -365,6 +369,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 progress.as_deref(),
                 mouse_supported,
                 mouse_captured,
+                &tab_bar_left,
+                &tab_bar_right,
             );
         })
         .map_err(Error::Terminal)?;
@@ -2212,6 +2218,10 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
         U::RecursiveDirSize => AppCommand::RecursiveDirSize,
         U::CompareDirectories => AppCommand::CompareDirectories,
         U::UndoLastOp => AppCommand::UndoLastOp,
+        U::NewTab => AppCommand::TabNew,
+        U::CloseTab => AppCommand::TabClose,
+        U::TabNext => AppCommand::TabNext,
+        U::TabPrev => AppCommand::TabPrev,
         _ => return None,
     })
 }
@@ -2266,6 +2276,8 @@ fn draw_frame(
     progress: Option<&str>,
     mouse_supported: bool,
     mouse_captured: bool,
+    tab_bar_left: &[cargonaut_core::TabBarEntry],
+    tab_bar_right: &[cargonaut_core::TabBarEntry],
 ) -> FrameLayout {
     use cargonaut_core::ViewMode;
     use ratatui::widgets::Widget;
@@ -2304,6 +2316,7 @@ fn draw_frame(
             theme,
             ms_left,
             pane_layout,
+            tab_bar_left,
         )
     };
     let right_inner = if qv && active == PaneId::Left {
@@ -2317,6 +2330,7 @@ fn draw_frame(
             theme,
             ms_right,
             pane_layout,
+            tab_bar_right,
         )
     };
 
@@ -2375,6 +2389,94 @@ fn draw_frame(
     }
 }
 
+/// Build a one-row `Line` for the tab bar above a pane column.
+///
+/// Active tab span uses `theme.cursor_style()`. Entries are separated by two
+/// spaces. If all entries don't fit in `width`, the line is scrolled so the
+/// active tab is always visible.
+fn tab_bar_line<'a>(
+    entries: &'a [cargonaut_core::TabBarEntry],
+    width: u16,
+    theme: &Theme,
+) -> ratatui::text::Line<'a> {
+    use ratatui::style::Style;
+    use ratatui::text::{Line, Span};
+
+    if entries.is_empty() {
+        return Line::from(vec![]);
+    }
+
+    // Build each entry's text independently.
+    let active_style = theme.cursor_style();
+    let inactive_style = Style::default();
+
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let separator = "  ";
+
+    // Compute cumulative starting x of each entry (unseparated widths).
+    let texts: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            format!(
+                "[{}{}]{}",
+                e.index,
+                if e.is_active { "*" } else { "" },
+                e.label
+            )
+        })
+        .collect();
+
+    // Compute scroll offset so the active tab is visible.
+    let total_width: usize = texts.iter().map(|t| t.len()).sum::<usize>()
+        + separator.len() * texts.len().saturating_sub(1);
+    let w = width as usize;
+
+    let scroll_offset: usize = if total_width <= w {
+        0
+    } else {
+        // Find position of active tab
+        let active_idx = entries.iter().position(|e| e.is_active).unwrap_or(0);
+        let mut pos = 0usize;
+        for (i, t) in texts.iter().enumerate() {
+            if i == active_idx {
+                break;
+            }
+            pos += t.len() + separator.len();
+        }
+        // Scroll so active tab starts at least at position 0
+        // and doesn't overshoot on the right
+        let active_end = pos + texts[active_idx].len();
+        if active_end > w {
+            pos.saturating_sub(2)
+        } else {
+            0
+        }
+    };
+
+    let mut x = 0isize;
+    for (i, (e, text)) in entries.iter().zip(texts.iter()).enumerate() {
+        if i > 0 {
+            let sep_start = x - scroll_offset as isize;
+            if sep_start + separator.len() as isize > 0 && sep_start < width as isize {
+                spans.push(Span::raw(separator));
+            }
+            x += separator.len() as isize;
+        }
+        let entry_start = x - scroll_offset as isize;
+        if entry_start < width as isize && entry_start + text.len() as isize > 0 {
+            let style = if e.is_active {
+                active_style
+            } else {
+                inactive_style
+            };
+            spans.push(Span::styled(text.clone(), style));
+        }
+        x += text.len() as isize;
+    }
+
+    Line::from(spans)
+}
+
 /// Draw one pane (list + per-pane mini-status). Returns the inner list
 /// rect for mouse hit-testing (US3).
 #[allow(clippy::too_many_arguments)]
@@ -2386,13 +2488,21 @@ fn draw_pane(
     theme: &Theme,
     mini_status: &str,
     layout: pane::PaneLayout,
+    tab_bar: &[cargonaut_core::TabBarEntry],
 ) -> Rect {
     use ratatui::widgets::Widget;
-    // Split the column into the list (with border) + a 1-row mini-status.
+    // Feature 053: 3-constraint split — tab bar (1 row) + list+border + mini-status (1 row).
     let col = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(2), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(1),
+        ])
         .split(area);
+    // Render tab bar in col[0].
+    let tbl = tab_bar_line(tab_bar, col[0].width, theme);
+    Paragraph::new(tbl).render(col[0], f.buffer_mut());
     let title = view.cwd.display();
     // US1 (FR-002): panel background + focus-colored border from the theme.
     let block = Block::default()
@@ -2400,13 +2510,13 @@ fn draw_pane(
         .borders(Borders::ALL)
         .border_style(theme.border_style(focused))
         .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
-    let inner = block.inner(col[0]);
-    block.render(col[0], f.buffer_mut());
+    let inner = block.inner(col[1]);
+    block.render(col[1], f.buffer_mut());
     view.render(inner, f.buffer_mut(), theme, layout);
     // US2 (FR-010): per-pane mini-status line.
     Paragraph::new(format!(" {mini_status}"))
         .style(theme.status_style())
-        .render(col[1], f.buffer_mut());
+        .render(col[2], f.buffer_mut());
     inner
 }
 
@@ -4640,6 +4750,205 @@ mod tests {
         assert!(
             text.to_lowercase().contains("find"),
             "help must mention 'find'"
+        );
+    }
+
+    // ===== Feature 053: T022 (red) — modal guard: tab keys swallowed by dialog =====
+    #[tokio::test]
+    async fn modal_guard_tab_keys_swallowed() {
+        use cargonaut_core::{Command as AppCommand, DialogKind, PaneId};
+        use crossterm::event::KeyCode;
+
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+
+        // Open a second tab so we have something to switch away from
+        app.dispatch(AppCommand::TabNew).await.unwrap();
+        let initial_left_tab = app
+            .tab_bar_view(PaneId::Left)
+            .iter()
+            .filter(|e| e.is_active)
+            .map(|e| e.index)
+            .next()
+            .unwrap();
+        let initial_left_count = app.tab_bar_view(PaneId::Left).len();
+
+        let keymap = Keymap::load(DEFAULT_KEYMAP).unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        // Inject a confirm dialog
+        let mut dlg: Option<ActiveDialog> = Some(make_dialog(DialogKind::Confirm {
+            title: "Test".into(),
+            body: "modal guard test".into(),
+            on_confirm: Box::new(AppCommand::Quit),
+        }));
+
+        // Tab-next key (])
+        feed_key(
+            KeyCode::Char(']'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        // Tab-prev key ([)
+        feed_key(
+            KeyCode::Char('['),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        // Ctrl-t (new tab)
+        feed_key(
+            KeyCode::Char('t'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+        // Ctrl-w (close tab)
+        feed_key(
+            KeyCode::Char('w'),
+            &mut app,
+            &keymap,
+            &mut mode,
+            &mut dlg,
+            &mut ui,
+        )
+        .await;
+
+        // All tab operations must have been swallowed — dialog is still active
+        assert!(
+            dlg.is_some(),
+            "dialog should still be active after tab keys"
+        );
+
+        // Tab count and active tab should be unchanged
+        let current_count = app.tab_bar_view(PaneId::Left).len();
+        let current_tab = app
+            .tab_bar_view(PaneId::Left)
+            .iter()
+            .filter(|e| e.is_active)
+            .map(|e| e.index)
+            .next()
+            .unwrap();
+        assert_eq!(
+            current_count, initial_left_count,
+            "tab count should be unchanged"
+        );
+        assert_eq!(
+            current_tab, initial_left_tab,
+            "active tab should be unchanged"
+        );
+    }
+
+    // ===== Feature 053: T015 (red) — tab_bar_line rendering tests =====
+    // tab_bar_line does not exist yet; these compile-fail tests are the red state.
+
+    #[test]
+    fn tab_bar_line_renders_single_tab() {
+        use cargonaut_core::TabBarEntry;
+        let entries = vec![TabBarEntry {
+            index: 1,
+            label: "foo".to_string(),
+            is_active: true,
+        }];
+        let line = tab_bar_line(&entries, 40, &Theme::default());
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.contains("[1*]foo"),
+            "tab bar should contain '[1*]foo', got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn tab_bar_line_renders_multiple_tabs_with_active_marker() {
+        use cargonaut_core::TabBarEntry;
+        let entries = vec![
+            TabBarEntry {
+                index: 1,
+                label: "bar".to_string(),
+                is_active: false,
+            },
+            TabBarEntry {
+                index: 2,
+                label: "baz".to_string(),
+                is_active: true,
+            },
+        ];
+        let line = tab_bar_line(&entries, 40, &Theme::default());
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.contains("[1]bar"),
+            "should contain '[1]bar', got: {text:?}"
+        );
+        assert!(
+            text.contains("[2*]baz"),
+            "should contain '[2*]baz', got: {text:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn draw_pane_tab_bar_occupies_first_row() {
+        use cargonaut_core::PaneId;
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = app_with(&td_l, &td_r).await;
+        let entries = app.tab_bar_view(PaneId::Left);
+        let backend = TestBackend::new(40, 8);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 8,
+        };
+        term.draw(|f| {
+            let pane_state = app.pane(PaneId::Left);
+            let mut view = pane::PaneView::new(pane_state.cwd.clone(), pane_state.listing.clone());
+            view.sync_from(pane_state);
+            let _inner = draw_pane(
+                f,
+                &mut view,
+                area,
+                true,
+                &theme,
+                "",
+                pane::PaneLayout::Brief,
+                &entries,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        // Collect the first row (y=0, x=0..40) from the buffer content
+        // Buffer content is stored row by row: row y starts at y * width
+        let width = 40usize;
+        let first_row: String = buf
+            .content()
+            .iter()
+            .take(width)
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            first_row.contains("[1"),
+            "first row should contain tab bar '[1', got: {first_row:?}"
         );
     }
 }

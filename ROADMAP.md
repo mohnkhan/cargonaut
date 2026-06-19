@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-18 (Feature 050 closed #47 — bulk rename via editor + undo; #47 was the last open Tier 2 item in this batch).
+**Last updated**: 2026-06-19 (Feature 051 closed #39 — built-in F3 viewer; Feature 047 closed #50 — user menu + help).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -52,7 +52,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#39](https://github.com/mohnkhan/cargonaut/issues/39) | Internal file viewer F3 (text + hex + search) | L | Feature 031 — F3 external-pager shell-out ships |
+| ~~[#39](https://github.com/mohnkhan/cargonaut/issues/39)~~ | ~~Internal file viewer F3 (text + hex + search)~~ | ~~L~~ | **Closed — Feature 051** |
 | [#40](https://github.com/mohnkhan/cargonaut/issues/40) | Internal full-screen editor F4 | XL | Feature 031 — F4 `$EDITOR` shell-out ships |
 | ~~[#41](https://github.com/mohnkhan/cargonaut/issues/41)~~ | ~~Find-file (name + content) + external panelize~~ | ~~L~~ | **Closed — Feature 052** |
 | ~~[#43](https://github.com/mohnkhan/cargonaut/issues/43)~~ | ~~Compare directories + diff two tagged files~~ | ~~M~~ | **Closed — Feature 049** |
@@ -60,7 +60,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 | [#45](https://github.com/mohnkhan/cargonaut/issues/45) | Tabs: multiple panels per side | L | Feature 031 §Out of Scope |
 | ~~[#47](https://github.com/mohnkhan/cargonaut/issues/47)~~ | ~~Bulk rename via editor + undo of file ops~~ | ~~M~~ | **Closed — Feature 050** |
 | [#48](https://github.com/mohnkhan/cargonaut/issues/48) | VFS backends: archives + remote (SFTP/FTP/sh) | XL | Feature 031 §Out of Scope — already Phase 2+ roadmapped |
-| [#50](https://github.com/mohnkhan/cargonaut/issues/50) | User menu (F2) + hypertext help content | M | Feature 031 — minimal F1 overlay + F2 placeholder ship |
+| ~~[#50](https://github.com/mohnkhan/cargonaut/issues/50)~~ | ~~User menu (F2) + hypertext help content~~ | ~~M~~ | **Closed — Feature 047** |
 
 ---
 
