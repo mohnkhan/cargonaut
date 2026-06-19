@@ -1892,18 +1892,54 @@ async fn handle_mouse(
     let (x, y) = (m.column, m.row);
     match m.kind {
         MouseEventKind::ScrollDown => {
+            // Feature 054: scroll subshell panel if click is inside it.
+            if let Some(srect) = ui.layout.subshell {
+                if rect_contains(srect, x, y) {
+                    if let Some(s) = ui.subshell.as_mut() {
+                        s.scroll_offset = s.scroll_offset.saturating_add(1);
+                    }
+                    return Ok(());
+                }
+            }
             let _ = app
                 .dispatch(AppCommand::CursorDown)
                 .await
                 .map_err(|e| Error::Other(e.to_string()))?;
         }
         MouseEventKind::ScrollUp => {
+            // Feature 054: scroll subshell panel if click is inside it.
+            if let Some(srect) = ui.layout.subshell {
+                if rect_contains(srect, x, y) {
+                    if let Some(s) = ui.subshell.as_mut() {
+                        s.scroll_offset = s.scroll_offset.saturating_sub(1);
+                    }
+                    return Ok(());
+                }
+            }
             let _ = app
                 .dispatch(AppCommand::CursorUp)
                 .await
                 .map_err(|e| Error::Other(e.to_string()))?;
         }
         MouseEventKind::Down(MouseButton::Left) => {
+            // Feature 054: click in subshell panel gives it keyboard focus.
+            if let Some(srect) = ui.layout.subshell {
+                if rect_contains(srect, x, y) {
+                    if ui.subshell_phase == subshell::SubshellPhase::VisibleFmFocus {
+                        dispatch_ui_command(
+                            Command::OpenSubshell,
+                            app,
+                            mode,
+                            active_dialog,
+                            status,
+                            quit,
+                            ui,
+                        )
+                        .await?;
+                    }
+                    return Ok(());
+                }
+            }
             // 1. Function-key bar buttons (FR-017).
             if let Some(cmd) = ui.fkeybar.command_at(ui.layout.fkeys, x, y) {
                 dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
