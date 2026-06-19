@@ -522,11 +522,12 @@ fn civil_from_unix(secs: u64) -> (i64, u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cargonaut_vfs::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsPath};
+    use cargonaut_vfs::{DirEntry, DirListing, FileMode, LocalFs, Sort, VfsKind, VfsMetadata, VfsPath};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use smol_str::SmolStr;
     use std::collections::BTreeSet;
+    use std::sync::Arc;
     use std::time::Duration;
 
     fn render_to_string(w: u16, h: u16, f: impl FnOnce(Rect, &mut Buffer)) -> String {
@@ -681,6 +682,7 @@ mod tests {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::new(LocalFs::new()),
         };
         let line = mini_status_line(&state);
         assert!(line.contains("readme.md"), "name missing: {line}");

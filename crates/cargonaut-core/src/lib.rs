@@ -30,7 +30,7 @@ pub use cargonaut_transfer::{TransferId, TransferMode};
 // Feature 042 — re-export hotlist types so the UI layer can name them without a
 // direct `cargonaut-config` dependency (mirrors the transfer-type re-exports).
 pub use cargonaut_config::{Bookmark, Hotlist};
-use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath};
+use cargonaut_vfs::{DirListing, LocalFs, Sort, VfsBackend, VfsError, VfsPath, VfsRegistry};
 use globset::{GlobBuilder, GlobMatcher};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -115,7 +115,7 @@ impl PaneFilter {
 /// Pure state for one pane. Renderable by the UI (ui-tui's `PaneView`
 /// builds itself from a `&PaneState` per frame) and mutated by the
 /// `App::dispatch` state machine.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PaneState {
     /// Directory currently being viewed.
     pub cwd: VfsPath,
@@ -138,6 +138,22 @@ pub struct PaneState {
     /// FR-011 forward history: only populated after [`Command::HistoryPrevDir`].
     /// Cleared on any non-history navigation (descend / ascend / sync).
     pub dir_history_fwd: Vec<VfsPath>,
+    /// Feature 057 — the VFS backend serving this pane's cwd. `LocalFs` at
+    /// startup; replaced with `ZipFs`/`TarFs`/`SftpFs`/`FtpFs` when the user
+    /// navigates into an archive or remote server.
+    pub backend: Arc<dyn VfsBackend>,
+}
+
+impl std::fmt::Debug for PaneState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaneState")
+            .field("cwd", &self.cwd)
+            .field("cursor", &self.cursor)
+            .field("show_hidden", &self.show_hidden)
+            .field("sort", &self.sort)
+            .field("backend_scheme", &self.backend.scheme())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Feature 040 — what the pane cursor currently points at: the synthetic
@@ -604,7 +620,8 @@ pub struct App {
     /// Per-side tab state. Index 0 = Left, 1 = Right (via [`pane_idx`]).
     sides: [SideState; 2],
     active: PaneId,
-    local_fs: Arc<dyn VfsBackend>,
+    /// Feature 057 — scheme+authority dispatch for all VFS backends.
+    registry: Arc<VfsRegistry>,
     transfers: HashMap<TransferId, TransferJob>,
     /// IDs in submit order — used by `CancelCurrentTransfer`.
     transfer_order: Vec<TransferId>,
@@ -640,6 +657,7 @@ impl App {
         right: &str,
     ) -> Result<Self, AppError> {
         let local_fs: Arc<dyn VfsBackend> = Arc::new(LocalFs::new());
+        let registry = Arc::new(VfsRegistry::new(Arc::clone(&local_fs)));
         let left_p = parse_path(left)?;
         let right_p = parse_path(right)?;
         let left_listing = local_fs.list(&left_p, Sort::NameAsc).await?;
@@ -657,6 +675,7 @@ impl App {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::clone(&local_fs),
         };
         let mut right_tab = PaneState {
             cwd: right_p,
@@ -668,6 +687,7 @@ impl App {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::clone(&local_fs),
         };
         // Feature 040 (FR-014): start the cursor on the first real entry, past
         // the synthetic `..` row in a non-root directory.
@@ -694,7 +714,7 @@ impl App {
             config,
             sides,
             active: PaneId::Left,
-            local_fs,
+            registry,
             transfers: HashMap::new(),
             transfer_order: Vec::new(),
             paused: HashSet::new(),
@@ -706,6 +726,11 @@ impl App {
             hotlist_path,
             undo_log: None,
         })
+    }
+
+    /// Feature 057 — the VFS registry (scheme dispatch for all backends).
+    pub fn registry(&self) -> Arc<VfsRegistry> {
+        Arc::clone(&self.registry)
     }
 
     /// The current global listing/preview view mode (FR-022).
@@ -872,7 +897,7 @@ impl App {
         let opts = self.transfer_opts();
 
         // Find this job's checkpoint sidecar in the destination directory.
-        let found = scan_resumable(Arc::clone(&self.local_fs), dst_parent)
+        let found = scan_resumable(self.registry.local(), dst_parent)
             .await?
             .into_iter()
             .find(|rt| rt.checkpoint.job_id == id.0.to_string());
@@ -880,8 +905,8 @@ impl App {
         match found {
             Some(rt) => {
                 match resume_transfer(
-                    Arc::clone(&self.local_fs),
-                    Arc::clone(&self.local_fs),
+                    self.registry.local(),
+                    self.registry.local(),
                     rt.checkpoint,
                     opts,
                 )
@@ -902,9 +927,9 @@ impl App {
                 // No checkpoint yet — restart from scratch. submit_transfer
                 // mints a fresh id, so swap it into transfer_order in place.
                 let job = submit_transfer(
-                    Arc::clone(&self.local_fs),
+                    self.registry.local(),
                     src_path,
-                    Arc::clone(&self.local_fs),
+                    self.registry.local(),
                     dst_path,
                     opts,
                 )
@@ -1079,7 +1104,7 @@ impl App {
             let p = self.pane(id);
             (p.cwd.clone(), p.sort)
         };
-        let listing = self.local_fs.list(&cwd, sort).await?;
+        let listing = self.registry.local().list(&cwd, sort).await?;
         let p = self.pane_mut(id);
         p.listing = listing;
         // Feature 040: clamp within the virtual row range (`..` + entries).
@@ -1097,7 +1122,7 @@ impl App {
             ))]);
         }
         let target = self.active_pane_state().cwd.join(name);
-        match self.local_fs.mkdir(&target, false).await {
+        match self.registry.local().mkdir(&target, false).await {
             Ok(()) => {
                 let mut evs = self.refresh_active_pane().await?;
                 evs.push(Event::Status(format!("Created {name}")));
@@ -1159,7 +1184,7 @@ impl App {
         let mut stack = vec![path];
         let mut truncated = false;
         while let Some(dir) = stack.pop() {
-            let listing = match self.local_fs.list(&dir, Sort::NameAsc).await {
+            let listing = match self.registry.local().list(&dir, Sort::NameAsc).await {
                 Ok(l) => l,
                 Err(_) => continue,
             };
@@ -1206,9 +1231,9 @@ impl App {
             let dst_path = dst_cwd.join(&entry_name);
             copy_paths.push(dst_path.clone());
             let job = submit_transfer(
-                Arc::clone(&self.local_fs),
+                self.registry.local(),
                 src_path,
-                Arc::clone(&self.local_fs),
+                self.registry.local(),
                 dst_path,
                 opts.clone(),
             )
@@ -1262,7 +1287,7 @@ impl App {
                 continue;
             }
             scanned.push(dir.clone());
-            let found = scan_resumable(Arc::clone(&self.local_fs), dir).await?;
+            let found = scan_resumable(self.registry.local(), dir).await?;
             self.pending_resumes.extend(found);
         }
         Ok(self.pending_resume_views())
@@ -1287,8 +1312,8 @@ impl App {
         let rt = self.pending_resumes.remove(index);
         let opts = self.transfer_opts();
         match resume_transfer(
-            Arc::clone(&self.local_fs),
-            Arc::clone(&self.local_fs),
+            self.registry.local(),
+            self.registry.local(),
             rt.checkpoint,
             opts,
         )
@@ -1318,9 +1343,9 @@ impl App {
         let dst = parse_path(&rt.checkpoint.dst_uri)?;
         let opts = self.transfer_opts();
         let job = submit_transfer(
-            Arc::clone(&self.local_fs),
+            self.registry.local(),
             src,
-            Arc::clone(&self.local_fs),
+            self.registry.local(),
             dst,
             opts,
         )
@@ -1345,7 +1370,7 @@ impl App {
     pub async fn refresh_active_pane(&mut self) -> Result<Vec<Event>, AppError> {
         let id = self.active;
         let cwd = self.pane(id).cwd.clone();
-        let listing = self.local_fs.list(&cwd, Sort::NameAsc).await?;
+        let listing = self.registry.local().list(&cwd, Sort::NameAsc).await?;
         let p = self.active_pane_mut();
         p.listing = listing;
         p.selected.clear();
@@ -1406,14 +1431,14 @@ impl App {
             return Ok(vec![Event::Status(format!("{name} is not a directory"))]);
         }
         let new_cwd = self.pane(id).cwd.join(&name);
-        self.navigate_to(id, new_cwd).await
+        self.navigate_to(id, new_cwd, self.registry.local()).await
     }
 
     async fn sync_other_panel_path(&mut self) -> Result<Vec<Event>, AppError> {
         let active = self.active;
         let other = active.other();
         let other_cwd = self.pane(other).cwd.clone();
-        self.navigate_to(active, other_cwd).await
+        self.navigate_to(active, other_cwd, self.registry.local()).await
     }
 
     async fn show_focused_in_other_panel(&mut self) -> Result<Vec<Event>, AppError> {
@@ -1434,7 +1459,7 @@ impl App {
             )]);
         };
         // navigate_to acts on `other`, not `active` — FR-014: focus stays put.
-        self.navigate_to(other, target).await
+        self.navigate_to(other, target, self.registry.local()).await
     }
 
     async fn ascend_to_parent(&mut self) -> Result<Vec<Event>, AppError> {
@@ -1442,15 +1467,24 @@ impl App {
         let Some(parent) = self.pane(id).cwd.parent() else {
             return Ok(vec![Event::Status("Already at root".into())]);
         };
-        self.navigate_to(id, parent).await
+        self.navigate_to(id, parent, self.registry.local()).await
     }
 
     /// FR-011 history-aware navigation. Pushes the OLD cwd onto the
     /// pane's back-history (bounded by `Config::ui.history.directory_depth`)
     /// and clears the forward-history. Called by every non-history nav
     /// entry point (descend, ascend, sync, show-in-other).
-    async fn navigate_to(&mut self, id: PaneId, new_cwd: VfsPath) -> Result<Vec<Event>, AppError> {
-        let listing = self.local_fs.list(&new_cwd, Sort::NameAsc).await?;
+    ///
+    /// `backend` is the VFS backend that owns `new_cwd`. Pass
+    /// `self.registry.local()` for local-filesystem navigation; pass the
+    /// appropriate archive / remote backend for Feature 057 navigation.
+    async fn navigate_to(
+        &mut self,
+        id: PaneId,
+        new_cwd: VfsPath,
+        backend: Arc<dyn VfsBackend>,
+    ) -> Result<Vec<Event>, AppError> {
+        let listing = backend.list(&new_cwd, Sort::NameAsc).await?;
         let depth = self.config.ui.history.directory_depth as usize;
         let p = self.pane_mut(id);
         let old_cwd = std::mem::replace(&mut p.cwd, new_cwd);
@@ -1462,6 +1496,7 @@ impl App {
         }
         p.dir_history_fwd.clear();
         p.listing = listing;
+        p.backend = backend;
         p.cursor = p.default_cursor(); // Feature 040: first real entry, past `..`
         p.selected.clear();
         Ok(vec![Event::PaneUpdated(id)])
@@ -1522,7 +1557,7 @@ impl App {
         }
         let target = self.resolve_cd_target(trimmed)?;
         let id = self.active;
-        self.navigate_to(id, target).await
+        self.navigate_to(id, target, self.registry.local()).await
     }
 
     // ===== Feature 043: file attribute operations =====
@@ -1546,14 +1581,14 @@ impl App {
         let mut failures = Vec::new();
         for name in &names {
             let target = cwd.join(name);
-            let current = match self.local_fs.stat(&target).await {
+            let current = match self.registry.local().stat(&target).await {
                 Ok(m) => m.mode.map(|fm| fm.bits).unwrap_or(0),
                 Err(e) => {
                     failures.push(format!("{name}: {e}"));
                     continue;
                 }
             };
-            match self.local_fs.chmod(&target, mode_spec.apply(current)).await {
+            match self.registry.local().chmod(&target, mode_spec.apply(current)).await {
                 Ok(()) => ok += 1,
                 Err(e) => failures.push(format!("{name}: {e}")),
             }
@@ -1581,7 +1616,7 @@ impl App {
         let mut failures = Vec::new();
         for name in &names {
             let target = cwd.join(name);
-            match self.local_fs.chown(&target, uid, gid).await {
+            match self.registry.local().chown(&target, uid, gid).await {
                 Ok(()) => ok += 1,
                 Err(e) => failures.push(format!("{name}: {e}")),
             }
@@ -1611,14 +1646,14 @@ impl App {
         let mut truncated = false;
         for r in roots {
             out.push(r.clone());
-            if let Ok(m) = self.local_fs.stat(r).await {
+            if let Ok(m) = self.registry.local().stat(r).await {
                 if matches!(m.kind, cargonaut_vfs::VfsKind::Dir) {
                     queue.push_back(r.clone());
                 }
             }
         }
         while let Some(dir) = queue.pop_front() {
-            let listing = match self.local_fs.list(&dir, Sort::NameAsc).await {
+            let listing = match self.registry.local().list(&dir, Sort::NameAsc).await {
                 Ok(l) => l,
                 Err(_) => continue, // unreadable dir: skip its subtree, keep going
             };
@@ -1659,7 +1694,7 @@ impl App {
         let mut ok = 0usize;
         let mut failures = Vec::new();
         for p in &paths {
-            let meta = match self.local_fs.stat(p).await {
+            let meta = match self.registry.local().stat(p).await {
                 Ok(m) => m,
                 Err(e) => {
                     failures.push(format!("{}: {e}", p.display()));
@@ -1670,7 +1705,7 @@ impl App {
                 continue; // never chmod through a symlink (FR-006)
             }
             let current = meta.mode.map(|fm| fm.bits).unwrap_or(0);
-            match self.local_fs.chmod(p, mode_spec.apply(current)).await {
+            match self.registry.local().chmod(p, mode_spec.apply(current)).await {
                 Ok(()) => ok += 1,
                 Err(e) => failures.push(format!("{}: {e}", p.display())),
             }
@@ -1697,7 +1732,7 @@ impl App {
         let mut ok = 0usize;
         let mut failures = Vec::new();
         for p in &paths {
-            match self.local_fs.stat(p).await {
+            match self.registry.local().stat(p).await {
                 Ok(m) if matches!(m.kind, cargonaut_vfs::VfsKind::Symlink { .. }) => continue,
                 Ok(_) => {}
                 Err(e) => {
@@ -1705,7 +1740,7 @@ impl App {
                     continue;
                 }
             }
-            match self.local_fs.chown(p, uid, gid).await {
+            match self.registry.local().chown(p, uid, gid).await {
                 Ok(()) => ok += 1,
                 Err(e) => failures.push(format!("{}: {e}", p.display())),
             }
@@ -1739,7 +1774,7 @@ impl App {
             return Err(AppError::BadAttr("link name must not be blank".into()));
         }
         let link = cwd.join(link_name);
-        self.local_fs.symlink(&target_name, &link).await?;
+        self.registry.local().symlink(&target_name, &link).await?;
         let mut evs = self.refresh_active_pane().await?;
         evs.push(Event::Status(format!("Linked {link_name} → {target_name}")));
         Ok(evs)
@@ -1756,7 +1791,7 @@ impl App {
         }
         let src = cwd.join(&target_name);
         let link = cwd.join(link_name);
-        self.local_fs.hard_link(&src, &link).await?;
+        self.registry.local().hard_link(&src, &link).await?;
         let mut evs = self.refresh_active_pane().await?;
         evs.push(Event::Status(format!(
             "Hard-linked {link_name} → {target_name}"
@@ -1918,7 +1953,7 @@ impl App {
         }
 
         // Then filesystem children that are directories and match.
-        if let Ok(listing) = self.local_fs.list(&dir, Sort::NameAsc).await {
+        if let Ok(listing) = self.registry.local().list(&dir, Sort::NameAsc).await {
             for e in listing.entries {
                 if matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir)
                     && e.name.as_str().starts_with(last)
@@ -1939,7 +1974,7 @@ impl App {
         let Some(prev) = prev else {
             return Ok(vec![Event::Status("No prior directory".into())]);
         };
-        let listing = self.local_fs.list(&prev, Sort::NameAsc).await?;
+        let listing = self.registry.local().list(&prev, Sort::NameAsc).await?;
         let p = self.pane_mut(id);
         let cur = std::mem::replace(&mut p.cwd, prev);
         p.dir_history_fwd.push(cur);
@@ -1955,7 +1990,7 @@ impl App {
         let Some(next) = next else {
             return Ok(vec![Event::Status("No forward directory".into())]);
         };
-        let listing = self.local_fs.list(&next, Sort::NameAsc).await?;
+        let listing = self.registry.local().list(&next, Sort::NameAsc).await?;
         let p = self.pane_mut(id);
         let cur = std::mem::replace(&mut p.cwd, next);
         p.dir_history_back.push(cur);
@@ -2163,6 +2198,7 @@ impl App {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::clone(&src.backend),
         };
         s.tabs.push(new_tab);
         s.active_tab = s.tabs.len() - 1;
@@ -2301,7 +2337,7 @@ impl App {
         for id in [PaneId::Left, PaneId::Right] {
             let cwd = self.pane(id).cwd.clone();
             let sort = self.pane(id).sort;
-            let listing = self.local_fs.list(&cwd, sort).await?;
+            let listing = self.registry.local().list(&cwd, sort).await?;
             let p = self.pane_mut(id);
             p.listing = listing;
             p.selected.clear();
@@ -2633,6 +2669,7 @@ fn crc32_partial(path: &std::path::Path, size: u64) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cargonaut_vfs::VfsCaps;
     use tempfile::TempDir;
     use tokio::fs;
 
@@ -3330,6 +3367,7 @@ mod tests {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::new(LocalFs::new()),
         };
         assert!(!p.has_parent());
         assert_eq!(p.parent_offset(), 0);
