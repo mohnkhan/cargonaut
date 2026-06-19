@@ -1,0 +1,13 @@
+# Keymap additions for Feature 053 — Pane Tabs
+# These two bindings are added to design/contracts/keymap.toml under the
+# "Power features" section.
+
+[[binding]]
+mode = "pane"
+key = "]"
+action = "tab-next"
+
+[[binding]]
+mode = "pane"
+key = "["
+action = "tab-prev"
