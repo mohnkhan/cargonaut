@@ -18,9 +18,9 @@
 
 **Purpose**: Wire new Cargo features and dependency declarations. No code yet — just build configuration.
 
-- [ ] T001 Add `archives` and `remote` Cargo features + optional deps (`zip`, `tar`, `flate2`, `bzip2`, `xz2`, `russh`, `russh-sftp`, `suppaftp`) to `crates/cargonaut-vfs/Cargo.toml`
-- [ ] T002 [P] Add `FtpConfig { connect_timeout_secs: u32, passive_mode: bool }` field to `RemoteConfig` in `crates/cargonaut-config/src/lib.rs`; update serde defaults and tests
-- [ ] T003 [P] Create stub modules `crates/cargonaut-vfs/src/registry.rs`, `src/archive/mod.rs`, `src/archive/zip_fs.rs`, `src/archive/tar_fs.rs`, `src/remote/mod.rs`, `src/remote/sftp_fs.rs`, `src/remote/ftp_fs.rs` (empty `pub` declarations behind `#[cfg(feature)]` guards) so `cargo build` compiles clean
+- [X] T001 Add `archives` and `remote` Cargo features + optional deps (`zip`, `tar`, `flate2`, `bzip2`, `xz2`, `russh`, `russh-sftp`, `suppaftp`) to `crates/cargonaut-vfs/Cargo.toml`
+- [X] T002 [P] Add `FtpConfig { connect_timeout_secs: u32, passive_mode: bool }` field to `RemoteConfig` in `crates/cargonaut-config/src/lib.rs`; update serde defaults and tests
+- [X] T003 [P] Create stub modules `crates/cargonaut-vfs/src/registry.rs`, `src/archive/mod.rs`, `src/archive/zip_fs.rs`, `src/archive/tar_fs.rs`, `src/remote/mod.rs`, `src/remote/sftp_fs.rs`, `src/remote/ftp_fs.rs` (empty `pub` declarations behind `#[cfg(feature)]` guards) so `cargo build` compiles clean
 
 **Checkpoint**: `cargo build --workspace` succeeds; `cargo clippy --workspace --all-targets -- -D warnings` clean.
 
@@ -34,27 +34,27 @@
 
 ### T004-T005: VfsPath::decode_authority (FR-001 helper)
 
-- [ ] T004 [US5] (red) Write failing unit tests for `VfsPath::decode_authority()` covering: percent-encoded slash roundtrip, multiple segments, empty authority → None, unencoded authority passthrough — in `crates/cargonaut-vfs/src/types.rs` (test module) and extend proptest in same file
-- [ ] T005 [US5] (green) Implement `pub fn decode_authority(&self) -> Option<String>` on `VfsPath` in `crates/cargonaut-vfs/src/types.rs`; apply full percent-decoding (`%2F`→`/`, `%XX` generally)
+- [X] T004 [US5] (red) Write failing unit tests for `VfsPath::decode_authority()` covering: percent-encoded slash roundtrip, multiple segments, empty authority → None, unencoded authority passthrough — in `crates/cargonaut-vfs/src/types.rs` (test module) and extend proptest in same file
+- [X] T005 [US5] (green) Implement `pub fn decode_authority(&self) -> Option<String>` on `VfsPath` in `crates/cargonaut-vfs/src/types.rs`; apply full percent-decoding (`%2F`→`/`, `%XX` generally)
 
 ### T006-T007: VfsRegistry (FR-001)
 
-- [ ] T006 [US5] (red) Write failing unit tests for `VfsRegistry`: resolve `file://` → local backend; resolve unknown scheme → None; resolve registered `sftp://user@host:22/` → registered backend; overwrite on re-register — in `crates/cargonaut-vfs/tests/registry.rs`
-- [ ] T007 [US5] (green) Implement `VfsRegistry { local, remote_map }` with `new`, `local()`, `register_remote`, `resolve` in `crates/cargonaut-vfs/src/registry.rs`; re-export from `crates/cargonaut-vfs/src/lib.rs`
+- [X] T006 [US5] (red) Write failing unit tests for `VfsRegistry`: resolve `file://` → local backend; resolve unknown scheme → None; resolve registered `sftp://user@host:22/` → registered backend; overwrite on re-register — in `crates/cargonaut-vfs/tests/registry.rs`
+- [X] T007 [US5] (green) Implement `VfsRegistry { local, remote_map }` with `new`, `local()`, `register_remote`, `resolve` in `crates/cargonaut-vfs/src/registry.rs`; re-export from `crates/cargonaut-vfs/src/lib.rs`
 
 ### T008-T010: PaneState.backend + App.registry (FR-002, FR-003)
 
-- [ ] T008 [US5] (red) Write failing tests asserting: `PaneState` has a `backend: Arc<dyn VfsBackend>` field; `App::new` populates both panes' backends with the local backend; `App` exposes `registry()` accessor returning `Arc<VfsRegistry>` — in `crates/cargonaut-core/src/lib.rs` (inline test module)
-- [ ] T009 [US5] (green) Add `pub backend: Arc<dyn VfsBackend>` to `PaneState` in `crates/cargonaut-core/src/lib.rs`; replace `App.local_fs` with `App.registry: Arc<VfsRegistry>`; populate both panes' backends from `registry.local()` in `App::new`
-- [ ] T010 [US5] (green) **Depends on T009** (PaneState.backend must exist first). Migrate ALL `self.local_fs.XXX()` call sites in `crates/cargonaut-core/src/lib.rs` to `self.pane(id).backend.XXX()` or `self.registry.local().XXX()`; update `navigate_to` signature to `navigate_to(id, new_cwd: VfsPath, backend: Arc<dyn VfsBackend>)`; run all existing tests (605+) to verify zero regression
+- [X] T008 [US5] (red) Write failing tests asserting: `PaneState` has a `backend: Arc<dyn VfsBackend>` field; `App::new` populates both panes' backends with the local backend; `App` exposes `registry()` accessor returning `Arc<VfsRegistry>` — in `crates/cargonaut-core/src/lib.rs` (inline test module)
+- [X] T009 [US5] (green) Add `pub backend: Arc<dyn VfsBackend>` to `PaneState` in `crates/cargonaut-core/src/lib.rs`; replace `App.local_fs` with `App.registry: Arc<VfsRegistry>`; populate both panes' backends from `registry.local()` in `App::new`
+- [X] T010 [US5] (green) **Depends on T009** (PaneState.backend must exist first). Migrate ALL `self.local_fs.XXX()` call sites in `crates/cargonaut-core/src/lib.rs` to `self.pane(id).backend.XXX()` or `self.registry.local().XXX()`; update `navigate_to` signature to `navigate_to(id, new_cwd: VfsPath, backend: Arc<dyn VfsBackend>)`; run all existing tests (605+) to verify zero regression
 
 ### T011: Object-safety gate
 
-- [ ] T011 [US5] [P] Extend `crates/cargonaut-vfs/tests/dyn_dispatch.rs` to assert `Arc<dyn VfsBackend>` is constructable from each new backend type (`ZipFs`, `TarFs`, `SftpFs`, `FtpFs`) behind respective feature flags; these tests will fail until Phase 3+ implementations land — commit as (red) stubs now
+- [X] T011 [US5] [P] Extend `crates/cargonaut-vfs/tests/dyn_dispatch.rs` to assert `Arc<dyn VfsBackend>` is constructable from each new backend type (`ZipFs`, `TarFs`, `SftpFs`, `FtpFs`) behind respective feature flags; these tests will fail until Phase 3+ implementations land — commit as (red) stubs now
 
 ### T040: FR-029 transfer engine API pre-verification (FR-029)
 
-- [ ] T040 [US5] (red + green) Verify `cargonaut-transfer` `submit_transfer` (or equivalent) already accepts `Arc<dyn VfsBackend>` for both source and destination: write a compile-only test in `crates/cargonaut-transfer/tests/api_shape.rs` calling `submit_transfer(src_path, arc_local.clone(), dst_path, arc_local.clone())` — if the signature is already correct the test is green on first commit; if not, update the transfer crate signature to accept `Arc<dyn VfsBackend>` pairs before any backend implementations depend on it. This verifies assumption "transfer engine already supports `Arc<dyn VfsBackend>`" before Phase 3 begins. (**Addresses analysis finding M6**)
+- [X] T040 [US5] (red + green) Verify `cargonaut-transfer` `submit_transfer` (or equivalent) already accepts `Arc<dyn VfsBackend>` for both source and destination: write a compile-only test in `crates/cargonaut-transfer/tests/api_shape.rs` calling `submit_transfer(src_path, arc_local.clone(), dst_path, arc_local.clone())` — if the signature is already correct the test is green on first commit; if not, update the transfer crate signature to accept `Arc<dyn VfsBackend>` pairs before any backend implementations depend on it. This verifies assumption "transfer engine already supports `Arc<dyn VfsBackend>`" before Phase 3 begins. (**Addresses analysis finding M6**)
 
 **Checkpoint**: `cargo test --workspace` shows 0 failures on existing tests. `PaneState.backend` is live. `App.registry` is live. FR-029 assumption verified.
 
@@ -68,23 +68,23 @@
 
 ### T012-T013: ZipFs core (FR-004..FR-007)
 
-- [ ] T012 [US1] (red) Write failing unit tests for `ZipFs`: list archive root → correct entry names/sizes; list subdirectory → filtered entries; stat file → correct VfsMetadata; read_stream FULL → bytes match fixture; read_stream range → Unsupported; encrypted entry → PermissionDenied; corrupt zip → Io; write ops → Unsupported; `caps()` == empty; `scheme()` == "zip" — in `crates/cargonaut-vfs/tests/zip_fs.rs` (use `tempfile` + embed test zip bytes as `include_bytes!`)
-- [ ] T013 [US1] (green) Implement `ZipFs` in `crates/cargonaut-vfs/src/archive/zip_fs.rs`: `ZipFs::open(archive_host_path: PathBuf) -> Result<Self, VfsError>`; `ZipIndex` (Vec<ZipEntryMeta> + name→idx HashMap, built via `enclosed_name()` scan, drops unsafe paths silently); `impl VfsBackend`: list, stat, read_stream (FULL only via `spawn_blocking`), all write ops → Unsupported; T011 dyn_dispatch test now turns green
+- [X] T012 [US1] (red) Write failing unit tests for `ZipFs`: list archive root → correct entry names/sizes; list subdirectory → filtered entries; stat file → correct VfsMetadata; read_stream FULL → bytes match fixture; read_stream range → Unsupported; encrypted entry → PermissionDenied; corrupt zip → Io; write ops → Unsupported; `caps()` == empty; `scheme()` == "zip" — in `crates/cargonaut-vfs/tests/zip_fs.rs` (use `tempfile` + embed test zip bytes as `include_bytes!`)
+- [X] T013 [US1] (green) Implement `ZipFs` in `crates/cargonaut-vfs/src/archive/zip_fs.rs`: `ZipFs::open(archive_host_path: PathBuf) -> Result<Self, VfsError>`; `ZipIndex` (Vec<ZipEntryMeta> + name→idx HashMap, built via `enclosed_name()` scan, drops unsafe paths silently); `impl VfsBackend`: list, stat, read_stream (FULL only via `spawn_blocking`), all write ops → Unsupported; T011 dyn_dispatch test now turns green
 
 ### T014-T015: Archive VfsPath encoding + navigate_to wiring (FR-021, FR-023)
 
-- [ ] T014 [US1] (red) Write two failing unit tests in `crates/cargonaut-ui-tui/src/lib.rs` (inline test module) or `crates/cargonaut-core/src/lib.rs`: (1) **happy path** — given a local pane with cursor on a `.zip` file, dispatching `Command::DescendOrOpen` produces an `Event` showing the pane navigated to a `zip://` VfsPath with correct authority (percent-encoded archive path) and empty segments; (2) **error path** — given a local pane with cursor on a corrupt `.zip` file (ZipFs::open returns Err), dispatching `Command::DescendOrOpen` produces a pane-level error banner event and does NOT crash or navigate away (**addresses FR-028 archive open failure path; analysis finding M3**)
-- [ ] T015 [US1] (green) In `crates/cargonaut-ui-tui/src/lib.rs` `DescendOrOpen` handler: detect `.zip` extension on focused regular-file entry; build `zip://` `VfsPath` (authority = percent-encode(host_path), segments=[]); `ZipFs::open(host_path)`; call `app.navigate_to(id, zip_vfs_path, Arc::new(zip_fs))`
+- [X] T014 [US1] (red) Write two failing unit tests in `crates/cargonaut-ui-tui/src/lib.rs` (inline test module) or `crates/cargonaut-core/src/lib.rs`: (1) **happy path** — given a local pane with cursor on a `.zip` file, dispatching `Command::DescendOrOpen` produces an `Event` showing the pane navigated to a `zip://` VfsPath with correct authority (percent-encoded archive path) and empty segments; (2) **error path** — given a local pane with cursor on a corrupt `.zip` file (ZipFs::open returns Err), dispatching `Command::DescendOrOpen` produces a pane-level error banner event and does NOT crash or navigate away (**addresses FR-028 archive open failure path; analysis finding M3**)
+- [X] T015 [US1] (green) In `crates/cargonaut-ui-tui/src/lib.rs` `DescendOrOpen` handler: detect `.zip` extension on focused regular-file entry; build `zip://` `VfsPath` (authority = percent-encode(host_path), segments=[]); `ZipFs::open(host_path)`; call `app.navigate_to(id, zip_vfs_path, Arc::new(zip_fs))`
 
 ### T016a-T016b: Pane header — non-local path display (FR-022)
 
-- [ ] T016a [US1] (red) Write failing inline test in `crates/cargonaut-ui-tui/src/chrome.rs` (or test module): construct a `PaneState` with `backend.scheme() == "zip"` and a `zip://` cwd; assert the pane header render output contains the full `pane.cwd.display()` string rather than a basename — test fails since the condition doesn't exist yet (**split from combined red+green per Constitution §II; analysis finding M4**)
-- [ ] T016b [US1] (green) In `crates/cargonaut-ui-tui/src/chrome.rs`: add condition `if pane.backend.scheme() != "file"` before rendering the header path; render `pane.cwd.display()` instead of the basename; T016a test now passes
+- [X] T016a [US1] (red) Write failing inline test in `crates/cargonaut-ui-tui/src/chrome.rs` (or test module): construct a `PaneState` with `backend.scheme() == "zip"` and a `zip://` cwd; assert the pane header render output contains the full `pane.cwd.display()` string rather than a basename — test fails since the condition doesn't exist yet (**split from combined red+green per Constitution §II; analysis finding M4**)
+- [X] T016b [US1] (green) In `crates/cargonaut-ui-tui/src/chrome.rs`: add condition `if pane.backend.scheme() != "file"` before rendering the header path; render `pane.cwd.display()` instead of the basename; T016a test now passes
 
 ### T017-T018: Backspace at archive root → local parent (FR-023)
 
-- [ ] T017 [US1] (red) Write failing test: navigating `..` from a `zip://` pane with empty segments navigates pane to the local parent directory of the archive file (file:// backend restored) — in `crates/cargonaut-core/src/lib.rs` or TUI test
-- [ ] T018 [US1] (green) In `navigate_up` (or `App::dispatch` on `Command::Ascend`): if `pane.cwd.segments.is_empty()` and `pane.backend.scheme() != "file"`, decode authority → host path → local parent VfsPath; call `navigate_to(id, local_parent, registry.local())`
+- [X] T017 [US1] (red) Write failing test: navigating `..` from a `zip://` pane with empty segments navigates pane to the local parent directory of the archive file (file:// backend restored) — in `crates/cargonaut-core/src/lib.rs` or TUI test
+- [X] T018 [US1] (green) In `navigate_up` (or `App::dispatch` on `Command::Ascend`): if `pane.cwd.segments.is_empty()` and `pane.backend.scheme() != "file"`, decode authority → host path → local parent VfsPath; call `navigate_to(id, local_parent, registry.local())`
 
 **Checkpoint**: Binary navigates into `.zip` files, displays entries, allows F5 copy-out to local pane, backspaces back to local filesystem. `cargo test --workspace` clean.
 
@@ -98,13 +98,13 @@
 
 ### T019-T020: TarFs core (FR-008..FR-012)
 
-- [ ] T019 [US2] (red) Write failing unit tests for `TarFs`: list/stat for uncompressed `.tar`; list/read for `.tar.gz`; list/read for `.tar.bz2`; list/read for `.tar.xz`; path-traversal entry silently skipped (use a fixture tar with `../etc/evil`); corrupt archive → Io; range read → Unsupported; write ops → Unsupported; `caps()` == empty; `scheme()` == "tar" — in `crates/cargonaut-vfs/tests/tar_fs.rs`
-- [ ] T020 [US2] (green) Implement `TarFs` in `crates/cargonaut-vfs/src/archive/tar_fs.rs`: `TarCompression` enum; `TarFs::open(path, compression)`; entry index built in `spawn_blocking` scanning all entries (drain each via `io::copy(&mut e, &mut sink())`), skipping `../` paths with `warn!`; `read_stream(FULL)` re-opens + re-scans to entry by seq_index; all write ops → Unsupported; T011 `TarFs` dyn_dispatch stub turns green
+- [X] T019 [US2] (red) Write failing unit tests for `TarFs`: list/stat for uncompressed `.tar`; list/read for `.tar.gz`; list/read for `.tar.bz2`; list/read for `.tar.xz`; path-traversal entry silently skipped (use a fixture tar with `../etc/evil`); corrupt archive → Io; range read → Unsupported; write ops → Unsupported; `caps()` == empty; `scheme()` == "tar" — in `crates/cargonaut-vfs/tests/tar_fs.rs`
+- [X] T020 [US2] (green) Implement `TarFs` in `crates/cargonaut-vfs/src/archive/tar_fs.rs`: `TarCompression` enum; `TarFs::open(path, compression)`; entry index built in `spawn_blocking` scanning all entries (drain each via `io::copy(&mut e, &mut sink())`), skipping `../` paths with `warn!`; `read_stream(FULL)` re-opens + re-scans to entry by seq_index; all write ops → Unsupported; T011 `TarFs` dyn_dispatch stub turns green
 
 ### T021a-T021b: UI Enter → TAR open (FR-021)
 
-- [ ] T021a [US2] (red) Write failing unit tests in `crates/cargonaut-ui-tui/src/lib.rs` test module asserting `Command::DescendOrOpen` on a `.tar.gz` file produces a pane navigation event with a `tar://` VfsPath; include separate test stubs for `.tar`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz` — all fail since handler doesn't yet recognise TAR extensions (**split per Constitution §II; analysis finding M4**)
-- [ ] T021b [US2] (green) Extend `DescendOrOpen` handler in `crates/cargonaut-ui-tui/src/lib.rs` to recognise all TAR extensions (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`); detect compression from extension; `TarFs::open(path, compression)`; `navigate_to` with `tar://` VfsPath; T021a tests now pass
+- [X] T021a [US2] (red) Write failing unit tests in `crates/cargonaut-ui-tui/src/lib.rs` test module asserting `Command::DescendOrOpen` on a `.tar.gz` file produces a pane navigation event with a `tar://` VfsPath; include separate test stubs for `.tar`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz` — all fail since handler doesn't yet recognise TAR extensions (**split per Constitution §II; analysis finding M4**)
+- [X] T021b [US2] (green) Extend `DescendOrOpen` handler in `crates/cargonaut-ui-tui/src/lib.rs` to recognise all TAR extensions (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`); detect compression from extension; `TarFs::open(path, compression)`; `navigate_to` with `tar://` VfsPath; T021a tests now pass
 
 **Checkpoint**: Binary navigates into all TAR variants; entries listed; copy-out works; path traversal safety verified. `cargo test --workspace` clean.
 
