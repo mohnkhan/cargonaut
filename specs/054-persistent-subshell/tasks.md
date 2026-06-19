@@ -55,6 +55,7 @@
 - [ ] T013 [US1] Implement `SubshellState::advance_phase()` helper in `crates/cargonaut-ui-tui/src/subshell.rs` that cycles `SubshellPhase` as per the three-state contract; make T010 green
 - [ ] T014 [US1] Add `subshell: Option<SubshellState>` and `subshell_phase: SubshellPhase` fields to `UiState` struct in `crates/cargonaut-ui-tui/src/lib.rs`; initialise both to `None`/`Hidden` in the `UiState { .. }` literal
 - [ ] T015 [US1] Handle `Command::OpenSubshell` in `handle_key` in `crates/cargonaut-ui-tui/src/lib.rs`: when `Hidden → VisibleFmFocus`, lazily spawn `SubshellState::spawn($SHELL or /bin/sh, active_cwd, subshell_rows, terminal_cols)` (store in `ui.subshell`); guard against terminal-too-small (content_height < 8): set status notice and return without advancing; when `VisibleFmFocus → VisibleShellFocus`, advance phase; when `VisibleShellFocus → Hidden`, advance phase; any modal active → no-op (FR-012)
+- [ ] T015b [US1] Implement Ctrl-o debounce guard in `handle_key` in `crates/cargonaut-ui-tui/src/lib.rs`: add `last_ctrl_o_at: Option<std::time::Instant>` field to `UiState`; when `OpenSubshell` is dispatched, compare `Instant::now()` with `last_ctrl_o_at`; if elapsed < 50 ms, silently discard the command (no state advance); otherwise update `last_ctrl_o_at` and proceed (spec.md edge case: rapid Ctrl-o bursts); add unit test `ctrl_o_debounce_ignores_rapid_press` in `crates/cargonaut-ui-tui/src/lib.rs`
 - [ ] T016 [US1] Extend `draw_frame` signature in `crates/cargonaut-ui-tui/src/lib.rs` with `subshell_phase: SubshellPhase` and `subshell_screen: Option<&vt100::Screen>` parameters; in the vertical layout constraint computation inject `Constraint::Length(subshell_rows)` when phase != `Hidden` (between pane band and status bar); set `layout.subshell = Some(subshell_rect)` when visible; render `tui_term::widget::PseudoTerminal::new(screen)` into `subshell_rect` when screen is `Some`; render a bordered block with "Shell exited — press Ctrl-o to restart" text when `dead == true`; add a 1-row header line above the panel showing `[Shell]` and the current phase indicator
 - [ ] T017 [US1] In `run_loop` in `crates/cargonaut-ui-tui/src/lib.rs`: each iteration call `ui.subshell.as_mut().map(|s| s.poll_output())` before the `term.draw` call; pass `ui.subshell_phase` and `ui.subshell.as_ref().map(|s| s.screen())` to `draw_frame`; on terminal resize event, if subshell exists and phase != `Hidden`, call `subshell.resize(new_rows, new_cols)` (implement `SubshellState::resize` in `subshell.rs`: calls `master.resize()` + `parser.screen_mut().set_size()`)
 - [ ] T018 [US1] Implement `SubshellState::respawn(&mut self, shell: &str, cwd: &Path, rows: u16, cols: u16)` in `crates/cargonaut-ui-tui/src/subshell.rs`: drop existing `master`/`writer`, spawn fresh PTY + reader task; reset `dead = false`, `scroll_offset = 0`; call from `handle_key` OpenSubshell when `dead == true` and phase is `Hidden → VisibleFmFocus`
@@ -144,8 +145,8 @@ Phase 3 + Phase 4 + Phase 5 → Phase 6 (T034-T042) [polish + docs]
 |---|---|---|---|
 | Phase 1: Setup | T001–T003 | — | pending |
 | Phase 2: Foundational | T004–T009 | — | pending |
-| Phase 3: US1 Toggle | T010–T019 | US1 | pending |
+| Phase 3: US1 Toggle | T010–T015b, T016–T019 | US1 | pending |
 | Phase 4: US2 cwd-sync | T020–T026 | US2 | pending |
 | Phase 5: US3 Key routing | T027–T033 | US3 | pending |
 | Phase 6: Polish | T034–T042 | — | pending |
-| **Total** | **42 tasks** | | |
+| **Total** | **43 tasks** | | |

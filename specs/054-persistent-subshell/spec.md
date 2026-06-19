@@ -18,7 +18,7 @@
 
 ## Overview
 
-Today Cargonaut launches an external viewer/editor by fully suspending the TUI (leaving the alternate screen, restoring the terminal to cooked mode) and blocking until the process exits. There is no persistent shell session that the user can toggle open and closed. This feature adds a **persistent subshell panel** at the bottom of the screen: a PTY-backed shell process that is spawned once at startup, kept alive for the session, and toggled visible or hidden with `Ctrl-o`. When visible, the shell occupies roughly the lower third of the terminal; both file-manager panes shrink to share the upper portion. When the subshell is hidden, the layout returns to the normal dual-panel view. The shell's working directory is kept in sync with the active panel's current directory whenever the panel changes directories. This mirrors the "Ctrl-o" subshell toggle in the reference manager (Midnight Commander) and resolves the deferral recorded in Feature 031.
+Today Cargonaut launches an external viewer/editor by fully suspending the TUI (leaving the alternate screen, restoring the terminal to cooked mode) and blocking until the process exits. There is no persistent shell session that the user can toggle open and closed. This feature adds a **persistent subshell panel** at the bottom of the screen: a PTY-backed shell process that is spawned lazily on the first `Ctrl-o` press, kept alive for the remainder of the session, and toggled visible or hidden with subsequent `Ctrl-o` presses. When visible, the shell occupies roughly the lower third of the terminal; both file-manager panes shrink to share the upper portion. When the subshell is hidden, the layout returns to the normal dual-panel view. The shell's working directory is kept in sync with the active panel's current directory whenever the panel changes directories. This mirrors the "Ctrl-o" subshell toggle in the reference manager (Midnight Commander) and resolves the deferral recorded in Feature 031.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -32,11 +32,12 @@ A user is browsing their project directory in the left panel. They press `Ctrl-o
 
 **Acceptance Scenarios**:
 
-1. **Given** the file manager is in normal dual-panel mode, **When** the user presses `Ctrl-o`, **Then** a shell panel appears in the lower portion of the screen and the dual panels are visible above it.
-2. **Given** the subshell panel is visible, **When** the user presses `Ctrl-o`, **Then** the shell panel hides and the dual panels expand back to full-screen height.
-3. **Given** the subshell was previously shown and commands were run, **When** the user presses `Ctrl-o` to show it again, **Then** the same shell session is resumed (history, environment variables, and cwd are preserved from the hidden state).
-4. **Given** the subshell is showing, **When** the user types a shell command and presses Enter, **Then** the command runs inside the shell and output appears within the subshell panel.
-5. **Given** the subshell is running a command, **When** the user presses `Ctrl-o`, **Then** the subshell is hidden but the running command continues in the background; toggling back reveals the resumed output.
+1. **Given** the file manager is in state 1 (hidden / normal dual-panel mode), **When** the user presses `Ctrl-o`, **Then** a shell panel appears in the lower portion of the screen and the dual panels are visible above it (state 2: VisibleFmFocus); file manager focus is retained.
+2. **Given** state 2 (subshell panel visible, file-manager focus active), **When** the user presses `Ctrl-o`, **Then** keyboard focus transfers to the subshell (state 3: VisibleShellFocus); the panel remains visible.
+3. **Given** state 3 (subshell panel visible, shell focus active), **When** the user presses `Ctrl-o`, **Then** the shell panel hides and the dual panels expand back to full-screen height (state 1: Hidden).
+4. **Given** the subshell was previously shown and commands were run, **When** the user presses `Ctrl-o` twice from state 1 to reach state 3, **Then** the same shell session is resumed (history, environment variables, and cwd are preserved from the hidden state).
+5. **Given** the subshell is in state 3 (shell focus), **When** the user types a shell command and presses Enter, **Then** the command runs inside the shell and output appears within the subshell panel.
+6. **Given** the subshell is running a command (state 3 → state 1 via Ctrl-o), **When** the user presses `Ctrl-o`, **Then** the subshell hides (state 1) but the running command continues in the background; pressing `Ctrl-o` twice from state 1 reveals the resumed output.
 
 ---
 
@@ -74,7 +75,7 @@ A user opens the subshell with `Ctrl-o` (first press — panel appears, FM focus
 4. **Given** state 2 (visible+FM-focus), **When** the user clicks inside the subshell panel (mouse mode), **Then** keyboard focus immediately transfers to the subshell (state 3).
 5. **Given** state 3 (visible+shell-focus), **When** the user clicks on either file-manager pane (mouse mode), **Then** keyboard focus returns to the file manager (state 2).
 6. **Given** keyboard focus is in the subshell (state 3), **When** the user types a command including special characters (pipes, redirects, quoting), **Then** all characters are forwarded verbatim to the PTY.
-7. **Given** the subshell has keyboard focus (state 3), **When** the shell exits (user types `exit` or `Ctrl-d`), **Then** the subshell panel closes (state 1), a fresh shell is spawned ready for the next `Ctrl-o`, and file-manager focus is restored.
+7. **Given** the subshell has keyboard focus (state 3), **When** the shell exits (user types `exit` or `Ctrl-d`), **Then** the subshell panel transitions to state 1 (Hidden) and shows a "Shell exited — press Ctrl-o to restart" notice; file-manager focus is restored. The next `Ctrl-o` from state 1 spawns a fresh shell (lazy respawn — not immediate).
 
 ---
 
@@ -91,7 +92,7 @@ A user opens the subshell with `Ctrl-o` (first press — panel appears, FM focus
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST spawn a PTY-backed persistent shell process at application startup (or on the first `Ctrl-o`, whichever is lazier). The shell MUST be determined by the `$SHELL` environment variable, falling back to `/bin/sh`.
+- **FR-001**: The system MUST spawn a PTY-backed persistent shell process lazily — on the first `Ctrl-o` press, not at application startup — to avoid needless process creation when the user never uses the subshell. Once spawned, the process is kept alive for the entire session. The shell MUST be determined by the `$SHELL` environment variable, falling back to `/bin/sh`.
 - **FR-002**: `Ctrl-o` advances the subshell through a three-state cycle in order: (1) **hidden** → (2) **visible, file-manager focus** → (3) **visible, shell focus** → back to (1) **hidden**. Each `Ctrl-o` press advances exactly one step. The cycle is the sole keyboard mechanism for showing, entering, and hiding the subshell; no separate focus-entry key is required.
 - **FR-003**: When advancing from state 1 → 2 (hidden → visible+FM-focus), the subshell panel MUST appear in the lower portion of the screen (~33% of content-area rows by default; FR-013). The dual panels remain visible and fully interactive above it. File-manager focus is retained — arrow keys and all file-manager bindings remain active.
 - **FR-004**: When advancing from state 2 → 3 (visible+FM-focus → visible+shell-focus), keyboard focus transfers to the subshell. All subsequent keystrokes (except `Ctrl-o`) are forwarded verbatim to the PTY. The file-manager panels remain visible but do not receive input.
@@ -99,7 +100,7 @@ A user opens the subshell with `Ctrl-o` (first press — panel appears, FM focus
   A mouse click inside the subshell panel area MUST also transfer keyboard focus to the shell (jumping directly to state 3) regardless of current state. A mouse click outside the subshell panel (on either file-manager pane) MUST return focus to the file manager (state 2 if panel is visible).
 - **FR-005**: The subshell panel MUST act as a full ANSI/VT100 terminal emulator — cursor-addressing programs (`vim`, `htop`, `less`, `top`) MUST render and respond to input correctly within the panel. The visible region shows the terminal's current screen state (not a raw log of output lines); the user MAY scroll up through scrollback history while focus is in the subshell (state 3). A terminal-emulator library paired with `portable-pty` provides this capability; raw-line display is insufficient.
 - **FR-006**: When keyboard focus is in the subshell, ALL keystrokes (including special characters, Ctrl sequences, and escape codes) MUST be forwarded verbatim to the PTY. The only exception is `Ctrl-o`, which returns focus to the file manager (FR-004).
-- **FR-007**: Whenever the **active file-manager panel** changes its current directory (via navigation, cd-popup, bookmark jump, tab-switch via `[`/`]`, or any other mechanism), the subshell's cwd MUST be updated by sending `cd <new-path>\n` to the shell PTY. This sync MUST occur regardless of whether the subshell panel is currently visible. Tab-switch (Feature 053) is explicitly a cwd-change trigger: switching from tab A (in `/foo`) to tab B (in `/bar`) on the active side MUST send `cd /bar` to the shell.
+- **FR-007**: Whenever the **active file-manager panel** changes its current directory (via navigation, cd-popup, bookmark jump, tab-switch via `[`/`]`, or any other mechanism), the subshell's cwd MUST be updated by sending `cd <new-path>\r` (carriage return, not newline — required by PTY protocol) to the shell PTY. This sync MUST occur regardless of whether the subshell panel is currently visible. Tab-switch (Feature 053) is explicitly a cwd-change trigger: switching from tab A (in `/foo`) to tab B (in `/bar`) on the active side MUST send `cd /bar\r` to the shell.
 - **FR-008**: Whenever the **focused file-manager side** changes (Tab or M-1/M-2 focus-swap), the subshell's cwd MUST be updated to the active tab of the newly focused side's current directory.
 - **FR-009**: If the shell process exits (any cause), the subshell panel MUST show a "Shell exited — press Ctrl-o to restart" notice rather than crashing or freezing. The next `Ctrl-o` MUST spawn a fresh shell in the active panel's directory and restore normal subshell behavior.
 - **FR-010**: When the terminal is resized, the PTY MUST be resized to match the new subshell panel dimensions (`TIOCSWINSZ` / equivalent portable API). The file manager and subshell panel MUST reflow to the new dimensions within one frame.
@@ -111,10 +112,9 @@ A user opens the subshell with `Ctrl-o` (first press — panel appears, FM focus
 
 ### Key Entities
 
-- **SubshellState**: Top-level struct (in `cargonaut-ui-tui`) owning the PTY master, child process handle, output ring buffer, scroll offset, and visible/focus flags. Managed by `UiState`.
-- **PtyOutput**: A fixed-capacity ring buffer of lines/bytes received from the PTY master fd, used to paint the subshell panel without keeping unlimited history.
-- **SubshellFocus**: Boolean flag on `UiState`; when true, input is routed to the PTY instead of the file manager dispatch table.
-- **SubshellHeight**: Resolved pixel-row count for the subshell panel, derived from `ui.subshell_height_pct` (FR-013) and current terminal height.
+- **SubshellState**: Struct (in `cargonaut-ui-tui/src/subshell.rs`) owning the PTY master fd, write end, `vt100::Parser` (VT100 state machine + scrollback), async output receiver, scroll offset, dead flag, and last-known PTY size. Created on first `Ctrl-o`; lives in `UiState`.
+- **SubshellPhase**: Three-variant enum (`Hidden`, `VisibleFmFocus`, `VisibleShellFocus`) on `UiState`. Determines input routing and layout. Replaces the former boolean `SubshellFocus` flag; the enum captures the full three-state cycle (FR-002).
+- **FrameLayout.subshell**: `Option<Rect>` field on the existing `FrameLayout` struct (in `chrome.rs`). Set to `Some(rect)` when the subshell panel is visible; used for rendering and mouse hit-testing.
 
 ## Success Criteria *(mandatory)*
 
