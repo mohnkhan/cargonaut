@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 18 features since (031–052) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 536 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 19 features since (031–053) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 572 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.9 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -183,8 +183,16 @@ for the local filesystem:
   panelized entries. `Esc` aborts an in-progress walk within ≤300 ms. Panel title shows
   `[Find: <pattern>]`; navigating away restores the real directory path.
   (Feature 052, closes #41).
+- **Per-pane tab lists** — `Ctrl-t` opens a new tab on the active side (cloning the current
+  directory); `Ctrl-w` closes it (last tab on a side cannot be closed); `]`/`[` cycle to the
+  next/previous tab. A tab bar is rendered as the first row of each pane showing `[N]label`
+  for inactive tabs and `[N*]label` for the active one, with horizontal scroll when tabs
+  overflow the width. Each tab maintains fully independent state (cwd, cursor, selection, filter,
+  sort, hidden-file toggle, navigation history). Cross-pane operations (F5 copy, F6 move,
+  `Alt-i` sync path) always use the active tab on each side.
+  (Feature 053).
 
-The full per-feature history (Features 001 → 052) lives in
+The full per-feature history (Features 001 → 053) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
