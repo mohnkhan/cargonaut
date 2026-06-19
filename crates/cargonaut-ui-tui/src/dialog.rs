@@ -1163,6 +1163,19 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
         ],
     },
     HelpSection {
+        title: "Built-in Editor (Feature 056 — F4)",
+        rows: &[
+            HelpRow {
+                key: "F2 / C-s",
+                desc: "Save the file (save-file)",
+            },
+            HelpRow {
+                key: "F10 / Esc / q",
+                desc: "Quit the editor; prompts if unsaved (editor-quit)",
+            },
+        ],
+    },
+    HelpSection {
         title: "Search Mode",
         rows: &[
             HelpRow {
@@ -3434,6 +3447,604 @@ fn left_truncate_path(path: &std::path::Path, max_width: usize) -> String {
 }
 
 // =====================================================================
+// Internal Editor (Feature 056 — FR-001..FR-010, issue #40)
+// =====================================================================
+
+/// Detected line-ending style, preserved through load and save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnding {
+    /// Unix-style `\n`.
+    Lf,
+    /// Windows-style `\r\n`.
+    Crlf,
+}
+
+impl LineEnding {
+    /// Join the given lines into a single string using this line ending.
+    pub fn join(self, lines: &[String]) -> String {
+        let sep = match self {
+            LineEnding::Lf => "\n",
+            LineEnding::Crlf => "\r\n",
+        };
+        lines.join(sep)
+    }
+}
+
+// --- UnsavedChangesDialog ---
+
+/// What the user chose in the unsaved-changes exit guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedChangesChoice {
+    /// Save the file, then close the editor.
+    Save,
+    /// Discard all changes and close without saving.
+    Discard,
+    /// Return to editing without closing.
+    Cancel,
+}
+
+/// Three-choice modal shown when the user tries to exit with unsaved changes.
+///
+/// Focus defaults to `Cancel` (index 2) — the safe choice.
+/// Tab / Left / Right cycle through Save / Discard / Cancel.
+/// Enter confirms the focused choice; Esc always resolves to Cancel.
+#[derive(Debug, Clone)]
+pub struct UnsavedChangesDialog {
+    /// Focused button: 0 = Save, 1 = Discard, 2 = Cancel.
+    focus: usize,
+}
+
+impl UnsavedChangesDialog {
+    /// Construct with focus on Cancel.
+    pub fn new() -> Self {
+        Self { focus: 2 }
+    }
+
+    /// Handle a key press. Returns `Some(choice)` when the dialog should dismiss.
+    pub fn handle_key(&mut self, code: crossterm::event::KeyCode) -> Option<UnsavedChangesChoice> {
+        use crossterm::event::KeyCode;
+        match code {
+            KeyCode::Esc => Some(UnsavedChangesChoice::Cancel),
+            KeyCode::Enter => Some(match self.focus {
+                0 => UnsavedChangesChoice::Save,
+                1 => UnsavedChangesChoice::Discard,
+                _ => UnsavedChangesChoice::Cancel,
+            }),
+            KeyCode::Tab | KeyCode::Right | KeyCode::Left => {
+                self.focus = (self.focus + 1) % 3;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Render centered over the given area.
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        let w = 46u16.min(area.width);
+        let h = 6u16.min(area.height);
+        let x = area.x + area.width.saturating_sub(w) / 2;
+        let y = area.y + area.height.saturating_sub(h) / 2;
+        let inner = Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        };
+        Clear.render(inner, buf);
+        let label = |idx: usize, text: &str| -> String {
+            if self.focus == idx {
+                format!("[{text}]")
+            } else {
+                format!(" {text} ")
+            }
+        };
+        let body = format!(
+            "Unsaved changes.\n\n{}  {}  {}",
+            label(0, "Save"),
+            label(1, "Discard"),
+            label(2, "Cancel"),
+        );
+        let block = Block::default()
+            .title(" Unsaved Changes ")
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        let para = Paragraph::new(body)
+            .block(block)
+            .style(theme.dialog_style())
+            .wrap(Wrap { trim: false });
+        Widget::render(para, inner, buf);
+    }
+
+    /// Currently focused button index (0=Save, 1=Discard, 2=Cancel).
+    pub fn focus(&self) -> usize {
+        self.focus
+    }
+}
+
+impl Default for UnsavedChangesDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// --- FileEditorAction ---
+
+/// Return value from [`FileEditorDialog::handle_key`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileEditorAction {
+    /// Key consumed; redraw, but no structural state change.
+    Swallow,
+    /// Editor has no unsaved changes — close immediately.
+    Close,
+    /// Editor has unsaved changes; sub-modal is now showing (key consumed).
+    UnsavedPromptShowing,
+    /// Sub-modal resolved to Save → lib.rs must call `save()` then close.
+    SaveAndClose,
+    /// Sub-modal resolved to Discard → lib.rs must close without saving.
+    DiscardAndClose,
+}
+
+// --- FileEditorDialog ---
+
+/// Full-screen built-in text editor (Feature 056, FR-001..FR-010).
+///
+/// Stores the file content as a [`Vec<String>`] line buffer (no terminators).
+/// Cursor is tracked as `(cursor_line, cursor_col)` — both 0-based byte indices.
+/// The view is scrolled so the cursor is always visible.
+#[derive(Debug)]
+pub struct FileEditorDialog {
+    /// Absolute resolved path for saving.
+    path: std::path::PathBuf,
+    /// Display name shown in the header bar.
+    display_name: String,
+    /// Line buffer — each entry is one line without its line terminator.
+    lines: Vec<String>,
+    /// 0-based row index of the cursor.
+    cursor_line: usize,
+    /// 0-based byte column of the cursor within `lines[cursor_line]`.
+    cursor_col: usize,
+    /// First visible line index (0 = top of file).
+    scroll_offset: usize,
+    /// True when in-memory content differs from the file on disk.
+    dirty: bool,
+    /// Line-ending style detected on open; preserved on save.
+    line_ending: LineEnding,
+    /// Non-None while the unsaved-changes sub-modal is showing.
+    unsaved_dlg: Option<UnsavedChangesDialog>,
+    /// Transient status message shown in the footer (e.g. save errors).
+    pub status_msg: Option<String>,
+    /// Last known content area height in rows; updated each render; used by PageUp/PageDown.
+    viewport_height: u16,
+}
+
+impl FileEditorDialog {
+    // --- Construction ---
+
+    /// Construct a new editor from the full file content string.
+    ///
+    /// `line_ending` is detected by the caller and recorded for save-time use.
+    pub fn new(
+        path: std::path::PathBuf,
+        display_name: String,
+        content: String,
+        line_ending: LineEnding,
+    ) -> Self {
+        // Split on LF (strip any CR), preserve at least one empty line for an empty file.
+        let lines: Vec<String> = if content.is_empty() {
+            vec![String::new()]
+        } else {
+            content
+                .split('\n')
+                .map(|l| l.trim_end_matches('\r').to_owned())
+                .collect()
+        };
+        Self {
+            path,
+            display_name,
+            lines,
+            cursor_line: 0,
+            cursor_col: 0,
+            scroll_offset: 0,
+            dirty: false,
+            line_ending,
+            unsaved_dlg: None,
+            status_msg: None,
+            viewport_height: 24,
+        }
+    }
+
+    // --- Public accessors ---
+
+    /// Whether the buffer has unsaved changes.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    // --- Save ---
+
+    /// Write the line buffer to disk using the original line-ending style.
+    ///
+    /// Clears `self.dirty` on success. On error the buffer is unchanged — the
+    /// caller should inspect the returned error and set `status_msg`.
+    pub fn save(&mut self) -> std::io::Result<()> {
+        let content = self.line_ending.join(&self.lines);
+        std::fs::write(&self.path, content.as_bytes())?;
+        self.dirty = false;
+        Ok(())
+    }
+
+    // --- Key handling ---
+
+    /// Handle a raw key event.
+    ///
+    /// Callers in `lib.rs` MUST intercept `Command::SaveFile` and
+    /// `Command::EditorQuit` BEFORE calling this method (via keymap lookup).
+    /// This method handles only raw navigation and editing keys, plus
+    /// sub-modal routing when `unsaved_dlg` is active.
+    ///
+    /// Uses `self.viewport_height` (updated by `render()`) for page scroll math.
+    pub fn handle_key(
+        &mut self,
+        code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> FileEditorAction {
+        let viewport_height = self.viewport_height;
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        // Route to sub-modal when active.
+        if let Some(ref mut dlg) = self.unsaved_dlg {
+            return match dlg.handle_key(code) {
+                Some(UnsavedChangesChoice::Save) => {
+                    self.unsaved_dlg = None;
+                    FileEditorAction::SaveAndClose
+                }
+                Some(UnsavedChangesChoice::Discard) => {
+                    self.unsaved_dlg = None;
+                    FileEditorAction::DiscardAndClose
+                }
+                Some(UnsavedChangesChoice::Cancel) => {
+                    self.unsaved_dlg = None;
+                    FileEditorAction::Swallow
+                }
+                None => FileEditorAction::Swallow,
+            };
+        }
+
+        let ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+        match code {
+            // Navigation
+            KeyCode::Up => {
+                self.move_up();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Down => {
+                self.move_down();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Left => {
+                self.move_left();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Right => {
+                self.move_right();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Home if ctrl => {
+                self.goto_start();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::End if ctrl => {
+                self.goto_end();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Home => {
+                self.cursor_col = 0;
+                FileEditorAction::Swallow
+            }
+            KeyCode::End => {
+                self.cursor_col = self.lines[self.cursor_line].len();
+                FileEditorAction::Swallow
+            }
+            KeyCode::PageUp => {
+                let step = viewport_height.saturating_sub(1) as usize;
+                self.scroll_offset = self.scroll_offset.saturating_sub(step);
+                self.cursor_line = self.cursor_line.saturating_sub(step);
+                self.clamp_cursor();
+                FileEditorAction::Swallow
+            }
+            KeyCode::PageDown => {
+                let step = viewport_height.saturating_sub(1) as usize;
+                let max_line = self.lines.len().saturating_sub(1);
+                self.cursor_line = (self.cursor_line + step).min(max_line);
+                self.scroll_to_cursor(viewport_height);
+                self.clamp_cursor();
+                FileEditorAction::Swallow
+            }
+            // Editing
+            KeyCode::Char(c) if !ctrl => {
+                self.insert_char(c);
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Backspace => {
+                self.delete_left();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            KeyCode::Delete => {
+                self.delete_right();
+                FileEditorAction::Swallow
+            }
+            KeyCode::Enter => {
+                self.split_line();
+                self.scroll_to_cursor(viewport_height);
+                FileEditorAction::Swallow
+            }
+            _ => FileEditorAction::Swallow,
+        }
+    }
+
+    /// Show the unsaved-changes sub-modal. Called by `lib.rs` when the user
+    /// triggers `EditorQuit` while `is_dirty()`.
+    pub fn show_unsaved_dialog(&mut self) {
+        self.unsaved_dlg = Some(UnsavedChangesDialog::new());
+    }
+
+    // --- Render ---
+
+    /// Render the editor full-screen into `area`. Updates `self.viewport_height` as a side effect.
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        use ratatui::style::Modifier;
+        use ratatui::text::{Line, Span};
+
+        if area.height < 3 || area.width < 4 {
+            return;
+        }
+
+        let header_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        let footer_area = Rect {
+            x: area.x,
+            y: area.y + area.height - 1,
+            width: area.width,
+            height: 1,
+        };
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height - 2,
+        };
+        self.viewport_height = content_area.height;
+        let content_style = theme.dialog_style();
+
+        // --- Header ---
+        let modified = if self.dirty { "*" } else { " " };
+        let header_text = format!("{modified} {}", self.display_name);
+        let header_line = Line::from(Span::styled(
+            format!("{:<width$}", header_text, width = area.width as usize),
+            theme.status_style(),
+        ));
+        buf.set_line(
+            header_area.x,
+            header_area.y,
+            &header_line,
+            header_area.width,
+        );
+
+        // --- Content ---
+        let viewport_height = content_area.height as usize;
+        for (row_idx, line_idx) in
+            (self.scroll_offset..self.scroll_offset + viewport_height).enumerate()
+        {
+            let y = content_area.y + row_idx as u16;
+            if y >= content_area.y + content_area.height {
+                break;
+            }
+            let Some(line) = self.lines.get(line_idx) else {
+                // Empty row below end of file.
+                let empty = format!("{:width$}", "", width = content_area.width as usize);
+                let styled = Line::from(Span::styled(empty, content_style));
+                buf.set_line(content_area.x, y, &styled, content_area.width);
+                continue;
+            };
+            // Expand tabs for display (4 spaces per tab, hard-coded per spec).
+            let display: String = line
+                .chars()
+                .flat_map(|c| {
+                    if c == '\t' {
+                        std::iter::repeat(' ').take(4).collect::<Vec<_>>()
+                    } else {
+                        vec![c]
+                    }
+                })
+                .collect();
+            let padded = format!("{:<width$}", display, width = content_area.width as usize);
+            let styled = Line::from(Span::styled(&padded, content_style));
+            buf.set_line(content_area.x, y, &styled, content_area.width);
+
+            // Highlight cursor cell on the cursor line.
+            if line_idx == self.cursor_line {
+                // Map byte col to visual col (accounting for tabs).
+                let visual_col = line.chars().take(self.cursor_col).fold(0usize, |acc, c| {
+                    acc + if c == '\t' { 4 } else { c.len_utf8().min(1) }
+                });
+                let cx = content_area.x + (visual_col as u16).min(content_area.width - 1);
+                if cx < content_area.x + content_area.width {
+                    let cell = buf.get_mut(cx, y);
+                    let current_style = cell.style();
+                    cell.set_style(current_style.add_modifier(Modifier::REVERSED));
+                }
+            }
+        }
+
+        // --- Footer ---
+        let left = if let Some(ref msg) = self.status_msg {
+            msg.clone()
+        } else {
+            format!("Ln {}, Col {}", self.cursor_line + 1, self.cursor_col + 1)
+        };
+        let right = "F2=Save  F10=Quit";
+        let gap = (area.width as usize).saturating_sub(left.len() + right.len());
+        let footer_text = format!("{left}{:>gap$}{right}", "", gap = gap);
+        let footer_line = Line::from(Span::styled(
+            format!("{:<width$}", footer_text, width = area.width as usize),
+            theme.status_style(),
+        ));
+        buf.set_line(
+            footer_area.x,
+            footer_area.y,
+            &footer_line,
+            footer_area.width,
+        );
+
+        // --- Unsaved dialog overlay ---
+        if let Some(ref dlg) = self.unsaved_dlg {
+            dlg.render(content_area, buf, theme);
+        }
+    }
+
+    // --- Private helpers ---
+
+    fn clamp_cursor(&mut self) {
+        let max_line = self.lines.len().saturating_sub(1);
+        self.cursor_line = self.cursor_line.min(max_line);
+        let max_col = self.lines[self.cursor_line].len();
+        self.cursor_col = self.cursor_col.min(max_col);
+    }
+
+    fn scroll_to_cursor(&mut self, viewport_height: u16) {
+        let vh = viewport_height as usize;
+        if vh == 0 {
+            return;
+        }
+        if self.cursor_line < self.scroll_offset {
+            self.scroll_offset = self.cursor_line;
+        } else if self.cursor_line >= self.scroll_offset + vh {
+            self.scroll_offset = self.cursor_line + 1 - vh;
+        }
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        let col = self.cursor_col;
+        let line = &mut self.lines[self.cursor_line];
+        // Find the byte offset for the given char index.
+        line.insert(col, ch);
+        self.cursor_col += ch.len_utf8();
+        self.dirty = true;
+    }
+
+    fn delete_left(&mut self) {
+        if self.cursor_col > 0 {
+            let line = &mut self.lines[self.cursor_line];
+            // Find char boundary to the left.
+            let new_col = {
+                let s = &line[..self.cursor_col];
+                s.char_indices().next_back().map(|(i, _)| i).unwrap_or(0)
+            };
+            line.remove(new_col);
+            self.cursor_col = new_col;
+            self.dirty = true;
+        } else if self.cursor_line > 0 {
+            // Join with previous line.
+            let removed = self.lines.remove(self.cursor_line);
+            self.cursor_line -= 1;
+            let prev_len = self.lines[self.cursor_line].len();
+            self.lines[self.cursor_line].push_str(&removed);
+            self.cursor_col = prev_len;
+            self.dirty = true;
+        }
+    }
+
+    fn delete_right(&mut self) {
+        let line = &self.lines[self.cursor_line];
+        if self.cursor_col < line.len() {
+            let col = self.cursor_col;
+            // Find next char boundary.
+            let next = line[col..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| col + i)
+                .unwrap_or(line.len());
+            self.lines[self.cursor_line].drain(col..next);
+            self.dirty = true;
+        } else if self.cursor_line + 1 < self.lines.len() {
+            // Join next line into this one.
+            let next_line = self.lines.remove(self.cursor_line + 1);
+            self.lines[self.cursor_line].push_str(&next_line);
+            self.dirty = true;
+        }
+    }
+
+    fn split_line(&mut self) {
+        let col = self.cursor_col;
+        let rest = self.lines[self.cursor_line].split_off(col);
+        self.cursor_line += 1;
+        self.cursor_col = 0;
+        self.lines.insert(self.cursor_line, rest);
+        self.dirty = true;
+    }
+
+    fn move_up(&mut self) {
+        if self.cursor_line > 0 {
+            self.cursor_line -= 1;
+            self.clamp_cursor();
+        }
+    }
+
+    fn move_down(&mut self) {
+        if self.cursor_line + 1 < self.lines.len() {
+            self.cursor_line += 1;
+            self.clamp_cursor();
+        }
+    }
+
+    fn move_left(&mut self) {
+        if self.cursor_col > 0 {
+            let s = &self.lines[self.cursor_line][..self.cursor_col];
+            if let Some((i, _)) = s.char_indices().next_back() {
+                self.cursor_col = i;
+            }
+        } else if self.cursor_line > 0 {
+            self.cursor_line -= 1;
+            self.cursor_col = self.lines[self.cursor_line].len();
+        }
+    }
+
+    fn move_right(&mut self) {
+        let line = &self.lines[self.cursor_line];
+        if self.cursor_col < line.len() {
+            let (_, ch) = line[self.cursor_col..].char_indices().next().unwrap();
+            self.cursor_col += ch.len_utf8();
+        } else if self.cursor_line + 1 < self.lines.len() {
+            self.cursor_line += 1;
+            self.cursor_col = 0;
+        }
+    }
+
+    fn goto_start(&mut self) {
+        self.cursor_line = 0;
+        self.cursor_col = 0;
+    }
+
+    fn goto_end(&mut self) {
+        self.cursor_line = self.lines.len().saturating_sub(1);
+        self.cursor_col = self.lines[self.cursor_line].len();
+    }
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
@@ -5451,43 +6062,190 @@ mod tests {
 
     // ---------- FileEditorDialog (Feature 056) ----------
 
+    fn make_editor(content: &str) -> (FileEditorDialog, tempfile::NamedTempFile) {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), content).unwrap();
+        let widget = FileEditorDialog::new(
+            f.path().to_path_buf(),
+            "test.txt".into(),
+            content.to_owned(),
+            LineEnding::Lf,
+        );
+        (widget, f)
+    }
+
     #[test]
     fn editor_insert_and_save_writes_correct_content() {
-        todo!()
+        let (mut w, f) = make_editor("hello");
+        // Insert 'X' at position 0.
+        w.handle_key(
+            crossterm::event::KeyCode::Char('X'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        assert!(w.is_dirty());
+        w.save().unwrap();
+        assert!(!w.is_dirty());
+        let written = std::fs::read_to_string(f.path()).unwrap();
+        assert_eq!(written, "Xhello");
     }
 
     #[test]
     fn editor_utf8_roundtrip_no_edits() {
-        todo!()
+        let content = "line1\nline2\n";
+        let (mut w, f) = make_editor(content);
+        assert!(!w.is_dirty());
+        w.save().unwrap();
+        let written = std::fs::read_to_string(f.path()).unwrap();
+        assert_eq!(written, content);
     }
 
     #[test]
     fn editor_save_failure_keeps_dirty_and_shows_error() {
-        todo!()
+        // Use a path that cannot be written.
+        let w = FileEditorDialog::new(
+            std::path::PathBuf::from("/dev/null/does_not_exist"),
+            "x.txt".into(),
+            "data".to_owned(),
+            LineEnding::Lf,
+        );
+        // Manually mark dirty so save attempt is meaningful.
+        let mut w = w;
+        // Force dirty by inserting a char.
+        w.handle_key(
+            crossterm::event::KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        assert!(w.is_dirty());
+        let result = w.save();
+        assert!(result.is_err(), "save to bad path should fail");
+        assert!(w.is_dirty(), "dirty flag must remain after failed save");
     }
 
     #[test]
     fn editor_cursor_navigation_stays_in_bounds() {
-        todo!()
+        let (mut w, _f) = make_editor("ab\ncd");
+        // Move left past start of first line — should be a no-op, not panic.
+        w.handle_key(
+            crossterm::event::KeyCode::Left,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        // Move up past first line — no-op.
+        w.handle_key(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        // Move right past EOL on last line (wraps to next line start).
+        w.handle_key(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        w.handle_key(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        w.handle_key(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        // Right at absolute end → no-op.
+        w.handle_key(
+            crossterm::event::KeyCode::Right,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        // Should not have panicked.
     }
 
     #[test]
     fn editor_render_shows_modified_indicator() {
-        todo!()
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+        let theme = crate::theme::Theme::commander_dark();
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 10,
+        };
+
+        let (mut w, _f) = make_editor("hello");
+        // Before modification: no star in header.
+        let mut buf = Buffer::empty(area);
+        w.render(area, &mut buf, &theme);
+        let header_row: String = (0..40u16)
+            .map(|x| buf.get(x, 0).symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            !header_row.starts_with('*'),
+            "clean file should not show '*'"
+        );
+
+        // After modification: star appears.
+        w.handle_key(
+            crossterm::event::KeyCode::Char('X'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        let mut buf2 = Buffer::empty(area);
+        w.render(area, &mut buf2, &theme);
+        let header2: String = (0..40u16)
+            .map(|x| buf2.get(x, 0).symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            header2.starts_with('*'),
+            "dirty file should show '*' in header"
+        );
     }
 
     #[test]
     fn editor_unsaved_changes_guard_triggered_on_quit() {
-        todo!()
+        let (mut w, _f) = make_editor("text");
+        // Dirty the buffer.
+        w.handle_key(
+            crossterm::event::KeyCode::Char('Z'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        w.show_unsaved_dialog();
+        // Next key should route to sub-modal, not close editor.
+        let action = w.handle_key(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        // Esc on UnsavedChangesDialog → Cancel → sub-modal dismissed, swallow.
+        assert_eq!(action, FileEditorAction::Swallow);
+        assert!(w.is_dirty(), "cancel should not have saved");
     }
 
     #[test]
     fn editor_discard_does_not_save() {
-        todo!()
+        let (mut w, f) = make_editor("original");
+        let original = std::fs::read_to_string(f.path()).unwrap();
+        w.handle_key(
+            crossterm::event::KeyCode::Char('X'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        w.show_unsaved_dialog();
+        // Tab to Discard (focus starts on Cancel=2, Tab → Save=0, Tab → Discard=1)
+        w.handle_key(
+            crossterm::event::KeyCode::Tab,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        w.handle_key(
+            crossterm::event::KeyCode::Tab,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        let action = w.handle_key(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        assert_eq!(action, FileEditorAction::DiscardAndClose);
+        let on_disk = std::fs::read_to_string(f.path()).unwrap();
+        assert_eq!(on_disk, original, "discard must not write to disk");
     }
 
     #[test]
     fn unsaved_dialog_cancel_resumes_editing() {
-        todo!()
+        let mut dlg = UnsavedChangesDialog::new();
+        assert_eq!(dlg.focus(), 2, "default focus = Cancel");
+        let result = dlg.handle_key(crossterm::event::KeyCode::Esc);
+        assert_eq!(result, Some(UnsavedChangesChoice::Cancel));
     }
 }
