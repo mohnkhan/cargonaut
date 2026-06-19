@@ -4646,4 +4646,71 @@ mod tests {
             "help must mention 'find'"
         );
     }
+
+    // ===== Feature 053: T015 (red) — tab_bar_line rendering tests =====
+    // tab_bar_line does not exist yet; these compile-fail tests are the red state.
+
+    #[test]
+    fn tab_bar_line_renders_single_tab() {
+        use cargonaut_core::TabBarEntry;
+        let entries = vec![TabBarEntry { index: 1, label: "foo".to_string(), is_active: true }];
+        let line = tab_bar_line(&entries, 40, &Theme::default());
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("[1*]foo"), "tab bar should contain '[1*]foo', got: {text:?}");
+    }
+
+    #[test]
+    fn tab_bar_line_renders_multiple_tabs_with_active_marker() {
+        use cargonaut_core::TabBarEntry;
+        let entries = vec![
+            TabBarEntry { index: 1, label: "bar".to_string(), is_active: false },
+            TabBarEntry { index: 2, label: "baz".to_string(), is_active: true },
+        ];
+        let line = tab_bar_line(&entries, 40, &Theme::default());
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("[1]bar"), "should contain '[1]bar', got: {text:?}");
+        assert!(text.contains("[2*]baz"), "should contain '[2*]baz', got: {text:?}");
+    }
+
+    #[tokio::test]
+    async fn draw_pane_tab_bar_occupies_first_row() {
+        use cargonaut_core::{PaneId, TabBarEntry};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = app_with(&td_l, &td_r).await;
+        let entries = app.tab_bar_view(PaneId::Left);
+        let backend = TestBackend::new(40, 8);
+        let mut term = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        let area = Rect { x: 0, y: 0, width: 40, height: 8 };
+        term.draw(|f| {
+            let pane_state = app.pane(PaneId::Left);
+            let mut view = pane::PaneView::new(pane_state.cwd.clone(), pane_state.listing.clone());
+            view.sync_from(pane_state);
+            let _inner = draw_pane(
+                f,
+                &mut view,
+                area,
+                true,
+                &theme,
+                "",
+                pane::PaneLayout::Brief,
+                &entries,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        // Collect the first row (y=0, x=0..40) from the buffer content
+        // Buffer content is stored row by row: row y starts at y * width
+        let width = 40usize;
+        let first_row: String = buf
+            .content()
+            .iter()
+            .take(width)
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(first_row.contains("[1"), "first row should contain tab bar '[1', got: {first_row:?}");
+    }
 }
