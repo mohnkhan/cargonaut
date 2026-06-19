@@ -5422,6 +5422,113 @@ mod tests {
         );
     }
 
+    // ---------- Feature 057 US1: DescendOrOpen on .zip files (T014 red) ----------
+
+    /// Minimal valid empty ZIP (EOCD record only — 22 bytes).
+    fn minimal_zip_bytes() -> Vec<u8> {
+        vec![
+            0x50, 0x4b, 0x05, 0x06, // End-of-Central-Directory signature
+            0x00, 0x00, // disk number
+            0x00, 0x00, // disk with CD start
+            0x00, 0x00, // entries on this disk
+            0x00, 0x00, // total entries
+            0x00, 0x00, 0x00, 0x00, // CD size
+            0x00, 0x00, 0x00, 0x00, // CD offset
+            0x00, 0x00, // comment length
+        ]
+    }
+
+    /// Write a valid empty ZIP to a named path and return the path.
+    fn write_valid_zip(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, minimal_zip_bytes()).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn descend_or_open_zip_navigates_into_archive() {
+        // T014 (red → green via T015): pressing Enter on a .zip file should
+        // navigate the active pane into the ZIP backend (zip:// cwd) instead
+        // of opening the built-in text viewer.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_zip(td_l.path(), "archive.zip");
+        let mut app = app_with(&td_l, &td_r).await;
+        // Cursor at index 0 is the ".." entry; the zip file is at index 1.
+        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        // After T015: pane must be navigated to a zip:// path.
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "zip",
+            "DescendOrOpen on a .zip file must navigate pane to zip:// (got: {}; status: {status:?})",
+            app.active_pane_state().cwd.display()
+        );
+        // Viewer dialog must NOT be opened.
+        assert!(dlg.is_none(), "no dialog must be open after zip navigation");
+    }
+
+    #[tokio::test]
+    async fn descend_or_open_corrupt_zip_shows_error_and_stays_local() {
+        // T014 error path: pressing Enter on a corrupt .zip shows an error
+        // and does NOT navigate the pane away from the local filesystem.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // PK magic header but then corrupted — valid ZIP magic so ZipFs tries to open it,
+        // but invalid structure so ZipFs::open returns Err; binary bytes so file viewer
+        // also fails its UTF-8 check.
+        std::fs::write(td_l.path().join("bad.zip"), b"PK\x03\x04\x00\xff\xfe binary garbage").unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::CursorTo(1)).await.unwrap();
+        let rect = Rect { x: 0, y: 1, width: 40, height: 10 };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        // Pane must stay local (no navigation on corrupt zip).
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "file",
+            "corrupt zip must not navigate pane (stayed at: {})",
+            app.active_pane_state().cwd.display()
+        );
+        // After T015: .zip files must NEVER open the file viewer regardless of
+        // whether archive open succeeds or fails — viewer is only for non-archive files.
+        assert!(
+            !matches!(mode, Mode::Preview),
+            "DescendOrOpen on a .zip must not open the viewer (mode={mode:?}); \
+             zip handler must intercept before reaching open_file_viewer"
+        );
+    }
+
     // ---------- open_file_editor decline paths (Feature 056 — US3) ----------
 
     #[tokio::test]
