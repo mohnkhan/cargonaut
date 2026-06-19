@@ -6147,4 +6147,72 @@ mod tests {
             );
         }
     }
+
+    // T017 [US1] (red): Ascending from a zip:// pane at archive root (empty
+    // segments) navigates back to the local parent directory of the archive
+    // file (file:// backend restored).
+    //
+    // Fails with the current ascend_to_parent because it returns
+    // "Already at root" for any zero-segment path — T018 fixes this.
+    #[tokio::test]
+    async fn ascend_from_zip_root_returns_to_local_parent() {
+        use cargonaut_vfs::ZipFs;
+        use std::io::Write;
+
+        // Create a valid empty zip inside a temp directory.
+        let td_archive = TempDir::new().unwrap();
+        let zip_path = td_archive.path().join("archive.zip");
+        {
+            let mut f = std::fs::File::create(&zip_path).unwrap();
+            // Minimal EOCD record — 0 entries, valid zip.
+            f.write_all(&[
+                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]).unwrap();
+        }
+
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+
+        // Mount the zip archive in the active (left) pane.
+        let zip_fs = ZipFs::open(zip_path.clone()).unwrap();
+        let encoded_auth: String = zip_path.to_str().unwrap()
+            .chars()
+            .flat_map(|c| match c {
+                '%' => "%25".chars().collect::<Vec<_>>(),
+                '/' => "%2F".chars().collect(),
+                other => vec![other],
+            })
+            .collect();
+        let zip_url = format!("zip://{encoded_auth}/");
+        let zip_vfs = VfsPath::parse(&zip_url).unwrap();
+        app.navigate_into(PaneId::Left, zip_vfs, std::sync::Arc::new(zip_fs))
+            .await
+            .unwrap();
+
+        // Confirm we are at the zip:// root (empty segments).
+        assert_eq!(app.pane(PaneId::Left).cwd.scheme.as_str(), "zip");
+        assert!(app.pane(PaneId::Left).cwd.segments.is_empty());
+
+        // Ascend — must pop out of the zip and land in the local parent dir.
+        app.dispatch(Command::Ascend).await.unwrap();
+
+        let pane = app.pane(PaneId::Left);
+        assert_eq!(
+            pane.cwd.scheme.as_str(),
+            "file",
+            "Ascend from zip root must restore file:// backend; cwd={}",
+            pane.cwd.display()
+        );
+        // The parent directory of the archive is td_archive.path().
+        let expected_parent = td_archive.path().to_str().unwrap();
+        assert!(
+            pane.cwd.display().ends_with(expected_parent)
+                || pane.cwd.display().contains(expected_parent),
+            "cwd after Ascend must be the archive's parent dir {expected_parent:?}; got {}",
+            pane.cwd.display()
+        );
+    }
 }
