@@ -708,6 +708,27 @@ action = "this-action-does-not-exist"
         assert_eq!(km.lookup_sequence(Mode::Pane, &[bogus]), SeqLookup::NoMatch);
     }
 
+    // Feature 052 T002 (red): M-? resolves to FindFilePopup in Pane mode,
+    // and no other binding resolves M-? (no collision).
+    #[test]
+    fn lookup_alt_question_resolves_to_find_file_popup() {
+        let km = Keymap::load(DEFAULT_KEYMAP_TOML).expect("default keymap must parse");
+        let ev = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::ALT);
+        assert_eq!(
+            km.lookup(Mode::Pane, ev),
+            Some(Command::FindFilePopup),
+            "M-? must resolve to FindFilePopup in Pane mode"
+        );
+        // Non-collision: M-? must not resolve from any other mode.
+        for mode in [Mode::Global, Mode::Dialog, Mode::Search, Mode::Preview] {
+            let result = km.lookup(mode, ev);
+            assert!(
+                result != Some(Command::FindFilePopup) || mode == Mode::Pane,
+                "M-? must not resolve to FindFilePopup in mode {mode:?}"
+            );
+        }
+    }
+
     #[test]
     fn merge_replaces_existing_binding() {
         let mut base = Keymap::load(
