@@ -5627,6 +5627,141 @@ mod tests {
         assert_eq!(app.sides[0].active_tab, 0, "single tab: TabNext stays at 0");
     }
 
+    // ===== Feature 053: T019 (red) — cross-pane operation tests =====
+    // Verify that cross-pane ops use each side's ACTIVE tab.
+
+    #[tokio::test]
+    async fn cross_pane_copy_dest_is_active_tab_cwd() {
+        // left tab 0 = td_l; left tab 1 = parent of td_l (via Ascend after TabNew)
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Write a file to right pane so we have something to copy
+        tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Open tab 2 on left (active_tab = 1, cwd = td_l)
+        app.dispatch(Command::TabNew).await.unwrap();
+        // Navigate tab 2 up (Ascend)
+        app.dispatch(Command::Ascend).await.unwrap();
+        let tab1_cwd = app.sides[0].tabs[0].cwd.display();
+        let tab2_cwd = app.sides[0].tabs[1].cwd.display();
+        assert_ne!(tab1_cwd, tab2_cwd, "tabs should have different cwds");
+        // Switch left to tab 1 (active_tab = 0) and focus right
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 0);
+        app.dispatch(Command::FocusRight).await.unwrap();
+        // Select the file and dispatch Copy (opens dialog)
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        let events = app.dispatch(Command::Copy).await.unwrap();
+        // The dialog body must mention tab 0's cwd (td_l), not tab 1's cwd
+        let body = events.iter().find_map(|e| {
+            if let Event::DialogRequested(DialogKind::Confirm { body, .. }) = e {
+                Some(body.clone())
+            } else {
+                None
+            }
+        });
+        let body = body.expect("expected DialogRequested event");
+        // The dialog body should say the copy goes TO tab 0's cwd (td_l).
+        // We check the active left pane's cwd directly equals tab 0's cwd.
+        assert_eq!(
+            app.pane(PaneId::Left).cwd.display(),
+            tab1_cwd,
+            "active left pane cwd should be tab 0 cwd after TabPrev"
+        );
+        assert!(
+            body.contains(&tab1_cwd),
+            "copy dialog body should contain tab 0 cwd ({tab1_cwd}), got: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cross_pane_copy_after_tab_switch_uses_new_active() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Open tab 2 on left; navigate to parent
+        app.dispatch(Command::TabNew).await.unwrap();
+        app.dispatch(Command::Ascend).await.unwrap();
+        let tab2_cwd = app.sides[0].tabs[1].cwd.display(); // parent of td_l
+        // Keep tab 2 active (active_tab = 1); focus right
+        assert_eq!(app.sides[0].active_tab, 1);
+        app.dispatch(Command::FocusRight).await.unwrap();
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        let events = app.dispatch(Command::Copy).await.unwrap();
+        let body = events.iter().find_map(|e| {
+            if let Event::DialogRequested(DialogKind::Confirm { body, .. }) = e {
+                Some(body.clone())
+            } else {
+                None
+            }
+        });
+        let body = body.expect("expected DialogRequested event");
+        assert!(
+            body.contains(&tab2_cwd),
+            "copy dialog body should contain tab 2 cwd ({tab2_cwd}), got: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_other_panel_uses_active_tab_cwd() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Open tab 2 on left; navigate to parent (now left tab 2 cwd = parent of td_l)
+        app.dispatch(Command::TabNew).await.unwrap();
+        app.dispatch(Command::Ascend).await.unwrap();
+        let tab2_cwd = app.sides[0].tabs[1].cwd.display();
+        // Switch back to left tab 1 to set up: active_tab = 0 on left
+        app.dispatch(Command::TabPrev).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 0);
+        // Now switch to left tab 2 (TabNext → active_tab = 1)
+        app.dispatch(Command::TabNext).await.unwrap();
+        assert_eq!(app.sides[0].active_tab, 1);
+        // Focus right; dispatch SyncOtherPanelPath (copies OTHER pane's cwd into active)
+        // SyncOtherPanelPath copies the OTHER pane's active tab cwd into the ACTIVE pane
+        app.dispatch(Command::FocusRight).await.unwrap();
+        app.dispatch(Command::SyncOtherPanelPath).await.unwrap();
+        // Right pane's cwd should now match left's active tab (tab 2) cwd
+        assert_eq!(
+            app.pane(PaneId::Right).cwd.display(),
+            tab2_cwd,
+            "right pane cwd should match left's active tab 2 cwd"
+        );
+    }
+
+    #[tokio::test]
+    async fn dialog_dest_captured_at_open_time() {
+        // Verify that dialog body captures the destination at dialog-open time.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        tokio::fs::write(td_r.path().join("file.txt"), b"hi").await.unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Left pane is focused; open tab 2 (cwd = td_l, same as tab 1)
+        app.dispatch(Command::TabNew).await.unwrap();
+        app.dispatch(Command::Ascend).await.unwrap();
+        // Switch left back to tab 0 (active_tab = 0, cwd = td_l)
+        app.dispatch(Command::TabPrev).await.unwrap();
+        let dest_at_open = app.sides[0].tabs[app.sides[0].active_tab].cwd.display();
+        // Focus right, select file, open copy dialog
+        app.dispatch(Command::FocusRight).await.unwrap();
+        app.dispatch(Command::SelectionToggle).await.unwrap();
+        let events = app.dispatch(Command::Copy).await.unwrap();
+        let body = events.iter().find_map(|e| {
+            if let Event::DialogRequested(DialogKind::Confirm { body, .. }) = e {
+                Some(body.clone())
+            } else {
+                None
+            }
+        });
+        let body = body.expect("expected DialogRequested");
+        // Dialog body must contain the destination cwd at dialog-open time
+        assert!(
+            body.contains(&dest_at_open),
+            "dialog body should capture dst at open time ({dest_at_open}), got: {body}"
+        );
+    }
+
     // ===== Feature 053: T010 (red) — tab_bar_view tests (method does not exist yet) =====
 
     #[tokio::test]
