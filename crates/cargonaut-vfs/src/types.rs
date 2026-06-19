@@ -349,4 +349,79 @@ mod tests {
         let p = VfsPath::parse("file:///etc").unwrap();
         let _ = p.join("..");
     }
+
+    // T004 (red): decode_authority — percent-decoding for archive VfsPath encoding.
+    // Authority encoding: archive host-path with `/` encoded as `%2F`.
+    // e.g. zip://%2Ftmp%2Farchive.zip/ means archive at /tmp/archive.zip.
+
+    #[test]
+    fn decode_authority_none_for_file_scheme() {
+        let p = VfsPath::parse("file:///etc").unwrap();
+        assert_eq!(p.decode_authority(), None, "file:// has no authority");
+    }
+
+    #[test]
+    fn decode_authority_passthrough_unencoded() {
+        let p = VfsPath::parse("sftp://user@host:22/").unwrap();
+        assert_eq!(
+            p.decode_authority(),
+            Some("user@host:22".to_string()),
+            "plain authority is returned as-is"
+        );
+    }
+
+    #[test]
+    fn decode_authority_percent_encoded_slash() {
+        // zip://%2Ftmp%2Farchive.zip/ represents archive at /tmp/archive.zip
+        let p = VfsPath {
+            scheme: SmolStr::new("zip"),
+            authority: Some(SmolStr::new("%2Ftmp%2Farchive.zip")),
+            segments: SmallVec::new(),
+        };
+        assert_eq!(
+            p.decode_authority(),
+            Some("/tmp/archive.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn decode_authority_multiple_segments_in_authority() {
+        // Deeply nested path encoded in authority
+        let p = VfsPath {
+            scheme: SmolStr::new("zip"),
+            authority: Some(SmolStr::new("%2Fhome%2Fuser%2Fdocs%2Ftest.zip")),
+            segments: SmallVec::new(),
+        };
+        assert_eq!(
+            p.decode_authority(),
+            Some("/home/user/docs/test.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn decode_authority_percent_encoded_percent() {
+        // %25 should decode to %
+        let p = VfsPath {
+            scheme: SmolStr::new("tar"),
+            authority: Some(SmolStr::new("%2Ftmp%2Fmy%2525file.tar")),
+            segments: SmallVec::new(),
+        };
+        assert_eq!(
+            p.decode_authority(),
+            Some("/tmp/my%25file.tar".to_string()),
+            "%25 decodes to literal % in a single pass"
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn decode_authority_no_panic_on_arbitrary(auth in "[a-zA-Z0-9%._:@/-]{0,64}") {
+            let p = VfsPath {
+                scheme: SmolStr::new("sftp"),
+                authority: Some(SmolStr::new(&auth)),
+                segments: SmallVec::new(),
+            };
+            let _ = p.decode_authority(); // must not panic
+        }
+    }
 }
