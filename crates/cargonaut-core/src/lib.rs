@@ -5315,6 +5315,45 @@ mod tests {
         assert_eq!(result[1], ("third.txt".to_string(), "3rd.txt".to_string()));
     }
 
+    // ===== Feature 053: T004 — API stability regression guard =====
+    // These tests pass before AND after the panes→sides refactor (T005).
+    // Their purpose is to detect any regression in the public accessor API.
+
+    #[tokio::test]
+    async fn pane_accessor_returns_starting_cwd() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let app = make_app(&td_l, &td_r).await;
+        // Public API unchanged: pane(PaneId) → &PaneState
+        let left: &PaneState = app.pane(PaneId::Left);
+        assert!(
+            left.cwd.display().ends_with(td_l.path().file_name().unwrap().to_str().unwrap()),
+            "left cwd should be td_l: {}",
+            left.cwd.display()
+        );
+        let right: &PaneState = app.pane(PaneId::Right);
+        assert!(
+            right.cwd.display().ends_with(td_r.path().file_name().unwrap().to_str().unwrap()),
+            "right cwd should be td_r: {}",
+            right.cwd.display()
+        );
+    }
+
+    #[tokio::test]
+    async fn active_pane_state_returns_active_side() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = make_app(&td_l, &td_r).await;
+        // Default active = Left; active_pane_state() returns Left's PaneState
+        assert_eq!(app.active_pane(), PaneId::Left);
+        let _state: &PaneState = app.active_pane_state();
+        assert_eq!(app.active_pane_state().cwd, app.pane(PaneId::Left).cwd);
+        // Focus swap → active = Right
+        app.dispatch(Command::FocusSwap).await.unwrap();
+        assert_eq!(app.active_pane(), PaneId::Right);
+        assert_eq!(app.active_pane_state().cwd, app.pane(PaneId::Right).cwd);
+    }
+
     // ===== Feature 053: Pane Tabs — T002 (red) type-shape tests =====
     // These tests fail to compile until T003 adds SideState and TabBarEntry.
 
