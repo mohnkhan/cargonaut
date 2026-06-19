@@ -31,9 +31,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 19 features since (031–053) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 572 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
-| **Binary** | 2.9 MiB stripped (ceiling: 8 MiB) |
+| **Status** | Alpha · Phase 1 shipped, plus 20 features since (031–054) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 591 unit + 12 integration, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Binary** | 3.0 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **Platform** | Linux terminal (local filesystem) |
@@ -191,8 +191,20 @@ for the local filesystem:
   sort, hidden-file toggle, navigation history). Cross-pane operations (F5 copy, F6 move,
   `Alt-i` sync path) always use the active tab on each side.
   (Feature 053).
+- **Persistent subshell (Ctrl-o)** — `Ctrl-o` toggles a PTY-backed shell panel at the bottom of
+  the screen. Three-state cycle: Hidden → FM-Focus (shell visible, FM keys active) → Shell-Focus
+  (keystrokes forwarded to the PTY) → Hidden. The shell is spawned lazily on the first `Ctrl-o`
+  and kept alive for the session; subsequent `Ctrl-o` presses cycle through the states. The
+  panel occupies the lower portion of the screen (configurable via `ui.subshell_height_pct`,
+  default 33%); both panes shrink to share the upper portion. Full ANSI/VT100 emulation via
+  `vt100::Parser` + custom `render_vt100_screen`; cursor-addressing programs (`vim`, `htop`,
+  `less`) render correctly. The shell's cwd is kept in sync with the active pane every iteration
+  via `cd <path>` injection. Mouse click inside the panel switches to Shell-Focus; scroll wheel
+  adjusts the `scroll_offset` (rendering follow-up: [#79](https://github.com/mohnkhan/cargonaut/issues/79)).
+  A 50 ms debounce prevents rapid Ctrl-o bursts from cycling states unintentionally.
+  (Feature 054, closes #44).
 
-The full per-feature history (Features 001 → 053) lives in
+The full per-feature history (Features 001 → 054) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
