@@ -111,6 +111,14 @@ struct UiState {
     mouse_enabled: bool,
     /// Set by F3/F4; run_loop suspends the TUI, runs it, and restores.
     pending_external: Option<PendingExternal>,
+    /// Feature 052 (FR-010): when the active pane shows a synthetic
+    /// find-file listing, this holds the search pattern for the title
+    /// `[Find: s]`. Cleared on any real directory navigation.
+    find_label: Option<String>,
+    /// Feature 052: pending panelize request from FindFile dialog.
+    /// Set by handle_key on FindOutcome::Panelize; applied in run_loop
+    /// which owns the PaneViews.
+    pending_panelize: Option<(Vec<std::path::PathBuf>, String)>,
 }
 
 #[derive(Debug)]
@@ -162,6 +170,14 @@ enum ActiveDialog {
     FileViewer {
         /// The file viewer widget.
         widget: dialog::FileViewerDialog,
+    },
+    /// Feature 052 — find-file overlay (Alt-?). Searches by name glob or
+    /// ripgrep content; result list panelizes into the active pane.
+    FindFile {
+        /// The find-file dialog widget.
+        widget: dialog::FindFileDialog,
+        /// The directory root the walk is anchored to.
+        root: std::path::PathBuf,
     },
 }
 
@@ -231,6 +247,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
         help_overlay: None,
         mouse_enabled,
         pending_external: None,
+        find_label: None,
+        pending_panelize: None,
     };
 
     // US1 (FR-001/005/006): resolve the configured theme once. An unknown
@@ -277,6 +295,28 @@ async fn run_loop<B: ratatui::backend::Backend>(
         left.sync_from(app.pane(PaneId::Left));
         right.sync_from(app.pane(PaneId::Right));
         let active = app.active_pane();
+
+        // Feature 052: if find_label is set, keep the synthetic listing by NOT
+        // overwriting it with sync_from's fresh directory listing. sync_from is
+        // already called above; we only need to clear find_label when the active
+        // pane's cwd changes to a real directory (i.e., the user navigated away).
+        // Detect this by comparing the cwd against the stored label.
+        // (The label is cleared explicitly in navigate_to arm of apply_event.)
+
+        // Feature 052: apply a pending panelize (from handle_key returning
+        // FindOutcome::Panelize). run_loop owns the PaneViews, so panelize
+        // must happen here rather than inside handle_key.
+        if let Some((paths, pattern)) = ui.pending_panelize.take() {
+            let active_id = app.active_pane();
+            let pane_view = if active_id == PaneId::Left {
+                &mut left
+            } else {
+                &mut right
+            };
+            panelize_into_pane(pane_view, &paths, &pattern, &mut ui);
+            status = format!("[Find: {pattern}]");
+        }
+
         let status_line = if status.is_empty() {
             app.status().to_string()
         } else {
@@ -370,6 +410,10 @@ async fn run_loop<B: ratatui::backend::Backend>(
             }
             _ = tick.tick() => {
                 // Drains pending transfer state changes through to the next render.
+                // Feature 052: drain incremental find-file walk results each tick.
+                if let Some(ActiveDialog::FindFile { widget, .. }) = active_dialog.as_mut() {
+                    widget.poll_results();
+                }
             }
         }
 
@@ -916,6 +960,29 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 052: find-file overlay receives raw key events.
+            ActiveDialog::FindFile { widget, root } => {
+                let config = app.config().clone();
+                let root_clone = root.clone();
+                let outcome = widget.handle_key_with_root(key.code, &config, root_clone);
+                match outcome {
+                    dialog::FindOutcome::Cancelled => {
+                        // call cancel() BEFORE dismissing (abort atomicity — T017)
+                        widget.cancel();
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        // T019: do NOT set find_label on cancel
+                    }
+                    dialog::FindOutcome::Panelize { paths, pattern } => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        // Store for run_loop to apply against the PaneViews.
+                        ui.pending_panelize = Some((paths, pattern));
+                    }
+                    dialog::FindOutcome::Consumed => {}
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -1269,6 +1336,22 @@ async fn dispatch_ui_command(
             *mode = Mode::Dialog;
             return Ok(());
         }
+        // Feature 052 (FR-001): Alt-? opens the find-file overlay.
+        Command::FindFilePopup => {
+            let rg_path = &app.config().search.ripgrep_path;
+            let content_available = dialog::plan_content_available(rg_path);
+            let widget = dialog::FindFileDialog::new(content_available);
+            // Anchor the walk to the active pane's current directory.
+            let cwd_vfs = app.active_pane_state().cwd.display();
+            let cwd_local = cwd_vfs
+                .strip_prefix("file://")
+                .unwrap_or(&cwd_vfs)
+                .to_string();
+            let root = std::path::PathBuf::from(cwd_local);
+            *active_dialog = Some(ActiveDialog::FindFile { widget, root });
+            *mode = Mode::Dialog;
+            return Ok(());
+        }
         _ => {}
     }
     if let Some(core_cmd) = ui_command_to_core(cmd) {
@@ -1328,6 +1411,47 @@ fn plan_mouse_toggle(supported: bool, currently: bool) -> MouseToggleOutcome {
         (true, false) => MouseToggleOutcome::EnabledNow,
         (true, true) => MouseToggleOutcome::SuspendedNow,
     }
+}
+
+/// Feature 052 (FR-009): Build a synthetic [`DirListing`] from absolute
+/// paths and load it into `pane`. Sets `ui.find_label` to the search
+/// pattern so the pane title shows `[Find: s]` (FR-010). The listing
+/// uses [`Sort::NameAsc`] (entries are already name-sorted by globset BFS).
+///
+/// Called by the `handle_key` panelize branch and directly by tests.
+pub(crate) fn panelize_into_pane(
+    pane: &mut PaneView,
+    paths: &[std::path::PathBuf],
+    pattern: &str,
+    ui: &mut UiState,
+) {
+    use cargonaut_vfs::{DirEntry, DirListing, Sort, VfsKind, VfsMetadata};
+    use smol_str::SmolStr;
+    use std::time::SystemTime;
+
+    let entries: Vec<DirEntry> = paths
+        .iter()
+        .filter_map(|p| {
+            let meta = std::fs::metadata(p).ok()?;
+            let name = p.file_name()?.to_string_lossy().to_string();
+            Some(DirEntry {
+                name: SmolStr::new(&name),
+                meta: VfsMetadata {
+                    size: meta.len(),
+                    mtime: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                    mode: None,
+                    kind: VfsKind::File,
+                    is_hidden: name.starts_with('.'),
+                },
+            })
+        })
+        .collect();
+
+    pane.set_listing(DirListing {
+        entries,
+        sort: Sort::NameAsc,
+    });
+    ui.find_label = Some(pattern.to_string());
 }
 
 /// Which external tool F4 (editor) launches. F3 uses the built-in viewer (Feature 051).
@@ -2238,6 +2362,8 @@ fn draw_frame(
             ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
             // Feature 051: full-screen overlay — use `area`, not the centred `darea`.
             ActiveDialog::FileViewer { widget } => widget.render(f, area, theme),
+            // Feature 052: find-file overlay — manages its own centering.
+            ActiveDialog::FindFile { widget, .. } => widget.render(f, area, theme),
         }
     }
 
@@ -2440,6 +2566,8 @@ mod tests {
             help_overlay: None,
             mouse_enabled: mouse,
             pending_external: None,
+            find_label: None,
+            pending_panelize: None,
         }
     }
 

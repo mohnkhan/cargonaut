@@ -21,9 +21,9 @@ shell-words = { workspace = true }
 thiserror = { workspace = true }
 strip-ansi-escapes = "0.2"
 globset = { workspace = true }
+smol_str = { workspace = true }
 
 [dev-dependencies]
-smol_str = { workspace = true }
 humantime = "2"
 tempfile = { workspace = true }
 
