@@ -1006,6 +1006,14 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
                 desc: "Close current tab (close-tab)",
             },
             HelpRow {
+                key: "]",
+                desc: "Next tab on active side (tab-next)",
+            },
+            HelpRow {
+                key: "[",
+                desc: "Previous tab on active side (tab-prev)",
+            },
+            HelpRow {
                 key: "C-o",
                 desc: "Open subshell in current directory (open-subshell)",
             },
