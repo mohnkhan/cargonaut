@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-19 (Feature 056 closed #40 — built-in F4 text editor).
+**Last updated**: 2026-06-20 (Feature 057 closes #48 — VFS backends; #84 opened for Docker SFTP integration test).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,7 +42,7 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| _(none — Tier 3 is clear)_ | | | |
+| [#84](https://github.com/mohnkhan/cargonaut/issues/84) | Feature 057 T041: Docker-based SFTP integration test (SC-003/SC-004) | M | Feature 057 US3 follow-up — SftpFs::connect already implemented; only live-TCP test scaffolding missing |
 
 > ✅ **Resolved**: [#79](https://github.com/mohnkhan/cargonaut/issues/79) (subshell scrollback rendering) shipped in **Feature 055** (`055-subshell-scrollback`). `scroll_offset` is now wired into `render_vt100_screen` via `Screen::set_scrollback()`; scroll direction inversion fixed; cursor hidden in scrollback mode; `scroll_offset` reset on resize.
 
@@ -61,7 +61,7 @@ Substantial multi-session work. Don't start without confirming the scope is stil
 | ~~[#44](https://github.com/mohnkhan/cargonaut/issues/44)~~ | ~~Persistent subshell integration (Ctrl-o)~~ | ~~L~~ | **Closed — Feature 054** |
 | ~~[#45](https://github.com/mohnkhan/cargonaut/issues/45)~~ | ~~Tabs: multiple panels per side~~ | ~~L~~ | **Closed — Feature 053** |
 | ~~[#47](https://github.com/mohnkhan/cargonaut/issues/47)~~ | ~~Bulk rename via editor + undo of file ops~~ | ~~M~~ | **Closed — Feature 050** |
-| [#48](https://github.com/mohnkhan/cargonaut/issues/48) | VFS backends: archives + remote (SFTP/FTP/sh) | XL | Feature 031 §Out of Scope — already Phase 2+ roadmapped |
+| ~~[#48](https://github.com/mohnkhan/cargonaut/issues/48)~~ | ~~VFS backends: archives + remote (SFTP/FTP/sh)~~ | ~~XL~~ | **Closed — Feature 057** |
 | ~~[#50](https://github.com/mohnkhan/cargonaut/issues/50)~~ | ~~User menu (F2) + hypertext help content~~ | ~~M~~ | **Closed — Feature 047** |
 
 ---

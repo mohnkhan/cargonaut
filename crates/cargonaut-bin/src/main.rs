@@ -169,11 +169,41 @@ async fn run_subcommand(sub: CargonautCommand) -> anyhow::Result<()> {
 
 fn init_tracing(verbose: bool) {
     let default = if verbose { "debug" } else { "info" };
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
+
+    // Stderr layer — shown only if verbose
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| default.into()),
-        )
-        .with_writer(std::io::stderr)
+        );
+
+    // File layer — always write WARN+ to ~/.local/share/cargonaut/debug.log
+    let file_layer = {
+        let log_dir = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .join(".local/share/cargonaut");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("debug.log");
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(file) => Some(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::sync::Arc::new(file))
+                    .with_ansi(false)
+                    .with_filter(tracing_subscriber::filter::LevelFilter::WARN),
+            ),
+            Err(_) => None,
+        }
+    };
+
+    use tracing_subscriber::prelude::*;
+    let _ = tracing_subscriber::registry()
+        .with(stderr_layer)
+        .with(file_layer)
         .try_init();
 }

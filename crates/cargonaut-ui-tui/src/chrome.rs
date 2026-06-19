@@ -431,6 +431,28 @@ pub fn mouse_indicator(session_supported: bool, captured: bool) -> &'static str 
 }
 
 // =====================================================================
+// Pane header title (FR-022)
+// =====================================================================
+
+/// Compute the pane block-border title string (FR-022).
+///
+/// For non-local backends (scheme != "file") the full VfsPath URI is shown
+/// so the user always knows which archive or remote host they are browsing.
+/// For local backends the last path segment (basename) is shown — it is
+/// shorter and the full path is already visible in the status bar.
+pub fn pane_header_title(pane: &PaneState) -> String {
+    if pane.backend.scheme() != "file" {
+        pane.cwd.display()
+    } else {
+        pane.cwd
+            .segments
+            .last()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "/".to_string())
+    }
+}
+
+// =====================================================================
 // Mini-status (per-pane)
 // =====================================================================
 
@@ -522,12 +544,15 @@ fn civil_from_unix(secs: u64) -> (i64, u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cargonaut_vfs::{DirEntry, DirListing, FileMode, Sort, VfsKind, VfsMetadata, VfsPath};
+    use cargonaut_vfs::{
+        DirEntry, DirListing, FileMode, LocalFs, Sort, VfsKind, VfsMetadata, VfsPath,
+    };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use smol_str::SmolStr;
     use std::collections::BTreeSet;
-    use std::time::Duration;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime};
 
     fn render_to_string(w: u16, h: u16, f: impl FnOnce(Rect, &mut Buffer)) -> String {
         let backend = TestBackend::new(w, h);
@@ -681,6 +706,7 @@ mod tests {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::new(LocalFs::new()),
         };
         let line = mini_status_line(&state);
         assert!(line.contains("readme.md"), "name missing: {line}");
@@ -700,5 +726,45 @@ mod tests {
     fn perms_string_directory_and_file() {
         assert_eq!(perms_string(0o755, &VfsKind::Dir), "drwxr-xr-x");
         assert_eq!(perms_string(0o644, &VfsKind::File), "-rw-r--r--");
+    }
+
+    // T016a [US1] (red): pane_header_title for zip:// backend shows full URI.
+    // Fails because pane_header_title does not exist yet.
+    #[test]
+    fn pane_header_title_zip_shows_full_display_string() {
+        use cargonaut_vfs::ZipFs;
+        use std::io::Write;
+        // Minimal valid ZIP (just an EOCD record — 0 entries).
+        let tf = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut f = tf.reopen().unwrap();
+            f.write_all(&[
+                0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ])
+            .unwrap();
+        }
+        let zip_fs = ZipFs::open(tf.path().to_path_buf()).unwrap();
+        let cwd = VfsPath::parse("zip:///tmp%2Ftest.zip").unwrap();
+        let state = PaneState {
+            cwd: cwd.clone(),
+            listing: DirListing {
+                entries: vec![],
+                sort: Sort::NameAsc,
+            },
+            cursor: 0,
+            selected: BTreeSet::new(),
+            show_hidden: false,
+            sort: Sort::NameAsc,
+            filter: None,
+            dir_history_back: vec![],
+            dir_history_fwd: vec![],
+            backend: Arc::new(zip_fs),
+        };
+        let title = pane_header_title(&state);
+        assert!(
+            title.contains(&cwd.display()),
+            "zip pane header must contain full URI; got: {title:?}"
+        );
     }
 }

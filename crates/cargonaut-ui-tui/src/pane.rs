@@ -285,10 +285,11 @@ impl PaneView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cargonaut_vfs::{DirEntry, FileMode, Sort, VfsKind, VfsMetadata};
+    use cargonaut_vfs::{DirEntry, FileMode, LocalFs, Sort, VfsKind, VfsMetadata};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use smol_str::SmolStr;
+    use std::sync::Arc;
     use std::time::SystemTime;
 
     fn entry(name: &str, kind: VfsKind, size: u64, hidden: bool) -> DirEntry {
@@ -635,6 +636,7 @@ mod tests {
             filter: None,
             dir_history_back: Vec::new(),
             dir_history_fwd: Vec::new(),
+            backend: Arc::new(LocalFs::new()),
         };
         // Virtual cursor 0 → the `..` row (no real entry focused).
         p.sync_from(&mk(0));

@@ -5,6 +5,10 @@
 # is ≤ 8 MiB after `strip`. Fails (exit 1) if larger so a single
 # unintended bloat dep is caught before merge.
 #
+# Updated Feature 057: russh + suppaftp add ~1–1.5 MiB; cap stays at 8 MiB.
+# The delta from a no-default-features build is not separately gated here;
+# the absolute cap of 8 MiB covers both the archive and remote feature sizes.
+#
 # Usage:
 #   bash scripts/check-binary-size.sh
 #

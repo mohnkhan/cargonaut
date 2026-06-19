@@ -13,6 +13,11 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${REPO_ROOT}" || exit 2
 
+# Disable incremental compilation: avoids accumulating large incremental caches
+# in the debug profile that can exhaust tmpfs on the dev host (Constitution §V).
+# The real CI runner (GitHub Actions) is ephemeral; this flag only matters locally.
+export CARGO_INCREMENTAL=0
+
 ARTIFACT_DIR="${REPO_ROOT}/dist/ci-artifacts"
 STDOUT_LOG="/tmp/ci-test-stdout.log"
 STDERR_LOG="/tmp/ci-test-stderr.log"
@@ -74,6 +79,15 @@ run_step "clippy"    "10m" "clippy"    "none" -- cargo clippy --workspace --all-
 # local_copy_vs_cp) in debug mode where they always miss their SC gates.
 # Those gates belong to `cargo bench` (release), not the per-PR test step.
 run_step "unit-test" "15m" "unit-test" "none" -- cargo test --workspace --lib --tests
+
+# Free debug artifacts before the release build to prevent tmpfs exhaustion on
+# the dev host (Constitution §V). The release step rebuilds what it needs from
+# the shared cargo registry cache; debug deps are not reused by release builds.
+if [ -z "${CI:-}" ]; then
+    TARGET_DIR="$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null || echo "target")"
+    printf '--- ci-local: freeing debug artifacts to make room for release build ---\n'
+    rm -rf "${TARGET_DIR}/debug/deps" "${TARGET_DIR}/debug/build" "${TARGET_DIR}/debug/.fingerprint"
+fi
 
 # 4. release build (compile-time gate; catches release-only issues)
 run_step "build"     "15m" "build"     "none" -- cargo build --release --workspace

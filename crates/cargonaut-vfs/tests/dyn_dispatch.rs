@@ -52,3 +52,53 @@ fn byte_range_full_constant() {
     assert_eq!(ByteRange::FULL.start, 0);
     assert!(ByteRange::FULL.end.is_none());
 }
+
+// T011: dyn-dispatch gate for Feature 057 new backend types.
+// These stubs verify each type is object-safe and coercible to
+// Arc<dyn VfsBackend> (checked at compile time via const fn assertions).
+// Full functionality tests land in Phase 3-6.
+
+#[cfg(feature = "archives")]
+mod archive_stubs {
+    use cargonaut_vfs::{TarFs, VfsBackend, ZipFs};
+
+    // Compile-time object-safety assertions. If any type stops implementing
+    // VfsBackend as a trait object these will fail to compile.
+    const fn _assert_vfs_backend<T: VfsBackend + 'static>() {}
+    const _: () = {
+        _assert_vfs_backend::<ZipFs>();
+        _assert_vfs_backend::<TarFs>();
+    };
+
+    #[test]
+    fn zip_fs_open_returns_err_stub() {
+        use std::path::PathBuf;
+        let result = ZipFs::open(PathBuf::from("/tmp/nonexistent.zip"));
+        assert!(
+            result.is_err(),
+            "ZipFs::open is a stub and must return Err until Phase 3"
+        );
+    }
+
+    #[test]
+    fn tar_fs_open_returns_err_stub() {
+        use cargonaut_vfs::archive::tar_fs::TarCompression;
+        use std::path::PathBuf;
+        let result = TarFs::open(PathBuf::from("/tmp/nonexistent.tar"), TarCompression::None);
+        assert!(
+            result.is_err(),
+            "TarFs::open is a stub and must return Err until Phase 4"
+        );
+    }
+}
+
+#[cfg(feature = "remote")]
+mod remote_stubs {
+    use cargonaut_vfs::{FtpFs, SftpFs, VfsBackend};
+
+    const fn _assert_vfs_backend<T: VfsBackend + 'static>() {}
+    const _: () = {
+        _assert_vfs_backend::<SftpFs>();
+        _assert_vfs_backend::<FtpFs>();
+    };
+}

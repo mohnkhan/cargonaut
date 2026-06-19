@@ -366,6 +366,8 @@ impl Default for AuditConfig {
 pub struct RemoteConfig {
     /// SFTP adapter settings.
     pub sftp: SftpConfig,
+    /// FTP adapter settings.
+    pub ftp: FtpConfig,
     /// S3 adapter settings.
     pub s3: S3Config,
 }
@@ -388,6 +390,25 @@ impl Default for SftpConfig {
             connect_timeout_secs: 30,
             keepalive_secs: 60,
             pipelined_reads: 4,
+        }
+    }
+}
+
+/// FTP adapter settings (Feature 057).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct FtpConfig {
+    /// TCP connect timeout (seconds).
+    pub connect_timeout_secs: u32,
+    /// Use PASV (passive) mode for data connections.
+    pub passive_mode: bool,
+}
+
+impl Default for FtpConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout_secs: 30,
+            passive_mode: true,
         }
     }
 }

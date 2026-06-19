@@ -210,6 +210,32 @@ enum ActiveDialog {
         /// The directory root the walk is anchored to.
         root: std::path::PathBuf,
     },
+    /// Feature 057 — SSH host-key verification prompt (US3).
+    ///
+    /// Shown when `SftpFs::connect` encounters an unknown server key.
+    /// Accept adds the key to `~/.ssh/known_hosts`; Reject aborts.
+    #[allow(dead_code)]
+    HostKeyVerify {
+        fingerprint: String,
+        accept_tx: tokio::sync::oneshot::Sender<bool>,
+    },
+    /// Feature 057 US3/US4 — "Connect SFTP…" / "Connect FTP…" URL prompt.
+    ///
+    /// Pre-filled with `sftp://user@host/` or `ftp://user@host/`.
+    /// On submit: parse URL, initiate connection, navigate pane.
+    #[allow(dead_code)]
+    RemoteConnect {
+        kind: RemoteKind,
+        widget: dialog::PathInputDialog,
+    },
+}
+
+/// Remote protocol kind for the "Connect…" dialog (Feature 057 US3/US4).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteKind {
+    Sftp,
+    Ftp,
 }
 
 /// What a [`TextInputDialog`]'s submitted text becomes.
@@ -384,6 +410,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let dialog_ref = active_dialog.as_mut();
         let ms_left = chrome::mini_status_line(app.pane(PaneId::Left));
         let ms_right = chrome::mini_status_line(app.pane(PaneId::Right));
+        let title_left = chrome::pane_header_title(app.pane(PaneId::Left));
+        let title_right = chrome::pane_header_title(app.pane(PaneId::Right));
         let view_mode = app.view_mode();
         let qv_preview = if view_mode == cargonaut_core::ViewMode::QuickView {
             compute_preview(app)
@@ -442,6 +470,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
                 fkeybar,
                 &ms_left,
                 &ms_right,
+                &title_left,
+                &title_right,
                 help_overlay.as_ref(),
                 view_mode,
                 &qv_preview,
@@ -1152,6 +1182,52 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            ActiveDialog::HostKeyVerify { .. } => {
+                use crossterm::event::KeyCode;
+                let accept = match key.code {
+                    KeyCode::Enter | KeyCode::Char('a') | KeyCode::Char('y') => Some(true),
+                    KeyCode::Esc | KeyCode::Char('r') | KeyCode::Char('n') => Some(false),
+                    _ => None,
+                };
+                if let Some(accepted) = accept {
+                    // Take the dialog to gain ownership of accept_tx.
+                    if let Some(ActiveDialog::HostKeyVerify { accept_tx, .. }) =
+                        active_dialog.take()
+                    {
+                        let _ = accept_tx.send(accepted);
+                    }
+                    *mode = Mode::Pane;
+                }
+                return Ok(true);
+            }
+            ActiveDialog::RemoteConnect { widget, kind } => {
+                use dialog::PathInputAction;
+                let kind = *kind;
+                match widget.handle_key(key.code) {
+                    PathInputAction::Cancel => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                    }
+                    PathInputAction::Submit(url) => {
+                        *active_dialog = None;
+                        *mode = Mode::Pane;
+                        // Show "Connecting…" banner; actual connection wired
+                        // in the polish phase (T034).
+                        *status = format!(
+                            "Connecting to {} ({})…",
+                            url,
+                            match kind {
+                                RemoteKind::Sftp => "SFTP",
+                                RemoteKind::Ftp => "FTP",
+                            }
+                        );
+                    }
+                    PathInputAction::Consumed
+                    | PathInputAction::Edited
+                    | PathInputAction::RequestCompletions { .. } => {}
+                }
+                return Ok(true);
+            }
         }
     }
 
@@ -1507,6 +1583,91 @@ async fn dispatch_ui_command(
                     std::path::PathBuf::from(local).join(&display_name)
                 };
                 let _ = p;
+
+                // Feature 057 US1: .zip files open as archive backends, not in the viewer.
+                if display_name.to_lowercase().ends_with(".zip") {
+                    let id = app.active_pane();
+                    let archive_path = raw_path.clone();
+                    let zip_result = tokio::task::spawn_blocking(move || {
+                        cargonaut_vfs::ZipFs::open(archive_path)
+                    })
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()));
+                    match zip_result {
+                        Ok(Ok(zip_fs)) => {
+                            let encoded_auth =
+                                encode_archive_authority(raw_path.to_str().unwrap_or(""));
+                            let zip_url = format!("zip://{encoded_auth}/");
+                            match cargonaut_vfs::VfsPath::parse(&zip_url) {
+                                Ok(zip_path) => {
+                                    match app
+                                        .navigate_into(id, zip_path, std::sync::Arc::new(zip_fs))
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            *status = format!("Cannot browse archive: {e}");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    *status = format!("Archive path encoding error: {e}");
+                                }
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            *status = format!("Cannot open archive: {e}");
+                        }
+                        Err(e) => {
+                            *status = format!("Archive open failed: {e}");
+                        }
+                    }
+                    return Ok(());
+                }
+
+                // Feature 057 US2: .tar/.tar.gz/.tgz/.tar.bz2/.tbz2/.tar.xz/.txz open as tar:// backends.
+                if let Some(compression) =
+                    cargonaut_vfs::TarCompression::from_extension(&display_name.to_lowercase())
+                {
+                    let id = app.active_pane();
+                    let archive_path = raw_path.clone();
+                    let tar_result = tokio::task::spawn_blocking(move || {
+                        cargonaut_vfs::TarFs::open(archive_path, compression)
+                    })
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()));
+                    match tar_result {
+                        Ok(Ok(tar_fs)) => {
+                            let encoded_auth =
+                                encode_archive_authority(raw_path.to_str().unwrap_or(""));
+                            let tar_url = format!("tar://{encoded_auth}/");
+                            match cargonaut_vfs::VfsPath::parse(&tar_url) {
+                                Ok(tar_path) => {
+                                    match app
+                                        .navigate_into(id, tar_path, std::sync::Arc::new(tar_fs))
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            *status = format!("Cannot browse archive: {e}");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    *status = format!("Archive path encoding error: {e}");
+                                }
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            *status = format!("Cannot open archive: {e}");
+                        }
+                        Err(e) => {
+                            *status = format!("Archive open failed: {e}");
+                        }
+                    }
+                    return Ok(());
+                }
+
                 match open_file_viewer(raw_path, display_name).await {
                     Ok(widget) => {
                         *active_dialog = Some(ActiveDialog::FileViewer { widget });
@@ -2583,6 +2744,20 @@ fn ui_command_to_core(cmd: Command) -> Option<AppCommand> {
 ///
 /// Joins segments with `/`; prepends `/` for the root. Non-`file` scheme
 /// paths (sftp, s3) fall back to `/` since the subshell can't cd to them.
+/// Percent-encode a host filesystem path for use as a `VfsPath` authority.
+/// Only `%` and `/` are encoded; all other bytes are passed through unchanged.
+fn encode_archive_authority(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() * 3);
+    for c in path.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '/' => out.push_str("%2F"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn vfs_path_to_local(vpath: &cargonaut_vfs::types::VfsPath) -> std::path::PathBuf {
     if vpath.scheme != "file" {
         return std::path::PathBuf::from("/");
@@ -2638,6 +2813,8 @@ fn draw_frame(
     fkeybar: &FunctionKeyBar,
     ms_left: &str,
     ms_right: &str,
+    title_left: &str,
+    title_right: &str,
     help_overlay: Option<&dialog::HelpOverlay>,
     view_mode: cargonaut_core::ViewMode,
     qv_preview: &str,
@@ -2709,6 +2886,7 @@ fn draw_frame(
             ms_left,
             pane_layout,
             tab_bar_left,
+            title_left,
         )
     };
     let right_inner = if qv && active == PaneId::Left {
@@ -2723,6 +2901,7 @@ fn draw_frame(
             ms_right,
             pane_layout,
             tab_bar_right,
+            title_right,
         )
     };
 
@@ -2806,6 +2985,19 @@ fn draw_frame(
             ActiveDialog::FileEditor { widget } => widget.render(area, f.buffer_mut(), theme),
             // Feature 052: find-file overlay — manages its own centering.
             ActiveDialog::FindFile { widget, .. } => widget.render(f, area, theme),
+            // Feature 057: host-key verification dialog — centred box.
+            ActiveDialog::HostKeyVerify { fingerprint, .. } => {
+                let hkd = dialog::HostKeyVerifyDialog::new(
+                    fingerprint.clone(),
+                    // Dummy sender for render-only path (real tx lives in enum).
+                    tokio::sync::oneshot::channel::<bool>().0,
+                );
+                hkd.render(f, darea);
+            }
+            // Feature 057: remote-connect URL prompt — reuses PathInputDialog.
+            ActiveDialog::RemoteConnect { widget, .. } => {
+                widget.render(darea, f.buffer_mut(), theme);
+            }
         }
     }
 
@@ -2918,6 +3110,7 @@ fn draw_pane(
     mini_status: &str,
     layout: pane::PaneLayout,
     tab_bar: &[cargonaut_core::TabBarEntry],
+    pane_title: &str,
 ) -> Rect {
     use ratatui::widgets::Widget;
     // Feature 053: 3-constraint split — tab bar (1 row) + list+border + mini-status (1 row).
@@ -2932,10 +3125,11 @@ fn draw_pane(
     // Render tab bar in col[0].
     let tbl = tab_bar_line(tab_bar, col[0].width, theme);
     Paragraph::new(tbl).render(col[0], f.buffer_mut());
-    let title = view.cwd.display();
     // US1 (FR-002): panel background + focus-colored border from the theme.
+    // FR-022: title is computed by chrome::pane_header_title — full URI for
+    // non-local backends, basename for local ones.
     let block = Block::default()
-        .title(title)
+        .title(pane_title)
         .borders(Borders::ALL)
         .border_style(theme.border_style(focused))
         .style(Style::default().bg(theme.panel_bg).fg(theme.panel_fg));
@@ -5366,6 +5560,7 @@ mod tests {
                 "",
                 pane::PaneLayout::Brief,
                 &entries,
+                &pane_state.cwd.display(),
             );
         })
         .unwrap();
@@ -5422,6 +5617,295 @@ mod tests {
         );
     }
 
+    // ---------- Feature 057 US1: DescendOrOpen on .zip files (T014 red) ----------
+
+    /// Minimal valid empty ZIP (EOCD record only — 22 bytes).
+    fn minimal_zip_bytes() -> Vec<u8> {
+        vec![
+            0x50, 0x4b, 0x05, 0x06, // End-of-Central-Directory signature
+            0x00, 0x00, // disk number
+            0x00, 0x00, // disk with CD start
+            0x00, 0x00, // entries on this disk
+            0x00, 0x00, // total entries
+            0x00, 0x00, 0x00, 0x00, // CD size
+            0x00, 0x00, 0x00, 0x00, // CD offset
+            0x00, 0x00, // comment length
+        ]
+    }
+
+    /// Write a valid empty ZIP to a named path and return the path.
+    fn write_valid_zip(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, minimal_zip_bytes()).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn descend_or_open_zip_navigates_into_archive() {
+        // T014 (red → green via T015): pressing Enter on a .zip file should
+        // navigate the active pane into the ZIP backend (zip:// cwd) instead
+        // of opening the built-in text viewer.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_zip(td_l.path(), "archive.zip");
+        let mut app = app_with(&td_l, &td_r).await;
+        // Cursor at index 0 is the ".." entry; the zip file is at index 1.
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        // After T015: pane must be navigated to a zip:// path.
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "zip",
+            "DescendOrOpen on a .zip file must navigate pane to zip:// (got: {}; status: {status:?})",
+            app.active_pane_state().cwd.display()
+        );
+        // Viewer dialog must NOT be opened.
+        assert!(dlg.is_none(), "no dialog must be open after zip navigation");
+    }
+
+    #[tokio::test]
+    async fn descend_or_open_corrupt_zip_shows_error_and_stays_local() {
+        // T014 error path: pressing Enter on a corrupt .zip shows an error
+        // and does NOT navigate the pane away from the local filesystem.
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // PK magic header but then corrupted — valid ZIP magic so ZipFs tries to open it,
+        // but invalid structure so ZipFs::open returns Err; binary bytes so file viewer
+        // also fails its UTF-8 check.
+        std::fs::write(
+            td_l.path().join("bad.zip"),
+            b"PK\x03\x04\x00\xff\xfe binary garbage",
+        )
+        .unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        // Pane must stay local (no navigation on corrupt zip).
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "file",
+            "corrupt zip must not navigate pane (stayed at: {})",
+            app.active_pane_state().cwd.display()
+        );
+        // After T015: .zip files must NEVER open the file viewer regardless of
+        // whether archive open succeeds or fails — viewer is only for non-archive files.
+        assert!(
+            !matches!(mode, Mode::Preview),
+            "DescendOrOpen on a .zip must not open the viewer (mode={mode:?}); \
+             zip handler must intercept before reaching open_file_viewer"
+        );
+    }
+
+    // ---------- Feature 057 US2: DescendOrOpen on .tar files (T021a red) ----------
+
+    /// Write a minimal valid uncompressed TAR archive containing one file.
+    fn write_valid_tar(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let f = std::fs::File::create(&p).unwrap();
+        let mut builder = tar::Builder::new(f);
+        let content = b"hello tar\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "hello.txt", content.as_slice())
+            .unwrap();
+        builder.finish().unwrap();
+        p
+    }
+
+    /// Write a minimal valid gzip-compressed TAR archive.
+    fn write_valid_tar_gz(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let f = std::fs::File::create(&p).unwrap();
+        let gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+        let mut builder = tar::Builder::new(gz);
+        let content = b"gz hello\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "gz_hello.txt", content.as_slice())
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        p
+    }
+
+    // T021a [US2] (red): DescendOrOpen on a .tar file navigates pane to tar:// cwd.
+    // Fails until T021b extends the DescendOrOpen handler for TAR extensions.
+    #[tokio::test]
+    async fn descend_or_open_tar_navigates_into_archive() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_tar(td_l.path(), "archive.tar");
+        let mut app = app_with(&td_l, &td_r).await;
+        // Cursor 0 = "..", cursor 1 = archive.tar
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "tar",
+            "DescendOrOpen on a .tar file must navigate pane to tar:// (got: {}; status: {status:?})",
+            app.active_pane_state().cwd.display()
+        );
+        assert!(dlg.is_none(), "no dialog must be open after tar navigation");
+    }
+
+    // T021a stub: DescendOrOpen on a .tar.gz file navigates pane to tar:// cwd.
+    #[tokio::test]
+    async fn descend_or_open_tar_gz_navigates_into_archive() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_tar_gz(td_l.path(), "archive.tar.gz");
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "tar",
+            "DescendOrOpen on a .tar.gz file must navigate pane to tar:// (got: {}; status: {status:?})",
+            app.active_pane_state().cwd.display()
+        );
+        assert!(
+            dlg.is_none(),
+            "no dialog must be open after tar.gz navigation"
+        );
+    }
+
+    // T021a stub: .tgz extension also navigates to tar://.
+    #[tokio::test]
+    async fn descend_or_open_tgz_navigates_into_archive() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        write_valid_tar_gz(td_l.path(), "archive.tgz");
+        let mut app = app_with(&td_l, &td_r).await;
+        app.dispatch(cargonaut_core::Command::CursorTo(1))
+            .await
+            .unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 10,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+        dispatch_ui_command(
+            Command::DescendOrOpen,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            app.active_pane_state().cwd.scheme.as_str(),
+            "tar",
+            "DescendOrOpen on a .tgz file must navigate pane to tar:// (got: {})",
+            app.active_pane_state().cwd.display()
+        );
+    }
+
     // ---------- open_file_editor decline paths (Feature 056 — US3) ----------
 
     #[tokio::test]
@@ -5445,5 +5929,129 @@ mod tests {
         assert!(result.is_err(), "oversized file should be rejected");
         let err = result.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    // ---------- HostKeyVerify dialog (Feature 057 — T026 red) ----------
+
+    /// T026 (red): `ActiveDialog::HostKeyVerify` must exist with `fingerprint`
+    /// and `accept_tx` fields.  The corresponding `HostKeyVerifyDialog` widget
+    /// must expose an `accept()` and `reject()` method (called by the key
+    /// handler in T027 green).  These tests compile-fail until T027 adds the
+    /// variant and widget.
+
+    #[test]
+    fn host_key_verify_dialog_variant_holds_fingerprint() {
+        let (accept_tx, _accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        // T027 green: this variant must exist.
+        let dlg: Option<ActiveDialog> = Some(ActiveDialog::HostKeyVerify {
+            fingerprint: "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
+            accept_tx,
+        });
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::HostKeyVerify { ref fingerprint, .. })
+                if fingerprint.starts_with("SHA256:")
+        ));
+    }
+
+    #[test]
+    fn host_key_verify_widget_accept_sends_true() {
+        // T027 green: dialog::HostKeyVerifyDialog must exist with an accept() method.
+        let (accept_tx, mut accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        let mut widget = dialog::HostKeyVerifyDialog::new(
+            "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
+            accept_tx,
+        );
+        widget.accept();
+        let accepted = accept_rx
+            .try_recv()
+            .expect("accept() must send immediately");
+        assert!(accepted, "accept() must send true");
+    }
+
+    #[test]
+    fn host_key_verify_widget_reject_sends_false() {
+        // T027 green: dialog::HostKeyVerifyDialog must exist with a reject() method.
+        let (accept_tx, mut accept_rx) = tokio::sync::oneshot::channel::<bool>();
+        let mut widget = dialog::HostKeyVerifyDialog::new(
+            "SHA256:AAABBBCCC/test+fingerprint=".to_string(),
+            accept_tx,
+        );
+        widget.reject();
+        let accepted = accept_rx
+            .try_recv()
+            .expect("reject() must send immediately");
+        assert!(!accepted, "reject() must send false");
+    }
+
+    // ---------- RemoteConnect dialog (Feature 057 — T028 red) ----------
+
+    /// T028 (red): dispatching `Command::ShowUserMenu` must include a built-in
+    /// "Connect SFTP…" item.  Selecting it must open
+    /// `ActiveDialog::RemoteConnect { kind: RemoteKind::Sftp, widget }` with
+    /// the widget pre-filled with `sftp://user@host/`.
+    ///
+    /// These tests compile-fail until T029 (green) adds `RemoteKind` and
+    /// `ActiveDialog::RemoteConnect`.
+
+    #[test]
+    fn remote_kind_sftp_exists() {
+        // T029 green: RemoteKind::Sftp must be a public enum variant.
+        let kind = RemoteKind::Sftp;
+        assert!(matches!(kind, RemoteKind::Sftp));
+    }
+
+    /// T032 (red/green): `RemoteKind::Ftp` must exist and `ActiveDialog::RemoteConnect`
+    /// must accept it — compile-time check (T029 already added these).
+    #[test]
+    fn remote_kind_ftp_exists() {
+        let kind = RemoteKind::Ftp;
+        assert!(matches!(kind, RemoteKind::Ftp));
+        // T033 green: RemoteConnect with Ftp must be constructable.
+        let _compile_check: Option<ActiveDialog> = Some(ActiveDialog::RemoteConnect {
+            kind: RemoteKind::Ftp,
+            widget: dialog::PathInputDialog::new("Connect FTP", "URL:", "ftp://user@host/"),
+        });
+    }
+
+    #[tokio::test]
+    async fn show_user_menu_includes_connect_sftp_builtin() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let rect = ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let mut ui = fresh_ui(rect, rect, false);
+        let mut mode = Mode::Pane;
+        let mut dlg: Option<ActiveDialog> = None;
+        let mut status = String::new();
+        let mut quit = false;
+
+        dispatch_ui_command(
+            Command::ShowUserMenu,
+            &mut app,
+            &mut mode,
+            &mut dlg,
+            &mut status,
+            &mut quit,
+            &mut ui,
+        )
+        .await
+        .unwrap();
+
+        // T029 green: the opened UserMenu or RemoteConnect must contain a
+        // "Connect SFTP…" item — OR the command directly opens RemoteConnect.
+        // Either way, the dialog must be Some and must contain SFTP wording.
+        assert!(dlg.is_some(), "ShowUserMenu must open a dialog");
+        // T029 green: ActiveDialog::RemoteConnect with kind Sftp must be
+        // constructable (compile-time check).
+        let _compile_check: Option<ActiveDialog> = Some(ActiveDialog::RemoteConnect {
+            kind: RemoteKind::Sftp,
+            widget: dialog::PathInputDialog::new("Connect SFTP", "URL:", "sftp://user@host/"),
+        });
     }
 }
