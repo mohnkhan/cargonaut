@@ -356,6 +356,14 @@ pub enum Command {
     BulkRenameApply(Vec<(String, String)>),
     /// Feature 050 — undo the most recent reversible file operation.
     UndoLastOp,
+    /// Feature 053 — open a new tab on the active side, cloning the current pane state.
+    TabNew,
+    /// Feature 053 — close the active tab on the active side (no-op when only one tab).
+    TabClose,
+    /// Feature 053 — cycle to the next tab on the active side (wraps around).
+    TabNext,
+    /// Feature 053 — cycle to the previous tab on the active side (wraps around).
+    TabPrev,
 }
 
 /// FR-022 — the global listing/preview view mode.
@@ -1051,6 +1059,11 @@ impl App {
             BulkRenameApply(pairs) => self.apply_bulk_rename(pairs).await,
             UndoLastOp => self.undo_last_operation().await,
             Quit => Ok(vec![Event::QuitRequested]),
+            // Feature 053: stub arms — full impl in T009
+            TabNew => Ok(vec![]),
+            TabClose => Ok(vec![]),
+            TabNext => Ok(vec![]),
+            TabPrev => Ok(vec![]),
         }
     }
 
