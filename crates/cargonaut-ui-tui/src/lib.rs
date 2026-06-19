@@ -99,6 +99,8 @@ struct FrameLayout {
     /// Inner (list) rect of the right pane.
     right: Rect,
     fkeys: Rect,
+    /// Subshell panel rect (Feature 054). `None` when panel is hidden.
+    subshell: Option<Rect>,
 }
 
 /// Loop-owned chrome + mouse state (kept in one struct to avoid a
@@ -2387,6 +2389,7 @@ fn draw_frame(
         left: left_inner,
         right: right_inner,
         fkeys: main_chunks[3],
+        subshell: None,
     }
 }
 
@@ -2672,6 +2675,7 @@ mod tests {
                     width: 80,
                     height: 1,
                 },
+                subshell: None,
             },
             last_click: None,
             help_overlay: None,
