@@ -63,6 +63,7 @@ after exit the PTY is cooked and a `crash-*.log` exists (SC-001, SC-002).
 - [ ] T014 [US1] (green) Add `diag::maybe_inject_panic("startup")` in `main` before UI launch and `maybe_inject_panic("render")` just before `term.draw` in `run_loop` (test seam for US1; R8).
 - [ ] T015 [US1] (red) Gated PTY test `crates/cargonaut-bin/tests/crash_safety.rs` (`#![cfg(...)]` self-skip unless `CARGONAUT_PTY_TESTS=1`): spawn the real binary with `CARGONAUT_PANIC_INJECT=render` + a temp `XDG_DATA_HOME`, send one key, then assert (a) the PTY is back in cooked mode = SC-001, (b) a `crash-*.log` exists containing version/platform/location/backtrace = SC-002, (c) the printed line names the path.
 - [ ] T016 [US1] (green) Make T015 pass; adjust `run()`/`main` wiring as needed.
+- [ ] T016a [US1] (red+green) FR-016: gate crash-exit output on terminal state — when stdout is not a TTY or `--a11y-output` is active, the crash pointer is written as a plain line (stderr) and no alternate-screen/raw control sequences are emitted; unit/integration test drives the non-TTY path and asserts no escape sequences leak. Touches `crates/cargonaut-bin/src/main.rs` + `crates/cargonaut-ui-tui/src/lib.rs`.
 
 **Checkpoint**: US1 shippable — fatal crashes are safe and diagnosable. This is the MVP.
 
@@ -75,7 +76,7 @@ after exit the PTY is cooked and a `crash-*.log` exists (SC-001, SC-002).
 **Independent test**: inject a one-shot render/input panic → loop continues with a status message; a panicking transfer task → job Failed, app usable (SC-003, SC-004).
 
 - [ ] T017 [P] [US2] (red) Run-loop recovery test in `crates/cargonaut-ui-tui/src/lib.rs` (TestBackend): with a one-shot injected render panic, the loop continues and the status line shows a "recovered from internal error" message; no crash file written.
-- [ ] T018 [US2] (green) Wrap the synchronous `term.draw(|f| ..)` in `run_loop` with `std::panic::catch_unwind(AssertUnwindSafe(..))`; on `Err` take the captured panic, `tracing::error!`, set `status`, continue; rate-limit — after N consecutive recovered render panics, escalate to fatal (write report + exit) to avoid a hot loop (R7).
+- [ ] T018 [US2] (green) Wrap the synchronous `term.draw(|f| ..)` in `run_loop` with `std::panic::catch_unwind(AssertUnwindSafe(..))`; on `Err` take the captured panic, `tracing::error!`, set `status`, continue; rate-limit — after **3** consecutive recovered render panics, escalate to fatal (write report + exit) to avoid a hot loop (R7).
 - [ ] T019 [US2] (green) Wrap the async key/mouse handling in `run_loop` with `futures::FutureExt::catch_unwind(AssertUnwindSafe(..))`; recover + status as in T018; add `maybe_inject_panic("input")` at the handler entry.
 - [ ] T020 [P] [US2] (red) Transfer isolation test in `crates/cargonaut-transfer/src/job.rs` (or `tests/`): a panicking transfer body resolves its job to `Failed` (not a hung/missing job); the registry remains usable.
 - [ ] T021 [US2] (green) In `crates/cargonaut-transfer/src/job.rs`, wrap the spawned transfer body so a panic is caught and the job transitions to `Failed` (FR-008); add `maybe_inject_panic("task")` in the task body.
@@ -115,7 +116,8 @@ after exit the PTY is cooked and a `crash-*.log` exists (SC-001, SC-002).
 - [ ] T033 [US4] (green) Add `Command::ShowAbout` in `crates/cargonaut-core/src/command.rs`; add `ActiveDialog::About` + an `AboutDialog` render + Esc/Enter lifecycle in `crates/cargonaut-ui-tui/src/lib.rs`/`dialog.rs`.
 - [ ] T034 [US4] (green) Add an "About" entry to the menu bar in `crates/cargonaut-ui-tui/src/chrome.rs` mapping to `Command::ShowAbout` (keybinding, if any, added to `design/contracts/keymap.toml` first).
 - [ ] T035 [US4] (green) In `crates/cargonaut-bin/src/main.rs`, set `#[command(version, long_version = LONG_VERSION)]` with a `concat!` `LONG_VERSION` const (version + copyright + license + repo) built to match `about_lines()`.
-- [ ] T036 [P] [US4] (red→green) Tests: help-About content (ui-tui), About dialog open/close (ui-tui), and `--version` long output contains the copyright (`crates/cargonaut-bin/tests/`), satisfying SC-005.
+- [ ] T036 [P] [US4] (red) Tests (commit failing first): help-About content (ui-tui), About dialog open/close (ui-tui), and `--version` long output contains the copyright (`crates/cargonaut-bin/tests/`), satisfying SC-005.
+- [ ] T036b [US4] (green) Make T036 pass (wiring already in T032–T035; this is the green commit for the SC-005 gate).
 
 **Checkpoint**: US4 shippable independently.
 
