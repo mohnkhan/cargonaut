@@ -16,6 +16,12 @@ remote = ["dep:russh", "dep:russh-sftp", "dep:suppaftp"]
 ## Both features enabled by default so `cargonaut` is full-featured without
 ## any cargo flag.
 default = ["archives", "remote"]
+## Opt-in: live-server integration tests (tests/sftp_integration.rs). Requires a
+## running SFTP server (see docker-compose.ci.yml) on localhost:2222. Never
+## enabled by default — plain `cargo test` stays hermetic; only CI's
+## sftp-integration job and explicit local runs (`make ci-sftp-up`) turn it on.
+## The test builds a client config via the `russh` dev-dependency below. (issue #84)
+ci-integration = ["remote"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -51,6 +57,11 @@ tokio = { workspace = true, features = ["test-util", "rt"] }
 tracing-subscriber = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports"] }
 zip = { version = "2", default-features = false, features = ["deflate", "aes-crypto"] }
+# Integration test (tests/sftp_integration.rs, gated by the `ci-integration`
+# feature) builds a russh client config to drive the real SftpFs::connect path.
+# Integration tests can only name dev-dependencies, so russh is declared here in
+# addition to its optional regular-dep entry above; same flags so Cargo unifies.
+russh = { version = "0.61", default-features = false, features = ["ring", "rsa"] }
 
 [[bench]]
 name = "archive_listing"

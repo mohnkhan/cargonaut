@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-21 (Feature 059 cargonaut-core split; #86 resolved).
+**Last updated**: 2026-06-21 (Feature 060 SFTP integration test; #84 resolved).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -42,7 +42,9 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#84](https://github.com/mohnkhan/cargonaut/issues/84) | Feature 057 T041: Docker-based SFTP integration test (SC-003/SC-004) | M | Feature 057 US3 follow-up — SftpFs::connect already implemented; only live-TCP test scaffolding missing |
+| _(none — Tier 3 is clear)_ | | | |
+
+> ✅ **Resolved**: [#84](https://github.com/mohnkhan/cargonaut/issues/84) (Docker-based SFTP integration test, SC-003/SC-004) shipped in **Feature 060** (`060-sftp-docker-integration-test`). A `ci-integration`-gated test (`crates/cargonaut-vfs/tests/sftp_integration.rs`) drives the real `SftpFs::connect` path against an `atmoz/sftp` fixture (`docker-compose.ci.yml`; `make ci-sftp-up`/`ci-sftp-down`): SC-003 asserts root-list latency ≤ 5 s; SC-004 transfers a 10 MiB file and logs throughput vs the 87.5 MB/s target while gating on a conservative non-flaky floor (single-stream SFTP is crypto-bound). A new `sftp-integration` CI job runs it and feeds the `ci` rollup.
 
 > ✅ **Resolved**: [#86](https://github.com/mohnkhan/cargonaut/issues/86) (split the `cargonaut-core/src/lib.rs` god-file into cohesive submodules) shipped in **Feature 059** (`059-cargonaut-core-split`). The 6,246-line module became a 122-line root + 14 submodules (`pane`, `command`, `error`, `jobs`, `app`, `nav`, `history`, `fsops`, `attrs`, `compare`, `rename`, `hotlist`, `tabs`, `transfers`) + a `#[cfg(test)]` `test_support`, each with co-located tests. Move-only: public API byte-for-byte stable (rustdoc-JSON surface diff vs committed baseline), 192 core tests green, zero downstream edits; only internal helpers widened to `pub(crate)`.
 
