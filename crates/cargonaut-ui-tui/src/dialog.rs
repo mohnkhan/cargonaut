@@ -1222,12 +1222,41 @@ pub static HELP_SECTIONS: &[HelpSection] = &[
             },
         ],
     },
+    // Feature 061 (FR-010/FR-012): identity surfaced in-app. These mirror
+    // `cargonaut_core::diag::about_lines()` (kept in sync by the same literals;
+    // `version` via `concat!` so the section stays a `&'static`).
     HelpSection {
         title: "About",
-        rows: &[HelpRow {
-            key: "cargonaut",
-            desc: "A dual-pane TUI file manager. Press Esc or F1 to close help.",
-        }],
+        rows: &[
+            HelpRow {
+                key: "cargonaut",
+                desc: concat!(
+                    "v",
+                    env!("CARGO_PKG_VERSION"),
+                    " — dual-pane terminal file manager"
+                ),
+            },
+            HelpRow {
+                key: "author",
+                desc: "Mohiuddin Khan Inamdar",
+            },
+            HelpRow {
+                key: "copyright",
+                desc: "© 2024–2026 Mohiuddin Khan Inamdar",
+            },
+            HelpRow {
+                key: "license",
+                desc: "MIT OR Apache-2.0",
+            },
+            HelpRow {
+                key: "repo",
+                desc: "https://github.com/mohnkhan/cargonaut",
+            },
+            HelpRow {
+                key: "close",
+                desc: "Press Esc or F1 to close help.",
+            },
+        ],
     },
 ];
 

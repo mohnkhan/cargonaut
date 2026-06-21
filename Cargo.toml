@@ -84,7 +84,11 @@ opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+# Feature 061: `unwind` (not `abort`) so panics can be caught — the panic hook
+# restores the terminal + writes a crash report, catch_unwind enables in-session
+# recovery, and tokio isolates panicking tasks. Size cost verified ≤ 8 MiB
+# (NFR-001) by scripts/check-binary-size.sh.
+panic = "unwind"
 
 [profile.dev]
 opt-level = 0

@@ -7,12 +7,25 @@
 //! to `$HOME` and `/tmp`). Subcommands (`list-plugins`, `audit`,
 //! `resume`) stub features that land in later phases.
 
+use cargonaut_core::diag;
 use clap::{Parser, Subcommand};
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
+
+use futures::FutureExt;
+
+/// Long `--version` output: version + copyright + license + repo (Feature 061,
+/// FR-011). Built from the same identity as `diag::about_lines()`.
+const LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "\n© 2024–2026 Mohiuddin Khan Inamdar",
+    "\nLicense: MIT OR Apache-2.0",
+    "\nhttps://github.com/mohnkhan/cargonaut",
+);
 
 /// Cargonaut — Rust-native dual-pane terminal file manager.
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, long_version = LONG_VERSION, about, long_about = None)]
 struct Cli {
     /// Path for the LEFT pane (default: $HOME).
     left: Option<PathBuf>,
@@ -71,8 +84,16 @@ enum CargonautCommand {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
+    // Feature 061 (US1): install the capture hook before anything else so every
+    // subsequent panic is recorded (and the default stderr dump suppressed).
+    diag::install_panic_hook();
+
     let cli = Cli::parse();
     init_tracing(cli.verbose);
+
+    // Feature 061 (US3 / FR-006a): one-time notice if a prior crash report is
+    // unseen. Best-effort; never blocks startup.
+    notify_unseen_crash();
 
     let mut config = match cli.config.as_deref() {
         Some(path) => cargonaut_config::Config::load_from_path(path)?,
@@ -99,26 +120,90 @@ async fn main() -> anyhow::Result<()> {
     let left = path_arg(cli.left.clone(), home_dir());
     let right = path_arg(cli.right.clone(), "/tmp".into());
 
-    let mut app =
-        cargonaut_core::App::new(config, &left.to_string_lossy(), &right.to_string_lossy()).await?;
+    // Feature 061 (US1): the whole app session runs inside an outer catch_unwind
+    // so a panic during startup (before the UI's own boundary) is also caught and
+    // turned into a clean crash report instead of an unwinding-out-of-main dump.
+    let outcome = AssertUnwindSafe(async {
+        diag::maybe_inject_panic("startup");
+        let mut app =
+            cargonaut_core::App::new(config, &left.to_string_lossy(), &right.to_string_lossy())
+                .await
+                .map_err(|e| cargonaut_ui_tui::Error::Other(e.to_string()))?;
 
-    let run_result = cargonaut_ui_tui::run(&mut app).await;
+        let run_result = cargonaut_ui_tui::run(&mut app).await;
 
-    // FR-017 exit-cwd writer: when invoked via the contrib/cargonaut.sh
-    // wrapper (which sets $CARGONAUT_EXIT_CWD_FILE), write the active
-    // pane's cwd to that file so the wrapper can `cd` to it after exit.
-    // Best-effort: silent on missing var; logs on write failure.
-    if let Ok(path) = std::env::var("CARGONAUT_EXIT_CWD_FILE") {
-        if !path.is_empty() {
-            let cwd = active_pane_local_path(&app);
-            if let Err(e) = std::fs::write(&path, cwd.as_bytes()) {
-                tracing::warn!("could not write exit-cwd file {path}: {e}");
+        // FR-017 exit-cwd writer: when invoked via the contrib/cargonaut.sh
+        // wrapper (which sets $CARGONAUT_EXIT_CWD_FILE), write the active pane's
+        // cwd so the wrapper can `cd` to it after exit. Best-effort.
+        if let Ok(path) = std::env::var("CARGONAUT_EXIT_CWD_FILE") {
+            if !path.is_empty() {
+                let cwd = active_pane_local_path(&app);
+                if let Err(e) = std::fs::write(&path, cwd.as_bytes()) {
+                    tracing::warn!("could not write exit-cwd file {path}: {e}");
+                }
             }
         }
-    }
+        run_result
+    })
+    .catch_unwind()
+    .await;
 
-    run_result?;
-    Ok(())
+    match outcome {
+        Ok(Ok(())) => Ok(()),
+        // The UI's outer boundary caught a panic, restored the terminal, and
+        // returned FatalPanic. Write the report (FR-002/006) and exit non-zero.
+        Ok(Err(cargonaut_ui_tui::Error::FatalPanic)) => {
+            finish_with_crash_report();
+            std::process::exit(101);
+        }
+        // A normal (non-panic) error from startup or the loop.
+        Ok(Err(other)) => Err(other.into()),
+        // A panic escaped the async body (e.g. during startup, before the UI
+        // boundary existed). The terminal was never entered, so just report.
+        Err(_payload) => {
+            finish_with_crash_report();
+            std::process::exit(101);
+        }
+    }
+}
+
+/// Format + persist the captured panic as a crash report and tell the user where
+/// it went. Failure-tolerant (FR-013): on any IO error the user is told the
+/// report could not be saved, never a secondary panic. Output goes to stderr as
+/// plain text — safe for a non-TTY / a11y stream (FR-016).
+fn finish_with_crash_report() {
+    let dir = diag::data_dir();
+    let message = match diag::take_captured_panic() {
+        Some(cap) => {
+            let meta = diag::ReportMeta::current(diag::timestamp_utc());
+            let body = diag::format_crash_report(&meta, &cap);
+            match diag::write_report(&dir, &meta.timestamp, &body) {
+                Ok(path) => {
+                    let _ = diag::prune_reports(&dir, diag::DEFAULT_RETENTION);
+                    format!(
+                        "cargonaut crashed. Crash report saved to: {}",
+                        path.display()
+                    )
+                }
+                Err(e) => format!("cargonaut crashed. Could not save crash report: {e}"),
+            }
+        }
+        None => "cargonaut crashed (no panic details were captured).".to_string(),
+    };
+    eprintln!("{message}");
+}
+
+/// Feature 061 (FR-006a): if a crash report exists that the user hasn't been
+/// shown yet, print a one-time pointer to it and mark it seen. Best-effort.
+fn notify_unseen_crash() {
+    let dir = diag::data_dir();
+    if let Ok(Some(path)) = diag::unseen_report(&dir) {
+        eprintln!(
+            "note: a previous cargonaut session crashed — report at {}",
+            path.display()
+        );
+        let _ = diag::mark_seen(&dir, &path);
+    }
 }
 
 /// Active pane's cwd as a local-filesystem path string (stripped of the

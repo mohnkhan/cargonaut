@@ -357,6 +357,7 @@ dependencies = [
  "cargonaut-core",
  "cargonaut-ui-tui",
  "clap",
+ "futures",
  "portable-pty",
  "sha2 0.10.9",
  "tempfile",
