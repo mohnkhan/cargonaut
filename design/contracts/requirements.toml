@@ -1,9 +1,31 @@
-# Cargonaut machine-readable requirements manifest.
+# ════════════════════════════════════════════════════════════════════════════
+# HISTORICAL ARTIFACT — SUPERSEDED. DO NOT TREAT AS CURRENT.
+# ════════════════════════════════════════════════════════════════════════════
 #
-# Every FR/SC/NFR from spec.md is mirrored here as a TOML entry. CI greps
-# this file to verify every requirement has a linked test or manual check.
+# This is the ORIGINAL 6-phase master requirements manifest (FR-001..FR-503,
+# SC-001..SC-010, NFR-001..NFR-008) that mirrored design/spec.md before the
+# project adopted the per-feature spec-kit workflow at feature 031.
 #
-# Schema (per entry):
+# It is NO LONGER MAINTAINED and NO LONGER AUTHORITATIVE:
+#   - Of its 59 `verification` file-path links, only 2 still resolve (≈97% are
+#     dead) — tests were written under crates/*/tests and crates/*/benches with
+#     different names, or the requirement was implemented differently/deferred.
+#   - NOTHING reads this file. It is not referenced by any CI workflow, script,
+#     or Makefile target. (An earlier header claimed "CI greps this file to
+#     verify every requirement" — that claim was never true and is removed.)
+#
+# CURRENT SOURCE OF TRUTH for requirement→test traceability:
+#   - Per-feature specs:   specs/NNN-name/{spec.md,plan.md,tasks.md}
+#   - Each feature's own tests/benches under crates/*/{tests,benches}/
+#   - Live machine-readable contracts in this directory remain authoritative:
+#     keymap.toml (Constitution §III), config.schema.json, commands.toml,
+#     menu.schema.json, openers.schema.json, plugin-api.md.
+#
+# Retained for historical context only (Feature 058 housekeeping). See
+# design/README.md and specs/058-repo-housekeeping/.
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Original schema (per entry):
 #   id            = "FR-NNN" | "SC-NNN" | "NFR-NNN"
 #   priority      = "P1" | "P2" | "P3" | "P4" | "P5" | "P6"
 #   phase         = 1..6                       # phase in which it MUST be satisfied

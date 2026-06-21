@@ -1,8 +1,11 @@
 # Cargonaut workspace.
 #
-# See design/plan.md for the multi-phase architecture and design/tasks.md
-# for the current task backlog. `cargo build` produces the `cargonaut`
-# binary (Phase 1 in progress).
+# Active development follows the per-feature spec-kit workflow: the current
+# feature's plan/spec/tasks live under specs/NNN-name/ (pointer in
+# .specify/feature.json); dev rules are in CLAUDE.md and
+# .specify/memory/constitution.md. `cargo build` produces the `cargonaut`
+# binary. (The original multi-phase master plan in design/ is a historical
+# archive — see design/README.md.)
 
 [workspace]
 resolver = "2"
