@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cargonaut-config",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "figment",
  "schemars",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cargonaut-config",
@@ -402,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-transfer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "cargonaut-vfs",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-ui-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cargonaut-config",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "cargonaut-vfs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitflags 2.13.0",
