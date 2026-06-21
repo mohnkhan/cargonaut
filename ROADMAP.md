@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-21 (Feature 063 parser fuzzing; #93 resolved).
+**Last updated**: 2026-06-21 (Feature 064 release process + versioning; #95 resolved).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -43,6 +43,8 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
 | _(none — Tier 3 is clear)_ | | | |
+
+> ✅ **Resolved**: [#95](https://github.com/mohnkhan/cargonaut/issues/95) (release process + version management) shipped in **Feature 064** (`064-release-versioning`): `docs/VERSIONING.md` (SemVer/0.y.z, single `[workspace.package] version`, MSRV), `docs/RELEASING.md` (cut-a-release checklist), a Keep-a-Changelog restructure (`Unreleased` + historical `[0.1.0]`), `make release-check` preflight, and a `v*`-tag-triggered `release.yml` (build `make dist` → checksum → GitHub Release with CHANGELOG notes, fail-closed). Cutting `v0.1.0` itself is a separate go-ahead.
 
 > ✅ **Resolved**: [#93](https://github.com/mohnkhan/cargonaut/issues/93) (coverage-guided fuzzing) shipped in **Feature 063** (`063-fuzzing-parsers`): an always-on `proptest` no-panic gate for `VfsPath::parse`/`ModeSpec::parse`/`parse_owner` (stable CI), a workspace-excluded `cargo-fuzz` harness with a libfuzzer target per parser, `make fuzz*` (tmpfs build+corpus per §V), and a non-blocking CI `fuzz-smoke` job. Archive/remote-backend fuzzing remains a future follow-up (out of scope here).
 

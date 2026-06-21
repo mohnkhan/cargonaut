@@ -395,6 +395,7 @@ dialogs), `cargonaut-transfer` (the resumable copy engine), `cargonaut-vfs`
 | Forward-looking, issue-backed roadmap | [`ROADMAP.md`](./ROADMAP.md) |
 | Architecture & full design tunnel | [`docs/architecture.md`](./docs/architecture.md) · [`design/INDEX.md`](./design/INDEX.md) |
 | Contributing conventions | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
+| Versioning policy & release process | [`docs/VERSIONING.md`](./docs/VERSIONING.md) · [`docs/RELEASING.md`](./docs/RELEASING.md) |
 | User guide, keybindings & config reference | [Project Wiki](https://github.com/mohnkhan/cargonaut/wiki) |
 
 ## Contributing

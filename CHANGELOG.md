@@ -1,16 +1,34 @@
 # Changelog
 
-Per-feature history for Cargonaut, most recent first. Each entry maps to a
-merged feature branch (`NNN-name`) and PR. Forward-looking work lives in
-[`ROADMAP.md`](./ROADMAP.md); engineering retrospectives live in
-[`Learnings.md`](./Learnings.md); the design rationale lives under
-[`design/`](./design/INDEX.md).
+All notable changes to Cargonaut, newest first. The format follows
+[Keep a Changelog](https://keepachangelog.com/); versions follow
+[`VERSIONING.md`](./docs/VERSIONING.md) (SemVer). Each entry maps to a merged
+feature branch (`NNN-name`) and PR. Forward-looking work lives in
+[`ROADMAP.md`](./ROADMAP.md); engineering retrospectives in
+[`Learnings.md`](./Learnings.md); release mechanics in
+[`docs/RELEASING.md`](./docs/RELEASING.md).
 
 > Terminology: "the reference orthodox file manager" / "orthodox-FM" refers to
 > the classic blue-screen, keyboard-first, dual-pane terminal file manager
 > lineage Cargonaut is modeled on; the specific product is left unnamed.
 
 ---
+
+## [Unreleased]
+
+Changes merged since the last release accumulate here. When a version is cut,
+this heading is renamed to `## [X.Y.Z] — YYYY-MM-DD` and a fresh empty
+`## [Unreleased]` is added on top (see [`docs/RELEASING.md`](./docs/RELEASING.md)).
+
+- **Feature 064 — Release process & version management** (2026-06-21, full spec-kit; closes #95). Adds the project's first written release machinery: [`docs/VERSIONING.md`](./docs/VERSIONING.md) (SemVer + 0.y.z rules, single `[workspace.package] version` source, MSRV policy, breaking-change definition), [`docs/RELEASING.md`](./docs/RELEASING.md) (step-by-step cut-a-release checklist), this Keep-a-Changelog restructure (an `Unreleased` collector above a preserved historical log), `scripts/release/release-check.sh` + `make release-check` preflight (clean tree, tag↔version match, CHANGELOG section present), and `.github/workflows/release.yml` (on `v*` tags: build `make dist`, checksum, publish a GitHub Release with CHANGELOG-derived notes; refuses if the section is missing). No crate code changes; the shipped binary and its 4.15 MiB size are unchanged. The first tag (`v0.1.0`) is cut separately on go-ahead.
+
+---
+
+## [0.1.0] — historical
+
+> The entries below are the per-feature development log up to and including the
+> introduction of the release process. They pre-date tagged releases and will
+> ship as **`v0.1.0`** (the version the workspace has carried since inception).
 
 - **Feature 063 — Coverage-guided fuzzing for parsers** (2026-06-21, full spec-kit; closes #93). Two layers. **(1) Always-on gate**: `crates/cargonaut-vfs/tests/parser_fuzz_invariants.rs` runs 1500 `proptest` cases per parser asserting `VfsPath::parse`, `ModeSpec::parse`, and `parse_owner` never panic on arbitrary unicode strings or lossily-decoded random byte buffers, plus a `VfsPath` display→re-parse roundtrip — in the normal stable `cargo test`, so every PR is gated (SC-001, FR-001/002/003). **(2) Coverage-guided fuzzing**: a standalone `fuzz/` `cargo-fuzz` crate (libfuzzer-sys), excluded from the workspace via `[workspace] exclude = ["fuzz"]` so it never touches the shipped binary or `cargo test` (SC-004); one `fuzz_target!` per parser. `make fuzz`/`fuzz-vfspath`/`fuzz-modespec`/`fuzz-owner` set `CARGO_TARGET_DIR` + corpus + artifact paths under tmpfs (Constitution §V — no SSD writes; SC-003). A non-blocking CI `fuzz-smoke` job (nightly + cargo-fuzz, bounded `-max_total_time`) runs each target per PR (FR-006) but is intentionally kept out of the required `ci` rollup so a heavyweight nightly-tool job can't block merges — the blocking no-panic guarantee is the proptest gate. Verified locally: `VfsPath::parse` survived 1.64M coverage-guided runs in 16s with no crash; all three targets build. +7 tests (744 total); no change to the shipped binary or its 4.15 MiB size.
 
