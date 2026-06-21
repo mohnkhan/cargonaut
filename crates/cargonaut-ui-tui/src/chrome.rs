@@ -350,6 +350,71 @@ impl MenuBar {
         None
     }
 
+    /// The rectangle the open dropdown occupies for the given bar `area` and
+    /// buffer area `buf`, or `None` if no menu is open (or it would be empty).
+    ///
+    /// This is the single source of dropdown geometry: [`MenuBar::render`],
+    /// [`MenuBar::item_at`] and [`MenuBar::in_dropdown`] all derive from it so
+    /// the clickable rows can never drift from the rendered rows (FR-002).
+    fn dropdown_rect(&self, area: Rect, buf: Rect) -> Option<Rect> {
+        let i = self.open?;
+        let menu = &self.menus[i];
+        let rects = self.title_rects(area);
+        let title_x = rects.get(i).map(|r| r.x).unwrap_or(area.x);
+        let width = menu.items.iter().map(|(l, _)| l.len()).max().unwrap_or(4) as u16 + 4;
+        let y = area.y + 1;
+        // Clamp to the buffer so a long menu (or short terminal) stays in bounds.
+        let max_h = buf.height.saturating_sub(y);
+        let height = (menu.items.len() as u16 + 2).min(max_h);
+        let drop = Rect {
+            x: title_x,
+            y,
+            width: width.min(buf.width.saturating_sub(title_x)),
+            height,
+        };
+        if drop.height == 0 || drop.width == 0 {
+            return None;
+        }
+        Some(drop)
+    }
+
+    /// Hit-test a point against the open dropdown's item rows. Returns the item
+    /// index under `(x, y)`, or `None` for clicks on the border, outside the
+    /// dropdown, on rows clipped by a short terminal, or when no menu is open.
+    pub fn item_at(&self, area: Rect, buf: Rect, x: u16, y: u16) -> Option<usize> {
+        let i = self.open?;
+        let drop = self.dropdown_rect(area, buf)?;
+        // Exclude the one-cell border on every side.
+        if x <= drop.x || x >= drop.x + drop.width - 1 {
+            return None;
+        }
+        if y <= drop.y || y >= drop.y + drop.height - 1 {
+            return None;
+        }
+        let idx = (y - drop.y - 1) as usize;
+        (idx < self.menus[i].items.len()).then_some(idx)
+    }
+
+    /// Whether `(x, y)` falls anywhere within the open dropdown's rectangle
+    /// (border included). Lets a caller tell a click inside the frame but off
+    /// the items (a no-op, FR-003) from a click fully outside (close +
+    /// pass-through, FR-004). Returns `false` when no menu is open.
+    pub fn in_dropdown(&self, area: Rect, buf: Rect, x: u16, y: u16) -> bool {
+        self.dropdown_rect(area, buf)
+            .is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+    }
+
+    /// Set the highlighted item directly (used by mouse click and hover).
+    /// Clamps to the open menu's item range; a no-op if no menu is open.
+    pub fn select(&mut self, idx: usize) {
+        if let Some(i) = self.open {
+            let len = self.menus[i].items.len();
+            if len > 0 {
+                self.item_sel = idx.min(len - 1);
+            }
+        }
+    }
+
     /// Render the title bar (and the open dropdown, if any).
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Bar background.
@@ -372,26 +437,13 @@ impl MenuBar {
                 .render(*r, buf);
         }
 
-        // Dropdown overlay.
+        // Dropdown overlay — geometry comes from `dropdown_rect` so the drawn
+        // rows and the hit-test rows are guaranteed identical (FR-002).
         if let Some(i) = self.open {
-            let menu = &self.menus[i];
-            let title_x = rects.get(i).map(|r| r.x).unwrap_or(area.x);
-            let width = menu.items.iter().map(|(l, _)| l.len()).max().unwrap_or(4) as u16 + 4;
-            let y = area.y + 1;
-            // Clamp the dropdown to the buffer so a long menu (or short terminal)
-            // can never render outside bounds (would panic in `Clear`).
-            let buf_h = buf.area().height;
-            let max_h = buf_h.saturating_sub(y);
-            let height = (menu.items.len() as u16 + 2).min(max_h);
-            let drop = Rect {
-                x: title_x,
-                y,
-                width: width.min(buf.area().width.saturating_sub(title_x)),
-                height,
-            };
-            if drop.height == 0 || drop.width == 0 {
+            let Some(drop) = self.dropdown_rect(area, *buf.area()) else {
                 return;
-            }
+            };
+            let menu = &self.menus[i];
             Clear.render(drop, buf);
             let items: Vec<ListItem<'_>> =
                 menu.items.iter().map(|(l, _)| ListItem::new(*l)).collect();

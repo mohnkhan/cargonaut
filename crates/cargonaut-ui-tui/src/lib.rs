@@ -112,6 +112,10 @@ struct FrameLayout {
     fkeys: Rect,
     /// Subshell panel rect (Feature 054). `None` when panel is hidden.
     subshell: Option<Rect>,
+    /// Full terminal rect for the most recent frame (Feature 065). Passed to
+    /// [`chrome::MenuBar::item_at`]/`in_dropdown` so dropdown hit-test clamping
+    /// matches the rendered geometry on short terminals.
+    full: Rect,
 }
 
 /// Loop-owned chrome + mouse state (kept in one struct to avoid a
@@ -3115,6 +3119,7 @@ fn draw_frame(
         right: right_inner,
         fkeys: main_chunks[fkeys_idx],
         subshell: layout_subshell,
+        full: area,
     }
 }
 
@@ -3409,6 +3414,12 @@ mod tests {
                     height: 1,
                 },
                 subshell: None,
+                full: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 24,
+                },
             },
             last_click: None,
             help_overlay: None,
@@ -5711,6 +5722,7 @@ mod tests {
             right: Rect::default(),
             fkeys: Rect::default(),
             subshell: None,
+            full: Rect::default(),
         };
         assert!(layout.subshell.is_none());
     }
