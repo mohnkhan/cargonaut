@@ -8,6 +8,15 @@
 
 **Input**: User description: "improve the survivability of this app; add help about copyrights to the author and show the version of the app; make it easy to debug crashes and prevent total crash gracefully — via full spec-kit development."
 
+## Clarifications
+
+### Session 2026-06-21
+
+- Q: How aggressively should the app recover from faults (restore-then-exit vs recover-and-continue)? → A: **Recover & continue** — the runtime is allowed to unwind on fault so failures while drawing, while handling a single input, or inside background tasks are caught and the session survives (small binary-size cost accepted given headroom).
+- Q: When a non-fatal fault is caught and the session continues, what is recorded? → A: **Log + in-app error** — recovered faults are written to `debug.log` at error level and shown as a dismissible on-screen message; a separate crash-report file is reserved for fatal/unrecovered crashes only (avoids flooding the data dir during a flurry of recoverable faults).
+- Q: Where should the in-app About information live? → A: **Both** — enrich the existing F1 Help "About" section and add a dedicated About view reachable from the menu.
+- Q: When is the user told where the crash report is? → A: **On exit and next launch** — the path is printed to the restored terminal as the process exits, and on the next launch a one-time notice surfaces if a not-yet-seen crash report exists.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A crash never wrecks the terminal, and leaves a clue (Priority: P1)
@@ -137,7 +146,10 @@ confirm both show the app name, version, author, copyright, and license.
 2. **Given** a shell, **When** the user runs the version command, **Then** the
    output includes the version, copyright, and license.
 3. **Given** the user is on the main view, **When** they open the help screen,
-   **Then** the About information is reachable from there.
+   **Then** the enriched About information is reachable from there.
+4. **Given** the user is on the main view, **When** they open the application
+   menu, **Then** a dedicated About entry opens a view showing the same identity
+   details.
 
 ---
 
@@ -170,8 +182,10 @@ confirm both show the app name, version, author, copyright, and license.
   restore the terminal to a usable state — normal/cooked input mode, primary
   (non-alternate) screen, visible cursor, and released mouse capture — before the
   process exits.
-- **FR-002**: On any fault-induced termination, the system MUST write a
-  crash-report file to a single, documented per-user location.
+- **FR-002**: On any **fatal/unrecovered** fault-induced termination, the system
+  MUST write a crash-report file to a single, documented per-user location.
+  (Recovered, non-fatal faults are handled by FR-007 and do not each produce a
+  crash-report file.)
 - **FR-003**: Each crash report MUST include a timestamp, the application
   version, the operating system and architecture, the fault message, and the
   source location of the fault.
@@ -179,12 +193,16 @@ confirm both show the app name, version, author, copyright, and license.
   regardless of the user's environment-variable configuration.
 - **FR-005**: Each crash report MUST include a trail of the most recent in-app
   actions/events preceding the crash, in chronological order.
-- **FR-006**: After a fault-induced termination, the system MUST inform the user,
-  on the restored terminal, of the crash report's location.
+- **FR-006**: After a fatal fault-induced termination, the system MUST inform the
+  user, on the restored terminal, of the crash report's location.
+- **FR-006a**: On the next launch after a crash, if a crash report exists that
+  the user has not yet been notified about, the system MUST surface a one-time
+  notice of its location, and MUST NOT repeat that notice once seen.
 - **FR-007**: A recoverable failure during interactive operation (while drawing
   or while handling a single user action) MUST NOT terminate the session; it MUST
-  be logged, surfaced to the user as a dismissible message, and leave the
-  application interactive.
+  be logged at error level, surfaced to the user as a dismissible message, and
+  leave the application interactive. Recovered faults MUST NOT each create a
+  separate crash-report file.
 - **FR-008**: A failure in a background task MUST NOT terminate the application;
   the failure MUST be isolated to that task and reported against it.
 - **FR-009**: Expected error conditions during normal operations (e.g.
@@ -195,8 +213,9 @@ confirm both show the app name, version, author, copyright, and license.
   identifier.
 - **FR-011**: The command-line version output MUST include the copyright notice
   and license identifier in addition to the version.
-- **FR-012**: The in-app About information MUST be reachable from the help
-  screen.
+- **FR-012**: The in-app About information MUST be reachable BOTH from the help
+  screen (an enriched "About" section) AND as a dedicated About view reachable
+  from the application menu.
 - **FR-013**: Crash-report writing MUST be failure-tolerant: if the report
   cannot be written, the terminal MUST still be restored and the process MUST
   still exit cleanly without a secondary crash.
@@ -248,16 +267,26 @@ confirm both show the app name, version, author, copyright, and license.
 - **SC-008**: With a credential configured in the session, a forced crash
   produces a report that contains no occurrence of that credential (verified by
   test).
+- **SC-009**: After a crash, the next launch surfaces exactly one notice of the
+  report's location, and that notice does not reappear on subsequent launches
+  once the report has been seen (verified by test).
 
 ## Assumptions
 
-- **Recovery is in scope (US2).** "Prevent total crash gracefully" is read as
-  including in-session recovery, not only clean-exit-then-die. Enabling this
-  implies allowing the runtime to unwind on fault rather than aborting
-  immediately; the resulting binary-size cost is accepted given the current
-  large headroom (release binary ≈ 2.97 MiB against the 8 MiB ceiling). The
-  abort-vs-recover decision and its scope are flagged for confirmation in
-  `/speckit-clarify`.
+- **Recovery is in scope (US2) — confirmed.** Per the 2026-06-21 clarification,
+  "prevent total crash gracefully" includes in-session recovery, not only
+  clean-exit-then-die. This requires allowing the runtime to unwind on fault
+  rather than aborting immediately; the resulting binary-size cost is accepted
+  given the current large headroom (release binary ≈ 2.97 MiB against the 8 MiB
+  ceiling, NFR-001).
+- **Recovered faults are logged, not filed.** Per clarification, a caught,
+  non-fatal fault is recorded to `debug.log` at error level and shown on screen;
+  only fatal/unrecovered crashes produce a `crash-<timestamp>` report file.
+- **About appears in two places.** Per clarification, the identity details are
+  surfaced both in the F1 Help "About" section and in a dedicated menu-reachable
+  About view.
+- **Crash notice is shown twice.** Per clarification, the report path is printed
+  on exit and a one-time notice is surfaced on the next launch if unseen.
 - **Crash-report and log location** is the existing per-user data directory used
   for `debug.log` (XDG data dir, e.g. `~/.local/share/cargonaut/`).
 - **Recent-action trail capacity** is a small fixed number (order of dozens);
