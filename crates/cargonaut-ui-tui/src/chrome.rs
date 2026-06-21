@@ -674,6 +674,109 @@ mod tests {
         assert!(rendered.contains("File"), "title missing: {rendered:?}");
     }
 
+    // Feature 065 — mouse interaction with the open dropdown.
+
+    // Bar area used by the 065 hit-test tests: full-width single-row menu bar.
+    fn bar_area() -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 1,
+        }
+    }
+
+    fn buf_area(h: u16) -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: h,
+        }
+    }
+
+    // T004: dropdown_rect must equal the rectangle render actually draws.
+    // We assert the geometry contract used by both render and hit-testing.
+    #[test]
+    fn menu_bar_dropdown_rect_matches_render() {
+        let mut mb = MenuBar::new();
+        assert_eq!(mb.dropdown_rect(bar_area(), buf_area(24)), None); // closed
+        mb.open(1); // File: 12 items, widest "Rename/Move" (11) → width 15.
+        let drop = mb
+            .dropdown_rect(bar_area(), buf_area(24))
+            .expect("open menu has a dropdown rect");
+        // File title sits after "Left" (width 6) → x = 6; y just below the bar.
+        assert_eq!(drop.x, 6);
+        assert_eq!(drop.y, 1);
+        assert_eq!(drop.width, 15);
+        assert_eq!(drop.height, 14); // 12 items + 2 border rows
+    }
+
+    // T006: item hit-test — first/last rows, border, outside, closed.
+    #[test]
+    fn menu_bar_item_hit_test() {
+        let mut mb = MenuBar::new();
+        assert_eq!(mb.item_at(bar_area(), buf_area(24), 8, 2), None); // closed
+        mb.open(1); // File
+        let (area, buf) = (bar_area(), buf_area(24));
+        // First item row is drop.y + 1 = 2.
+        assert_eq!(mb.item_at(area, buf, 8, 2), Some(0));
+        // Last item (index 11) is row 13.
+        assert_eq!(mb.item_at(area, buf, 8, 13), Some(11));
+        // Top border row (y = 1) is not an item.
+        assert_eq!(mb.item_at(area, buf, 8, 1), None);
+        // Bottom border row (y = drop.y + height - 1 = 14) is not an item.
+        assert_eq!(mb.item_at(area, buf, 8, 14), None);
+        // Left border column (x = drop.x = 6) is not an item.
+        assert_eq!(mb.item_at(area, buf, 6, 2), None);
+        // A point fully outside the dropdown.
+        assert_eq!(mb.item_at(area, buf, 0, 2), None);
+    }
+
+    // T007: short terminal clips trailing items; clipped rows are not clickable.
+    #[test]
+    fn menu_bar_item_hit_test_clamped() {
+        let mut mb = MenuBar::new();
+        mb.open(1); // File (12 items)
+        let (area, buf) = (bar_area(), buf_area(6)); // height 6 → dropdown clamped
+        let drop = mb.dropdown_rect(area, buf).unwrap();
+        assert_eq!(drop.height, 5); // (6 - y=1) clamp
+        // Last visible item row is drop.y + height - 2 = 4 → index 2.
+        assert_eq!(mb.item_at(area, buf, 8, 4), Some(2));
+        // A row that was clipped away (y = 5 = bottom border) returns None.
+        assert_eq!(mb.item_at(area, buf, 8, 5), None);
+        // And anything below the dropdown.
+        assert_eq!(mb.item_at(area, buf, 8, 10), None);
+    }
+
+    // T009: in_dropdown distinguishes inside-frame (incl. border) from outside.
+    #[test]
+    fn menu_bar_in_dropdown() {
+        let mut mb = MenuBar::new();
+        let (area, buf) = (bar_area(), buf_area(24));
+        assert!(!mb.in_dropdown(area, buf, 6, 1)); // closed → false
+        mb.open(1);
+        assert!(mb.in_dropdown(area, buf, 6, 1)); // top-left border corner
+        assert!(mb.in_dropdown(area, buf, 8, 2)); // an item row
+        assert!(mb.in_dropdown(area, buf, 20, 14)); // bottom-right border
+        assert!(!mb.in_dropdown(area, buf, 21, 2)); // one past the right edge
+        assert!(!mb.in_dropdown(area, buf, 8, 15)); // one past the bottom edge
+        assert!(!mb.in_dropdown(area, buf, 5, 2)); // left of the dropdown
+    }
+
+    // T011: select sets the highlighted item, clamps, no-ops when closed.
+    #[test]
+    fn menu_bar_select_sets_item() {
+        let mut mb = MenuBar::new();
+        mb.select(3); // closed → no panic, no effect
+        assert!(mb.selected_command().is_none());
+        mb.open(1); // File
+        mb.select(3); // index 3 → "Copy"
+        assert!(matches!(mb.selected_command(), Some(Command::CopySelection)));
+        mb.select(999); // clamps to last item "Hardlink"
+        assert!(matches!(mb.selected_command(), Some(Command::CreateHardLink)));
+    }
+
     // T020: mini-status shows name/size/perms/mtime for the focused entry.
     #[test]
     fn mini_status_shows_entry_details() {
