@@ -4212,6 +4212,51 @@ mod tests {
         }
     }
 
+    // T020 (FR-007): moving the pointer over an item highlights it (updates
+    // selection) without dispatching; a subsequent click invokes that item.
+    #[tokio::test]
+    async fn t_menu_mouse_hover_moves_highlight() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File; default selection = item 0 (View).
+        let (l, r) = synced_views(&app);
+        // Hover over item index 2 (Mkdir) at row y=4.
+        let _ = mouse(moved(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(ui.menu.selected_command(), Some(Command::Mkdir)),
+            "hover must move the highlight to the item under the pointer"
+        );
+        assert!(ui.menu.is_open(), "hover must not close the menu");
+        // A click on the hovered item then invokes it.
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::Input {
+                kind: InputKind::Mkdir,
+                ..
+            })
+        ));
+    }
+
+    // T021 (FR-008): pointer movement over the border / off the item rows does
+    // not change the highlight and dispatches nothing.
+    #[tokio::test]
+    async fn t_menu_mouse_hover_border_no_change() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File; selection = item 0 (View → Preview).
+        let (l, r) = synced_views(&app);
+        // Move over the top border (y=1) — not an item row.
+        let _ = mouse(moved(8, 1), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(ui.menu.selected_command(), Some(Command::Preview)),
+            "hover over the border must leave the highlight unchanged"
+        );
+        assert!(ui.menu.is_open());
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]
