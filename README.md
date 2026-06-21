@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 25 features since (031–059) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
+| **Status** | Alpha · Phase 1 shipped, plus 26 features since (031–060) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI), plus 2 live SFTP integration tests gated behind the `ci-integration` feature (SC-003 list latency + SC-004 throughput, enforced by the `sftp-integration` CI job against a Docker `atmoz/sftp` fixture) |
 | **Binary** | 2.97 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -244,7 +244,16 @@ for the local filesystem:
   and the only visibility change is widening internal helpers to `pub(crate)`.
   (Feature 059, closes #86).
 
-The full per-feature history (Features 001 → 059) lives in
+- **Live SFTP integration test (SC-003/SC-004)** — closes the last Feature 057 gap: a
+  `ci-integration`-gated test (`crates/cargonaut-vfs/tests/sftp_integration.rs`) drives the
+  real `SftpFs::connect` path against a Docker `atmoz/sftp` fixture (`docker-compose.ci.yml`,
+  `make ci-sftp-up`/`ci-sftp-down`), asserting root-list latency ≤ 5 s (SC-003) and 10 MiB
+  transfer throughput (SC-004). The throughput check logs measured MB/s and its % of the
+  87.5 MB/s target but gates on a conservative non-flaky floor, since single-stream SFTP is
+  crypto-bound. A new `sftp-integration` CI job runs it and feeds the `ci` rollup.
+  (Feature 060, closes #84).
+
+The full per-feature history (Features 001 → 060) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
@@ -253,7 +262,6 @@ Cargonaut is alpha. The original roadmap (#40–#48) has mostly shipped; remaini
 gap items:
 
 - S3/GCS/Azure backends — cloud object storage (not in #48 scope)
-- SFTP live integration test gated on Docker-in-CI (#84)
 - FTP-over-TLS (FTPS) — deferrable
 - SSH tunnel / jump host support
 

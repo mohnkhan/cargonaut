@@ -1,0 +1,25 @@
+# SFTP integration-test fixture for issue #84 (Feature 057 T041, SC-003/SC-004).
+#
+# Launches an OpenSSH-backed SFTP server (atmoz/sftp) with a single test user,
+# bound to localhost:2222, for `tests/sftp_integration.rs` (cargo feature
+# `ci-integration`).
+#
+# The `testuser:testpass:1001::upload` user spec means:
+#   user=testuser  password=testpass  uid=1001  and a writable subdir `upload/`.
+# atmoz/sftp chroots the user to its home, so inside the SFTP session the
+# writable path is `/upload` — that is where the test writes/reads its 10 MiB
+# probe file. The chroot home itself is root-owned and read-only by design.
+#
+# Local use:
+#   make ci-sftp-up      # bring it up + wait for the port
+#   cargo test -p cargonaut-vfs --features ci-integration
+#   make ci-sftp-down
+#
+# CI use: see the `sftp-integration` job in .github/workflows/ci.yml.
+
+services:
+  sftp:
+    image: atmoz/sftp:alpine
+    command: testuser:testpass:1001::upload
+    ports:
+      - "2222:22"

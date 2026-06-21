@@ -20,6 +20,8 @@
 #
 #   CI:
 #     ci-local          Run the full CI pipeline locally
+#     ci-sftp-up        Start the atmoz/sftp fixture for the integration test
+#     ci-sftp-down      Stop + remove the SFTP fixture
 #
 #   Dev ergonomics (single-user dev box only — auto-skipped on CI):
 #     tmpfs-setup       Redirect target/ into /tmp/cargonaut/<hash>/ to spare the SSD
@@ -31,7 +33,8 @@
 
 .PHONY: help build build-release static run test clippy fmt fmt-check clean \
         install uninstall dist \
-        ci-local tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
+        ci-local ci-sftp-up ci-sftp-down \
+        tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
 
 # Default goal: print help instead of building, so a user who types `make`
 # without arguments sees what's available.
@@ -72,6 +75,8 @@ help:
 	@echo
 	@echo "CI:"
 	@echo "  ci-local          Run the full CI pipeline locally (fmt+clippy+test+build+docs-gate)"
+	@echo "  ci-sftp-up        Start the atmoz/sftp fixture (localhost:2222) for the integration test"
+	@echo "  ci-sftp-down      Stop + remove the SFTP fixture"
 	@echo
 	@echo "Dev ergonomics (single-user dev box only — auto-skipped on CI):"
 	@echo "  tmpfs-setup       Redirect target/ into /tmp/cargonaut/<hash>/ to spare the SSD."
@@ -154,6 +159,24 @@ dist: static
 
 ci-local:
 	@bash scripts/ci/ci-local.sh
+
+# Bring the SFTP integration-test fixture up/down (issue #84). Mirrors the
+# `sftp-integration` CI job for local runs of:
+#   cargo test -p cargonaut-vfs --features ci-integration
+COMPOSE := $(shell command -v docker-compose 2>/dev/null || echo "docker compose")
+
+ci-sftp-up:
+	@$(COMPOSE) -f docker-compose.ci.yml up -d
+	@echo "[ci-sftp-up] waiting for localhost:2222 ..."
+	@for i in $$(seq 1 30); do \
+	  if (exec 3<>/dev/tcp/127.0.0.1/2222) 2>/dev/null; then \
+	    exec 3>&- 3<&-; echo "[ci-sftp-up] ready"; exit 0; \
+	  fi; sleep 1; \
+	done; \
+	echo "[ci-sftp-up] port 2222 never opened" >&2; exit 1
+
+ci-sftp-down:
+	@$(COMPOSE) -f docker-compose.ci.yml down -v
 
 # ── tmpfs (dev-ergonomics) ────────────────────────────────────────────────────
 # Redirect Cargo's `target/` into tmpfs so heavy build iteration doesn't
