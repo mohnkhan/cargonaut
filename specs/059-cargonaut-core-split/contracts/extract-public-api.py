@@ -68,8 +68,19 @@ def main() -> int:
             out.add(f"const {name}")
         elif kind in ("use", "import"):
             u = inner.get(kind, {})
+            if u.get("glob"):
+                continue
             nm = u.get("name")
-            if nm:
+            # Only count CROSS-CRATE re-exports: a same-crate `pub use` merely
+            # relocates a definition that is already counted by its canonical
+            # struct/enum/fn/method line, so counting it again would make the
+            # surface diff sensitive to internal module moves (which is exactly
+            # what this refactor does). Cross-crate re-exports have no local
+            # definition, so they must be counted here.
+            tid = u.get("id")
+            target = index.get(str(tid)) or index.get(tid) if tid is not None else None
+            is_external = not (target is not None and target.get("crate_id", 0) == 0)
+            if nm and is_external:
                 out.add(f"reexport {nm}")
 
     # Methods / associated functions live in impl blocks; attribute each to its
