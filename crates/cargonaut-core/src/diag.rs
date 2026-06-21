@@ -209,7 +209,7 @@ fn format_epoch_millis(ms: u64) -> String {
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as i64; // [0, 146096]
+    let doe = z - era * 146_097; // [0, 146096]
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
@@ -415,8 +415,16 @@ mod tests {
             thread: "main".into(),
             backtrace: "   0: some::frame\n   1: another::frame".into(),
             actions: vec![
-                ActionRecord { seq: 1, label: "FocusSwap".into(), detail: None },
-                ActionRecord { seq: 2, label: "CursorDown".into(), detail: Some("pane=Left idx=11".into()) },
+                ActionRecord {
+                    seq: 1,
+                    label: "FocusSwap".into(),
+                    detail: None,
+                },
+                ActionRecord {
+                    seq: 2,
+                    label: "CursorDown".into(),
+                    detail: Some("pane=Left idx=11".into()),
+                },
             ],
         }
     }
@@ -432,7 +440,10 @@ mod tests {
         assert_eq!(snap.len(), ACTION_CAPACITY, "buffer must cap at capacity");
         // Oldest 6 dropped → first remaining is Cmd6, last is Cmd{cap+5}.
         assert_eq!(snap.first().unwrap().label, "Cmd6");
-        assert_eq!(snap.last().unwrap().label, format!("Cmd{}", ACTION_CAPACITY + 5));
+        assert_eq!(
+            snap.last().unwrap().label,
+            format!("Cmd{}", ACTION_CAPACITY + 5)
+        );
         // seq strictly increases.
         assert!(snap.windows(2).all(|w| w[1].seq > w[0].seq));
     }
@@ -520,10 +531,18 @@ mod tests {
         prune_reports(&dir, DEFAULT_RETENTION).unwrap();
         let remaining = report_names(&dir).unwrap();
         assert_eq!(remaining.len(), DEFAULT_RETENTION);
-        assert!(remaining.last().unwrap().ends_with("000000011.log"), "newest kept");
-        assert!(remaining.first().unwrap().ends_with("000000002.log"), "kept window starts at i=2");
         assert!(
-            !remaining.iter().any(|n| n.ends_with("000000000.log") || n.ends_with("000000001.log")),
+            remaining.last().unwrap().ends_with("000000011.log"),
+            "newest kept"
+        );
+        assert!(
+            remaining.first().unwrap().ends_with("000000002.log"),
+            "kept window starts at i=2"
+        );
+        assert!(
+            !remaining
+                .iter()
+                .any(|n| n.ends_with("000000000.log") || n.ends_with("000000001.log")),
             "the two oldest reports must be pruned"
         );
 
@@ -531,7 +550,10 @@ mod tests {
         let unseen = unseen_report(&dir).unwrap();
         assert_eq!(unseen.as_deref(), Some(last.as_path()));
         mark_seen(&dir, &last).unwrap();
-        assert!(unseen_report(&dir).unwrap().is_none(), "must not repeat once seen");
+        assert!(
+            unseen_report(&dir).unwrap().is_none(),
+            "must not repeat once seen"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

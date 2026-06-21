@@ -161,6 +161,15 @@ impl App {
     /// Many commands are state-only (no events beyond `PaneUpdated`);
     /// destructive ones request dialogs; `Copy`/`Move` spawn transfers.
     pub async fn dispatch(&mut self, cmd: Command) -> Result<Vec<Event>, AppError> {
+        // Feature 061 (FR-005): record the command's variant name into the
+        // recent-action trail for crash diagnostics. Only the variant name is
+        // kept (any Debug-formatted fields are split off) so no user paths,
+        // patterns, or credentials can leak into a crash report (FR-015).
+        {
+            let dbg = format!("{cmd:?}");
+            let label = dbg.split(['(', ' ', '{']).next().unwrap_or("Command");
+            crate::diag::record_action(label, None);
+        }
         use Command::*;
         match cmd {
             CursorDown => {

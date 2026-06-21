@@ -16,6 +16,7 @@ cargonaut-ui-tui = { path = "../cargonaut-ui-tui" }
 cargonaut-config = { path = "../cargonaut-config" }
 clap = { workspace = true }
 tokio = { workspace = true }
+futures = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

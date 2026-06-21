@@ -27,7 +27,7 @@ pub use pane::PaneView;
 pub use theme::Theme;
 
 use cargonaut_core::{
-    App, Command as AppCommand, DialogKind, Event as AppEvent, PaneId, ResumeOfferView,
+    diag, App, Command as AppCommand, DialogKind, Event as AppEvent, PaneId, ResumeOfferView,
 };
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as CtEvent, EventStream, KeyEvent, MouseButton,
@@ -37,13 +37,14 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use std::io::stdout;
+use std::panic::AssertUnwindSafe;
 use std::time::Instant;
 
 /// Default keymap (the bundled `design/contracts/keymap.toml`), embedded
@@ -69,9 +70,19 @@ pub async fn run(app: &mut App) -> Result<(), Error> {
     let backend = CrosstermBackend::new(out);
     let mut term = Terminal::new(backend).map_err(Error::Terminal)?;
 
-    let result = run_loop(&mut term, app, mouse_enabled).await;
+    // Feature 061: outer recovery boundary. A panic that escapes every inner
+    // boundary (render/input) unwinds to here instead of aborting; we still run
+    // the teardown below (so the terminal is restored) and report it as a fatal
+    // panic. The hook already captured the details on the panicking thread.
+    let loop_outcome = AssertUnwindSafe(run_loop(&mut term, app, mouse_enabled))
+        .catch_unwind()
+        .await;
+    let result = match loop_outcome {
+        Ok(r) => r,
+        Err(_payload) => Err(Error::FatalPanic),
+    };
 
-    // Teardown — always best-effort, even on error from the loop. Mouse
+    // Teardown — always best-effort, even on error/panic from the loop. Mouse
     // capture is released unconditionally regardless of the runtime toggle
     // state (Feature 041 FR-008 / SC-005).
     let _ = restore_terminal_modes(&mut std::io::stdout());
@@ -316,6 +327,9 @@ async fn run_loop<B: ratatui::backend::Backend>(
     let theme_name = app.config().ui.theme.clone();
     let (theme, theme_err) = Theme::resolve(&theme_name);
     let mut status: String = theme_err.unwrap_or_default();
+    // Feature 061 (US2): count consecutive recovered render panics; escalate to a
+    // clean fatal exit after 3 to avoid a hot redraw loop (research R7).
+    let mut consecutive_render_panics: u32 = 0;
 
     // Per-pane PaneView, synced from App state once per frame.
     let mut left = PaneView::new(
@@ -456,37 +470,63 @@ async fn run_loop<B: ratatui::backend::Backend>(
         let menu = &mut ui.menu;
         let fkeybar = &ui.fkeybar;
         let help_overlay = ui.help_overlay.as_ref().cloned();
-        term.draw(|f| {
-            layout = draw_frame(
-                f,
-                &mut left,
-                &mut right,
-                active,
-                mode,
-                &status_line,
-                dialog_ref,
-                &theme,
-                menu,
-                fkeybar,
-                &ms_left,
-                &ms_right,
-                &title_left,
-                &title_right,
-                help_overlay.as_ref(),
-                view_mode,
-                &qv_preview,
-                progress.as_deref(),
-                mouse_supported,
-                mouse_captured,
-                &tab_bar_left,
-                &tab_bar_right,
-                subshell_phase,
-                subshell_screen,
-                subshell_dead,
-                subshell_rows,
-            );
-        })
-        .map_err(Error::Terminal)?;
+        // Feature 061 (US2): the synchronous render is an inner recovery boundary.
+        // A panic here (widget arithmetic, slicing) is caught so one bad frame
+        // doesn't kill the session; we log it, show a status, and redraw.
+        diag::maybe_inject_panic("render");
+        let draw_outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            term.draw(|f| {
+                layout = draw_frame(
+                    f,
+                    &mut left,
+                    &mut right,
+                    active,
+                    mode,
+                    &status_line,
+                    dialog_ref,
+                    &theme,
+                    menu,
+                    fkeybar,
+                    &ms_left,
+                    &ms_right,
+                    &title_left,
+                    &title_right,
+                    help_overlay.as_ref(),
+                    view_mode,
+                    &qv_preview,
+                    progress.as_deref(),
+                    mouse_supported,
+                    mouse_captured,
+                    &tab_bar_left,
+                    &tab_bar_right,
+                    subshell_phase,
+                    subshell_screen,
+                    subshell_dead,
+                    subshell_rows,
+                );
+            })
+            .map(|_| ())
+        }));
+        match draw_outcome {
+            Ok(Ok(())) => {
+                consecutive_render_panics = 0;
+            }
+            Ok(Err(e)) => return Err(Error::Terminal(e)),
+            Err(_payload) => {
+                consecutive_render_panics += 1;
+                // Discard the captured panic (already logged by the hook) so it
+                // isn't later mistaken for a fatal crash.
+                let _ = diag::take_captured_panic();
+                if consecutive_render_panics >= 3 {
+                    // Persistent render failure → escalate to a clean fatal exit.
+                    return Err(Error::FatalPanic);
+                }
+                status =
+                    "recovered from internal render error (see ~/.local/share/cargonaut/debug.log)"
+                        .to_string();
+                continue;
+            }
+        }
         // T006: restore live view so non-render screen accesses are unaffected.
         if let Some(s) = ui.subshell.as_mut() {
             s.screen_mut().set_scrollback(0);
@@ -3266,6 +3306,12 @@ pub enum Error {
     /// up from the dispatch loop.
     #[error("{0}")]
     Other(String),
+
+    /// Feature 061: a panic escaped every in-session recovery boundary and was
+    /// caught by the outer `catch_unwind` in [`run`]. The terminal has already
+    /// been restored (best-effort teardown); the binary writes the crash report.
+    #[error("fatal panic (terminal restored; crash report written)")]
+    FatalPanic,
 }
 
 #[cfg(test)]
