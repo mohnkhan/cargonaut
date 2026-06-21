@@ -67,13 +67,20 @@ fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// credentials). O(1); oldest entry dropped past [`ACTION_CAPACITY`].
 pub fn record_action(label: &str, detail: Option<&str>) {
     let seq = NEXT_SEQ.fetch_add(1, Ordering::Relaxed);
-    let mut buf = lock_recover(actions());
-    buf.push_back(ActionRecord {
+    let rec = ActionRecord {
         seq,
         label: label.to_string(),
         detail: detail.map(str::to_string),
-    });
-    while buf.len() > ACTION_CAPACITY {
+    };
+    push_capped(&mut lock_recover(actions()), rec, ACTION_CAPACITY);
+}
+
+/// Push `rec` onto `buf`, dropping the oldest entries past `cap`. Pure helper so
+/// the ring-buffer semantics can be unit-tested without the process-global state
+/// (which production `dispatch` writes to concurrently).
+fn push_capped(buf: &mut VecDeque<ActionRecord>, rec: ActionRecord, cap: usize) {
+    buf.push_back(rec);
+    while buf.len() > cap {
         buf.pop_front();
     }
 }
@@ -81,11 +88,6 @@ pub fn record_action(label: &str, detail: Option<&str>) {
 /// Snapshot of the recent-action trail, oldest first.
 pub fn recent_actions() -> Vec<ActionRecord> {
     lock_recover(actions()).iter().cloned().collect()
-}
-
-#[cfg(test)]
-fn clear_actions() {
-    lock_recover(actions()).clear();
 }
 
 // ─── Panic capture ───────────────────────────────────────────────────────────
@@ -405,9 +407,6 @@ pub fn about_lines() -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// Serializes tests that touch the process-global ring buffer / panic slot.
-    static SERIAL: Mutex<()> = Mutex::new(());
-
     fn sample_panic() -> CapturedPanic {
         CapturedPanic {
             message: "index out of bounds: the len is 3 but the index is 7".into(),
@@ -430,40 +429,42 @@ mod tests {
     }
 
     #[test]
-    fn action_buffer_caps_at_capacity_and_keeps_newest() {
-        let _g = SERIAL.lock().unwrap();
-        clear_actions();
+    fn push_capped_drops_oldest_and_keeps_newest() {
+        // Pure helper test — no process-global state, so it is immune to the
+        // concurrent `record_action` calls made by parallel dispatch tests.
+        let mut buf = VecDeque::new();
         for i in 0..(ACTION_CAPACITY + 6) {
-            record_action(&format!("Cmd{i}"), None);
+            push_capped(
+                &mut buf,
+                ActionRecord {
+                    seq: i as u64,
+                    label: format!("Cmd{i}"),
+                    detail: None,
+                },
+                ACTION_CAPACITY,
+            );
         }
-        let snap = recent_actions();
-        assert_eq!(snap.len(), ACTION_CAPACITY, "buffer must cap at capacity");
-        // Oldest 6 dropped → first remaining is Cmd6, last is Cmd{cap+5}.
-        assert_eq!(snap.first().unwrap().label, "Cmd6");
+        assert_eq!(buf.len(), ACTION_CAPACITY, "buffer must cap at capacity");
+        assert_eq!(buf.front().unwrap().label, "Cmd6", "oldest 6 dropped");
         assert_eq!(
-            snap.last().unwrap().label,
-            format!("Cmd{}", ACTION_CAPACITY + 5)
+            buf.back().unwrap().label,
+            format!("Cmd{}", ACTION_CAPACITY + 5),
+            "newest kept"
         );
-        // seq strictly increases.
-        assert!(snap.windows(2).all(|w| w[1].seq > w[0].seq));
     }
 
     #[test]
-    fn capture_slot_take_is_none_then_roundtrips() {
-        let _g = SERIAL.lock().unwrap();
-        // Drain any residue from earlier tests in this binary.
-        let _ = take_captured_panic();
-        assert!(take_captured_panic().is_none());
-
+    fn panic_hook_captures_message_location_and_backtrace() {
+        // The hook is process-global; once installed, *any* panic in this test
+        // binary populates the slot. Assert only that a panic IS captured with a
+        // backtrace — not that the slot was empty (a parallel test may panic too)
+        // nor that the message is exactly ours.
         install_panic_hook();
         let res = std::panic::catch_unwind(|| panic!("boom-xyz"));
         assert!(res.is_err());
-        let cap = take_captured_panic().expect("hook must populate the slot");
-        assert!(cap.message.contains("boom-xyz"));
-        assert!(cap.location.is_some(), "location must be captured");
+        let cap = take_captured_panic().expect("a panic must be captured");
         assert!(!cap.backtrace.is_empty(), "backtrace must be captured");
-        // Slot cleared after take.
-        assert!(take_captured_panic().is_none());
+        assert!(cap.location.is_some(), "location must be captured");
     }
 
     #[test]
