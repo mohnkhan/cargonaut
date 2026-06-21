@@ -330,6 +330,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
     // Feature 061 (US2): count consecutive recovered render panics; escalate to a
     // clean fatal exit after 3 to avoid a hot redraw loop (research R7).
     let mut consecutive_render_panics: u32 = 0;
+    // Feature 062 (US1): same bound for recovered input-handler panics.
+    let mut consecutive_input_panics: u32 = 0;
 
     // Per-pane PaneView, synced from App state once per frame.
     let mut left = PaneView::new(
@@ -541,7 +543,9 @@ async fn run_loop<B: ratatui::backend::Backend>(
             maybe_ev = events.next() => {
                 match maybe_ev {
                     Some(Ok(CtEvent::Key(key))) => {
-                        let cont = handle_key(
+                        // Feature 062 (US1): input handling is an inner recovery
+                        // boundary, mirroring render — a panic here is contained.
+                        let res = AssertUnwindSafe(handle_key(
                             key,
                             app,
                             &keymap,
@@ -551,14 +555,48 @@ async fn run_loop<B: ratatui::backend::Backend>(
                             &mut status,
                             &mut quit,
                             &mut ui,
-                        ).await?;
-                        if !cont { return Ok(()); }
+                        ))
+                        .catch_unwind()
+                        .await;
+                        match res {
+                            Ok(inner) => {
+                                let cont = inner?;
+                                consecutive_input_panics = 0;
+                                if !cont {
+                                    return Ok(());
+                                }
+                            }
+                            Err(_payload) => {
+                                let _ = diag::take_captured_panic();
+                                consecutive_input_panics += 1;
+                                if consecutive_input_panics >= 3 {
+                                    return Err(Error::FatalPanic);
+                                }
+                                status = "recovered from internal input error (see ~/.local/share/cargonaut/debug.log)".to_string();
+                            }
+                        }
                     }
                     Some(Ok(CtEvent::Mouse(m))) => {
-                        handle_mouse(
+                        let res = AssertUnwindSafe(handle_mouse(
                             m, app, &mut ui, &left, &right, &mut status,
                             &mut mode, &mut active_dialog, &mut quit,
-                        ).await?;
+                        ))
+                        .catch_unwind()
+                        .await;
+                        match res {
+                            Ok(inner) => {
+                                inner?;
+                                consecutive_input_panics = 0;
+                            }
+                            Err(_payload) => {
+                                let _ = diag::take_captured_panic();
+                                consecutive_input_panics += 1;
+                                if consecutive_input_panics >= 3 {
+                                    return Err(Error::FatalPanic);
+                                }
+                                status = "recovered from internal input error (see ~/.local/share/cargonaut/debug.log)".to_string();
+                            }
+                        }
                     }
                     Some(Ok(CtEvent::Resize(new_cols, new_rows))) => {
                         // Resize PTY if the subshell panel is visible (T017).
@@ -625,6 +663,10 @@ async fn handle_key(
     ui: &mut UiState,
 ) -> Result<bool, Error> {
     use crossterm::event::KeyCode;
+
+    // Feature 062 (US1): test seam — recover-from-input-panic boundary lives at
+    // the call site in `run_loop`. Inert unless CARGONAUT_PANIC_INJECT=input.
+    diag::maybe_inject_panic("input");
 
     // Help overlay — swallows all keys; Esc/F1 close it.
     if let Some(overlay) = ui.help_overlay.as_mut() {

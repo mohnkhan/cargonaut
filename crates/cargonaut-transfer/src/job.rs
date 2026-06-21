@@ -5,7 +5,7 @@
 
 use super::checkpoint::TransferCheckpoint;
 use cargonaut_vfs::{ByteRange, VfsBackend, VfsPath, WriteMode};
-use futures::{AsyncReadExt, AsyncWriteExt};
+use futures::{AsyncReadExt, AsyncWriteExt, FutureExt};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -176,21 +176,54 @@ pub async fn submit_transfer(
         cancel: cancel.clone(),
     };
 
-    tokio::spawn(run_transfer(
-        id,
-        src_backend,
-        src_path,
-        dst_backend,
-        dst_path,
-        opts,
-        src_size,
-        src_sha256_prefix,
-        checkpoint_path,
-        state_tx,
-        cancel,
-    ));
+    let state_tx = Arc::new(state_tx);
+    let guard_tx = Arc::clone(&state_tx);
+    tokio::spawn(async move {
+        let outcome = std::panic::AssertUnwindSafe(run_transfer(
+            id,
+            src_backend,
+            src_path,
+            dst_backend,
+            dst_path,
+            opts,
+            src_size,
+            src_sha256_prefix,
+            checkpoint_path,
+            state_tx,
+            cancel,
+        ))
+        .catch_unwind()
+        .await;
+        if outcome.is_err() {
+            mark_failed_on_panic(&guard_tx);
+        }
+    });
 
     Ok(job)
+}
+
+/// Feature 062 (FR-003): when a transfer task panics, transition its job to
+/// `Failed` so the tasks panel reflects the failure — unless the job already
+/// reached a terminal state (don't overwrite a real Completed/Failed/Canceled).
+fn mark_failed_on_panic(tx: &watch::Sender<TransferState>) {
+    let terminal = matches!(
+        &*tx.borrow(),
+        TransferState::Completed { .. } | TransferState::Failed { .. } | TransferState::Canceled
+    );
+    if !terminal {
+        let _ = tx.send(TransferState::Failed {
+            error: "internal error (transfer task panicked)".into(),
+            resumable: false,
+        });
+    }
+}
+
+/// Feature 062 test seam: panic once if `CARGONAUT_PANIC_INJECT=task`. Inert
+/// otherwise. Local (no `cargonaut-core` dep) mirror of `diag::maybe_inject_panic`.
+fn maybe_inject_task_panic() {
+    if std::env::var("CARGONAUT_PANIC_INJECT").ok().as_deref() == Some("task") {
+        panic!("injected panic at site: task");
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // private helper; arguments are a bag of pre-resolved inputs.
@@ -204,9 +237,10 @@ async fn run_transfer(
     src_size: u64,
     src_sha256_prefix: [u8; 32],
     checkpoint_path: VfsPath,
-    state_tx: watch::Sender<TransferState>,
+    state_tx: Arc<watch::Sender<TransferState>>,
     cancel: CancellationToken,
 ) {
+    maybe_inject_task_panic();
     let start = Instant::now();
     let created_at = now_secs();
 
@@ -558,19 +592,28 @@ pub async fn resume_transfer(
         created_at: checkpoint.created_at,
     };
 
-    tokio::spawn(run_transfer_with_state(
-        id,
-        src_backend,
-        src_path,
-        dst_backend,
-        dst_path,
-        opts,
-        checkpoint.src_size,
-        checkpoint_path,
-        state_tx,
-        cancel,
-        resumed_state,
-    ));
+    let state_tx = Arc::new(state_tx);
+    let guard_tx = Arc::clone(&state_tx);
+    tokio::spawn(async move {
+        let outcome = std::panic::AssertUnwindSafe(run_transfer_with_state(
+            id,
+            src_backend,
+            src_path,
+            dst_backend,
+            dst_path,
+            opts,
+            checkpoint.src_size,
+            checkpoint_path,
+            state_tx,
+            cancel,
+            resumed_state,
+        ))
+        .catch_unwind()
+        .await;
+        if outcome.is_err() {
+            mark_failed_on_panic(&guard_tx);
+        }
+    });
 
     Ok(job)
 }
@@ -597,10 +640,11 @@ async fn run_transfer_with_state(
     opts: TransferOptions,
     src_size: u64,
     checkpoint_path: VfsPath,
-    state_tx: watch::Sender<TransferState>,
+    state_tx: Arc<watch::Sender<TransferState>>,
     cancel: CancellationToken,
     resumed: ResumedState,
 ) {
+    maybe_inject_task_panic();
     let start = Instant::now();
     let created_at = resumed.created_at;
     let mut bytes_written = resumed.bytes_already_written;
@@ -771,6 +815,51 @@ mod tests {
 
     fn vfs_path_for(p: &Path) -> VfsPath {
         VfsPath::parse(&format!("file://{}", p.to_str().expect("UTF-8 path"))).expect("parses")
+    }
+
+    // ── Feature 062 (US2): task-panic → Failed marking ──────────────────────
+    // The actual panic-injection path uses an env var (global), so unit-test the
+    // marking decision directly rather than racing parallel tests with a panic.
+
+    #[test]
+    fn mark_failed_on_panic_marks_a_running_job_failed() {
+        let (tx, rx) = watch::channel(TransferState::Running {
+            bytes_done: 1,
+            bytes_total: 10,
+            eta_secs: 0,
+            throughput_mibs: 0.0,
+        });
+        mark_failed_on_panic(&tx);
+        assert!(
+            matches!(
+                &*rx.borrow(),
+                TransferState::Failed {
+                    resumable: false,
+                    ..
+                }
+            ),
+            "a running job must become Failed on task panic"
+        );
+    }
+
+    #[test]
+    fn mark_failed_on_panic_does_not_downgrade_terminal_state() {
+        for terminal in [
+            TransferState::Completed { sha256_match: true },
+            TransferState::Canceled,
+            TransferState::Failed {
+                error: "real failure".into(),
+                resumable: true,
+            },
+        ] {
+            let (tx, rx) = watch::channel(terminal);
+            mark_failed_on_panic(&tx);
+            // Must not overwrite a genuine terminal state with the panic failure.
+            assert!(
+                !matches!(&*rx.borrow(), TransferState::Failed { resumable: false, error } if error.contains("panicked")),
+                "terminal state must not be downgraded by the panic guard"
+            );
+        }
     }
 
     /// Drive the `watch::Receiver` until a terminal state, returning the final state.
