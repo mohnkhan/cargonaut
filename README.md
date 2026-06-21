@@ -31,7 +31,7 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 23 features since (031–057) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Status** | Alpha · Phase 1 shipped, plus 24 features since (031–058) — see [`CHANGELOG.md`](./CHANGELOG.md) |
 | **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.97 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
@@ -225,7 +225,17 @@ for the local filesystem:
   connections required in CI). T041 Docker integration test deferred to issue #84.
   (Feature 057, closes #48).
 
-The full per-feature history (Features 001 → 057) lives in
+- **Repository housekeeping** — reconciles decayed planning metadata so the repo's
+  self-description matches reality (no production code changed). Archives the original
+  6-phase master manifest `design/contracts/requirements.toml` (57 of 59 `verification`
+  links were dead; nothing read it despite a false "CI greps this file" claim) behind a
+  HISTORICAL banner + new `design/README.md`; corrects the stale `Cargo.toml` header
+  ("Phase 1 in progress" → current spec-kit workflow); removes orphaned root
+  `tests/integration/` and `benches/` placeholders (real tests/benches live per-crate).
+  Live contracts (`keymap.toml` et al.) untouched. The `cargonaut-core` god-file split
+  is tracked as a follow-up (#86). (Feature 058).
+
+The full per-feature history (Features 001 → 058) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap

@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-20 (Feature 057 closes #48 — VFS backends; #84 opened for Docker SFTP integration test).
+**Last updated**: 2026-06-21 (Feature 058 repo housekeeping; #86 opened for cargonaut-core module split).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
@@ -43,6 +43,7 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
 | [#84](https://github.com/mohnkhan/cargonaut/issues/84) | Feature 057 T041: Docker-based SFTP integration test (SC-003/SC-004) | M | Feature 057 US3 follow-up — SftpFs::connect already implemented; only live-TCP test scaffolding missing |
+| [#86](https://github.com/mohnkhan/cargonaut/issues/86) | Split cargonaut-core/src/lib.rs god-file into cohesive submodules | M | Feature 058 audit follow-up — core is a single 6.2k-line / ~300-fn / 1-mod module; split into fs/compare/rename/history/attrs/jobs with a stable public surface |
 
 > ✅ **Resolved**: [#79](https://github.com/mohnkhan/cargonaut/issues/79) (subshell scrollback rendering) shipped in **Feature 055** (`055-subshell-scrollback`). `scroll_offset` is now wired into `render_vt100_screen` via `Screen::set_scrollback()`; scroll direction inversion fixed; cursor hidden in scrollback mode; `scroll_offset` reset on resize.
 
