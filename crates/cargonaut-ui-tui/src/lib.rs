@@ -195,6 +195,9 @@ enum ActiveDialog {
         /// The hotlist list widget.
         widget: HotlistDialog,
     },
+    /// Feature 062 — dedicated About modal (build identity). Display-only;
+    /// Esc/Enter closes it.
+    About(dialog::AboutDialog),
     /// Feature 047 — F2 user-defined action menu. Items loaded from
     /// `~/.config/cargonaut/menu.toml`; filtered by `only_if` condition.
     UserMenu {
@@ -1045,6 +1048,14 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 062 US3: dedicated About modal — Esc/Enter closes, swallow rest.
+            ActiveDialog::About(_) => {
+                if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                    *active_dialog = None;
+                    *mode = Mode::Pane;
+                }
+                return Ok(true);
+            }
             // Feature 047 US2 (FR-006/007/008): F2 user-defined action menu.
             ActiveDialog::UserMenu {
                 widget,
@@ -1382,6 +1393,11 @@ async fn dispatch_ui_command(
             ui.help_overlay = Some(dialog::HelpOverlay::new(visible_h));
             return Ok(());
         }
+        Command::ShowAbout => {
+            *mode = Mode::Dialog;
+            *active_dialog = Some(ActiveDialog::About(dialog::AboutDialog::new()));
+            return Ok(());
+        }
         // Feature 054 (FR-002): Ctrl-o cycles through Hidden→VisibleFmFocus→VisibleShellFocus→Hidden.
         Command::OpenSubshell => {
             // FR-012: no-op when any modal is open.
@@ -1657,7 +1673,12 @@ async fn dispatch_ui_command(
             let is_file =
                 entry.is_some_and(|e| !matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir));
             if is_file {
-                let entry = entry.unwrap();
+                // Feature 062 (FR-006): `is_file` already implies `entry` is
+                // Some, but use a guard instead of `unwrap()` so a future refactor
+                // of the guard above can't turn this into a panic.
+                let Some(entry) = entry else {
+                    return Ok(());
+                };
                 let display_name = entry.name.to_string();
                 let raw_path: std::path::PathBuf = {
                     let cwd = p.cwd.display().to_string();
@@ -3059,6 +3080,7 @@ fn draw_frame(
             ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::TasksPanel { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Hotlist { widget } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::About(widget) => widget.render(darea, f.buffer_mut(), theme),
             // Feature 047 US2: UserMenuDialog::render manages its own centering.
             ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
             // Feature 051: full-screen overlay — use `area`, not the centred `darea`.

@@ -232,7 +232,7 @@ impl MenuBar {
             },
             Menu {
                 title: "Options",
-                items: vec![("Help", Command::ShowHelp)],
+                items: vec![("Help", Command::ShowHelp), ("About", Command::ShowAbout)],
             },
             Menu {
                 title: "Right",
