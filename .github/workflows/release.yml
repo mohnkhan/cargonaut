@@ -1,0 +1,71 @@
+# Feature 064 — tag-triggered release. Pushing an annotated `vX.Y.Z` tag builds
+# the static musl artifact (`make dist`), checksums it, extracts the matching
+# CHANGELOG section, and publishes a GitHub Release. Refuses if the tag/version
+# or CHANGELOG section don't line up. See docs/RELEASING.md.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # Fail before building if tag ↔ version ↔ CHANGELOG don't agree.
+      - name: Preflight
+        env:
+          RELEASE_CHECK_SKIP_TREE: "1"
+        run: bash scripts/release/release-check.sh "${GITHUB_REF_NAME}"
+
+      - name: Build static dist artifact
+        run: make dist
+
+      - name: Checksum
+        run: |
+          cd dist
+          for f in cargonaut-*.tar.gz; do sha256sum "$f" > "$f.sha256"; done
+          ls -l
+
+      - name: Extract CHANGELOG notes for this tag
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v v="$ver" '
+            $0 ~ "^## \\[" v "\\]" { grab=1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::no CHANGELOG section for $ver — refusing to publish empty notes" >&2
+            exit 1
+          fi
+          echo "----- release notes -----"; cat release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/cargonaut-*.tar.gz dist/cargonaut-*.tar.gz.sha256 \
+            --title "cargonaut ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md

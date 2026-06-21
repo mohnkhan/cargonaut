@@ -20,6 +20,7 @@
 #
 #   CI:
 #     ci-local          Run the full CI pipeline locally
+#     release-check     Release preflight: version ↔ CHANGELOG ↔ clean tree
 #     ci-sftp-up        Start the atmoz/sftp fixture for the integration test
 #     ci-sftp-down      Stop + remove the SFTP fixture
 #
@@ -39,7 +40,7 @@
 
 .PHONY: help build build-release static run test clippy fmt fmt-check clean \
         install uninstall dist \
-        ci-local ci-sftp-up ci-sftp-down \
+        ci-local release-check ci-sftp-up ci-sftp-down \
         fuzz fuzz-vfspath fuzz-modespec fuzz-owner \
         tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
 
@@ -82,6 +83,7 @@ help:
 	@echo
 	@echo "CI:"
 	@echo "  ci-local          Run the full CI pipeline locally (fmt+clippy+test+build+docs-gate)"
+	@echo "  release-check     Release preflight (version/CHANGELOG/clean-tree; REF=vX.Y.Z optional)"
 	@echo "  ci-sftp-up        Start the atmoz/sftp fixture (localhost:2222) for the integration test"
 	@echo "  ci-sftp-down      Stop + remove the SFTP fixture"
 	@echo
@@ -170,6 +172,11 @@ dist: static
 
 ci-local:
 	@bash scripts/ci/ci-local.sh
+
+# Release preflight (issue #95): verify version ↔ CHANGELOG ↔ clean tree before
+# tagging. Pass REF=vX.Y.Z to also assert the tag matches. See docs/RELEASING.md.
+release-check:
+	@bash scripts/release/release-check.sh $(REF)
 
 # Bring the SFTP integration-test fixture up/down (issue #84). Mirrors the
 # `sftp-integration` CI job for local runs of:
