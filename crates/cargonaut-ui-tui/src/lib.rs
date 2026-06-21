@@ -2373,6 +2373,17 @@ async fn handle_mouse(
                 }
             }
         }
+        // Feature 065 (FR-007/FR-008): hover highlights the item under the
+        // pointer while a menu is open. O(1), allocation-free, no dispatch.
+        // Terminals that don't report motion simply never reach this arm, so
+        // click-to-invoke degrades gracefully (FR-010).
+        MouseEventKind::Moved => {
+            if ui.menu.is_open() {
+                if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
+                    ui.menu.select(i);
+                }
+            }
+        }
         _ => {}
     }
     Ok(())
