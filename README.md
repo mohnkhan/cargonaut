@@ -31,7 +31,7 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 24 features since (031–058) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Status** | Alpha · Phase 1 shipped, plus 25 features since (031–059) — see [`CHANGELOG.md`](./CHANGELOG.md) |
 | **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI) |
 | **Binary** | 2.97 MiB stripped (ceiling: 8 MiB) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
@@ -233,9 +233,18 @@ for the local filesystem:
   ("Phase 1 in progress" → current spec-kit workflow); removes orphaned root
   `tests/integration/` and `benches/` placeholders (real tests/benches live per-crate).
   Live contracts (`keymap.toml` et al.) untouched. The `cargonaut-core` god-file split
-  is tracked as a follow-up (#86). (Feature 058).
+  was tracked as follow-up #86 (now resolved by Feature 059). (Feature 058).
 
-The full per-feature history (Features 001 → 058) lives in
+- **`cargonaut-core` god-file split** — the 6,246-line `cargonaut-core/src/lib.rs` is split
+  into a 122-line module root plus 14 cohesive submodules (`pane`, `command`, `error`, `jobs`,
+  `app`, `nav`, `history`, `fsops`, `attrs`, `compare`, `rename`, `hotlist`, `tabs`, `transfers`)
+  and a `#[cfg(test)]` `test_support`, each with co-located tests. Move-only and
+  behavior-preserving: the public API is byte-for-byte unchanged (proven by a rustdoc-JSON
+  surface diff against a committed baseline), all 192 core tests pass with no downstream edits,
+  and the only visibility change is widening internal helpers to `pub(crate)`.
+  (Feature 059, closes #86).
+
+The full per-feature history (Features 001 → 059) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap

@@ -123,9 +123,9 @@ Never run `cargo clean` / `rm -rf target` (Constitution §V); use `make` wrapper
 
 **Purpose**: Mandatory docs updates, deferral paper-trail closeout, and merge gate.
 
-- [ ] T027 [P] Update `README.md`: "At a Glance" metrics (test count unchanged; feature count +1) and add a Feature 059 one-line entry to Feature History (CLAUDE.md docs mandate).
-- [ ] T028 [P] Append a Feature 059 section to `Learnings.md` (≥3 bullets): the descendant-module privacy insight (why `App`/`SideState` stay at root → zero widening), the test-co-location requirement driven by private-method visibility, and the rustdoc-JSON surface-diff gate (jq absent → Python) (CLAUDE.md docs mandate).
-- [ ] T029 Reconcile the deferral paper-trail: this feature *implements* issue #86, so the ROADMAP row for #86 is resolved — update `ROADMAP.md` to mark it done/remove per house style, and ensure the PR body closes #86 (CLAUDE.md Deferrals rule).
+- [x] T027 [P] Update `README.md`: "At a Glance" metrics (test count unchanged; feature count +1) and add a Feature 059 one-line entry to Feature History (CLAUDE.md docs mandate).
+- [x] T028 [P] Append a Feature 059 section to `Learnings.md` (≥3 bullets): the descendant-module privacy insight (why `App`/`SideState` stay at root → zero widening), the test-co-location requirement driven by private-method visibility, and the rustdoc-JSON surface-diff gate (jq absent → Python) (CLAUDE.md docs mandate).
+- [x] T029 Reconcile the deferral paper-trail: this feature *implements* issue #86, so the ROADMAP row for #86 is resolved — update `ROADMAP.md` to mark it done/remove per house style, and ensure the PR body closes #86 (CLAUDE.md Deferrals rule).
 - [ ] T030 Run the full merge gate `make ci-local` (clippy → test → release build → check-pr-body → docs-gate); must be green.
 - [ ] T031 Run `specs/059-cargonaut-core-split/quickstart.md` end-to-end (the one-shot block) and confirm "ALL GREEN".
 - [ ] T032 Open the PR targeting `main` (branch `059-cargonaut-core-split`), body closing #86, no AI-attribution trailers; ensure README + Learnings are in the diff so docs-gate passes.
