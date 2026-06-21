@@ -117,5 +117,5 @@ When editing this file or adding project-wide conventions, follow the discipline
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/063-fuzzing-parsers/plan.md
+at specs/064-release-versioning/plan.md
 <!-- SPECKIT END -->
