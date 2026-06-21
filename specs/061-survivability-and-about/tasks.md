@@ -128,7 +128,7 @@ after exit the PTY is cooked and a `crash-*.log` exists (SC-001, SC-002).
 - [ ] T037 [P] FR-009 audit: survey production (non-test) `unwrap()`/`expect()` in hot paths (`crates/cargonaut-core/src/{app,attrs,fsops}.rs`, `cargonaut-ui-tui/src/lib.rs`) and convert risky ones to handled errors/log; record scope in Learnings.
 - [X] T038 [P] Verify SC-007: `make build-release && bash scripts/check-binary-size.sh`; record the `panic=unwind` size delta in `Learnings.md`.
 - [X] T039 [P] Docs: update `README.md` (At-a-Glance metrics + Feature History) and `Learnings.md` (≥3 bullets: capture-in-hook/decide-at-catch, abort→unwind tradeoff, AssertUnwindSafe caveat); update `CHANGELOG.md`; update `ROADMAP.md` if anything is deferred.
-- [ ] T040 [P] Final gate: `make ci-local` + `CARGONAUT_PTY_TESTS=1 cargo test --workspace --lib --tests`; clippy `-D warnings` and `cargo fmt --check` clean.
+- [X] T040 [P] Final gate: `make ci-local` + `CARGONAUT_PTY_TESTS=1 cargo test --workspace --lib --tests`; clippy `-D warnings` and `cargo fmt --check` clean.
 
 ---
 
