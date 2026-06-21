@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Binary](https://img.shields.io/badge/binary-4.15%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-744-brightgreen.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-760-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,8 +31,8 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 29 features since (031–063) — see [`CHANGELOG.md`](./CHANGELOG.md) |
-| **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI), plus 2 live SFTP integration tests gated behind the `ci-integration` feature (SC-003 list latency + SC-004 throughput, enforced by the `sftp-integration` CI job against a Docker `atmoz/sftp` fixture) |
+| **Status** | Alpha · Phase 1 shipped, plus 31 features since (031–065) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Tests** | 760 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI), plus 2 live SFTP integration tests gated behind the `ci-integration` feature (SC-003 list latency + SC-004 throughput, enforced by the `sftp-integration` CI job against a Docker `atmoz/sftp` fixture) |
 | **Binary** | 4.15 MiB stripped (ceiling: 8 MiB) — incl. `panic=unwind` tables for crash recovery (Feature 061) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
@@ -89,7 +89,9 @@ for the local filesystem:
   highlighting; `commander-dark` (default) and `monochrome` built-in themes.
 - **Full chrome** — top pull-down menu bar, bottom `1Help…10Quit` function-key
   bar, per-pane mini-status (perms/size/mtime/name), F1 help.
-- **Mouse** — focus/move/enter/scroll and clickable menu + F-key buttons.
+- **Mouse** — focus/move/enter/scroll, clickable F-key buttons, and fully
+  mouse-driven pull-down menus: click a title to open, click an item to run it,
+  hover to highlight, click away to dismiss (Feature 065).
 - **Rich listings** — name/size/mtime/permission columns, brief vs full layout,
   quick-view file preview, sort cycling, recursive directory size.
 - **Operations** — copy/move/delete with a confirm + live progress overlay
@@ -284,7 +286,17 @@ for the local filesystem:
   fuzzing per PR. Verified locally: 1.64M runs/16s on `VfsPath::parse`, no crash.
   (Feature 063, full spec-kit; closes #93).
 
-The full per-feature history (Features 001 → 063) lives in
+- **Click-on-dropdown-item menus** — the pull-down menu bar is now fully
+  mouse-operable: clicking a dropdown item runs its command and closes the menu,
+  moving the pointer over items highlights them, clicking a different title
+  switches menus, clicking the open title toggles it shut, and clicking outside
+  closes the menu while passing the click through to the panel (focus + cursor).
+  All gated by the existing mouse-capture state (`--no-mouse` / `Alt-m`), and
+  degrading gracefully on terminals that send no motion events. Hit-testing
+  shares one geometry source with rendering so clickable rows can never drift
+  from drawn rows (Feature 065).
+
+The full per-feature history (Features 001 → 065) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap

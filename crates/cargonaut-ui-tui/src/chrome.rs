@@ -272,6 +272,16 @@ impl MenuBar {
         self.open(0);
     }
 
+    /// Toggle a menu by index: close it if it is the currently-open menu,
+    /// otherwise open it. Used by title clicks (Feature 065, FR-005/FR-006).
+    pub fn toggle(&mut self, idx: usize) {
+        if self.open == Some(idx) {
+            self.close();
+        } else {
+            self.open(idx);
+        }
+    }
+
     /// Close the menu.
     pub fn close(&mut self) {
         self.open = None;
@@ -350,6 +360,71 @@ impl MenuBar {
         None
     }
 
+    /// The rectangle the open dropdown occupies for the given bar `area` and
+    /// buffer area `buf`, or `None` if no menu is open (or it would be empty).
+    ///
+    /// This is the single source of dropdown geometry: [`MenuBar::render`],
+    /// [`MenuBar::item_at`] and [`MenuBar::in_dropdown`] all derive from it so
+    /// the clickable rows can never drift from the rendered rows (FR-002).
+    fn dropdown_rect(&self, area: Rect, buf: Rect) -> Option<Rect> {
+        let i = self.open?;
+        let menu = &self.menus[i];
+        let rects = self.title_rects(area);
+        let title_x = rects.get(i).map(|r| r.x).unwrap_or(area.x);
+        let width = menu.items.iter().map(|(l, _)| l.len()).max().unwrap_or(4) as u16 + 4;
+        let y = area.y + 1;
+        // Clamp to the buffer so a long menu (or short terminal) stays in bounds.
+        let max_h = buf.height.saturating_sub(y);
+        let height = (menu.items.len() as u16 + 2).min(max_h);
+        let drop = Rect {
+            x: title_x,
+            y,
+            width: width.min(buf.width.saturating_sub(title_x)),
+            height,
+        };
+        if drop.height == 0 || drop.width == 0 {
+            return None;
+        }
+        Some(drop)
+    }
+
+    /// Hit-test a point against the open dropdown's item rows. Returns the item
+    /// index under `(x, y)`, or `None` for clicks on the border, outside the
+    /// dropdown, on rows clipped by a short terminal, or when no menu is open.
+    pub fn item_at(&self, area: Rect, buf: Rect, x: u16, y: u16) -> Option<usize> {
+        let i = self.open?;
+        let drop = self.dropdown_rect(area, buf)?;
+        // Exclude the one-cell border on every side.
+        if x <= drop.x || x >= drop.x + drop.width - 1 {
+            return None;
+        }
+        if y <= drop.y || y >= drop.y + drop.height - 1 {
+            return None;
+        }
+        let idx = (y - drop.y - 1) as usize;
+        (idx < self.menus[i].items.len()).then_some(idx)
+    }
+
+    /// Whether `(x, y)` falls anywhere within the open dropdown's rectangle
+    /// (border included). Lets a caller tell a click inside the frame but off
+    /// the items (a no-op, FR-003) from a click fully outside (close +
+    /// pass-through, FR-004). Returns `false` when no menu is open.
+    pub fn in_dropdown(&self, area: Rect, buf: Rect, x: u16, y: u16) -> bool {
+        self.dropdown_rect(area, buf)
+            .is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+    }
+
+    /// Set the highlighted item directly (used by mouse click and hover).
+    /// Clamps to the open menu's item range; a no-op if no menu is open.
+    pub fn select(&mut self, idx: usize) {
+        if let Some(i) = self.open {
+            let len = self.menus[i].items.len();
+            if len > 0 {
+                self.item_sel = idx.min(len - 1);
+            }
+        }
+    }
+
     /// Render the title bar (and the open dropdown, if any).
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Bar background.
@@ -372,26 +447,13 @@ impl MenuBar {
                 .render(*r, buf);
         }
 
-        // Dropdown overlay.
+        // Dropdown overlay — geometry comes from `dropdown_rect` so the drawn
+        // rows and the hit-test rows are guaranteed identical (FR-002).
         if let Some(i) = self.open {
-            let menu = &self.menus[i];
-            let title_x = rects.get(i).map(|r| r.x).unwrap_or(area.x);
-            let width = menu.items.iter().map(|(l, _)| l.len()).max().unwrap_or(4) as u16 + 4;
-            let y = area.y + 1;
-            // Clamp the dropdown to the buffer so a long menu (or short terminal)
-            // can never render outside bounds (would panic in `Clear`).
-            let buf_h = buf.area().height;
-            let max_h = buf_h.saturating_sub(y);
-            let height = (menu.items.len() as u16 + 2).min(max_h);
-            let drop = Rect {
-                x: title_x,
-                y,
-                width: width.min(buf.area().width.saturating_sub(title_x)),
-                height,
-            };
-            if drop.height == 0 || drop.width == 0 {
+            let Some(drop) = self.dropdown_rect(area, *buf.area()) else {
                 return;
-            }
+            };
+            let menu = &self.menus[i];
             Clear.render(drop, buf);
             let items: Vec<ListItem<'_>> =
                 menu.items.iter().map(|(l, _)| ListItem::new(*l)).collect();
@@ -672,6 +734,128 @@ mod tests {
             );
         });
         assert!(rendered.contains("File"), "title missing: {rendered:?}");
+    }
+
+    // Feature 065 — mouse interaction with the open dropdown.
+
+    // Bar area used by the 065 hit-test tests: full-width single-row menu bar.
+    fn bar_area() -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 1,
+        }
+    }
+
+    fn buf_area(h: u16) -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: h,
+        }
+    }
+
+    // T004: dropdown_rect must equal the rectangle render actually draws.
+    // We assert the geometry contract used by both render and hit-testing.
+    #[test]
+    fn menu_bar_dropdown_rect_matches_render() {
+        let mut mb = MenuBar::new();
+        assert_eq!(mb.dropdown_rect(bar_area(), buf_area(24)), None); // closed
+        mb.open(1); // File: 12 items, widest "Rename/Move" (11) → width 15.
+        let drop = mb
+            .dropdown_rect(bar_area(), buf_area(24))
+            .expect("open menu has a dropdown rect");
+        // File title sits after "Left" (width 6) → x = 6; y just below the bar.
+        assert_eq!(drop.x, 6);
+        assert_eq!(drop.y, 1);
+        assert_eq!(drop.width, 15);
+        assert_eq!(drop.height, 14); // 12 items + 2 border rows
+    }
+
+    // T006: item hit-test — first/last rows, border, outside, closed.
+    #[test]
+    fn menu_bar_item_hit_test() {
+        let mut mb = MenuBar::new();
+        assert_eq!(mb.item_at(bar_area(), buf_area(24), 8, 2), None); // closed
+        mb.open(1); // File
+        let (area, buf) = (bar_area(), buf_area(24));
+        // First item row is drop.y + 1 = 2.
+        assert_eq!(mb.item_at(area, buf, 8, 2), Some(0));
+        // Last item (index 11) is row 13.
+        assert_eq!(mb.item_at(area, buf, 8, 13), Some(11));
+        // Top border row (y = 1) is not an item.
+        assert_eq!(mb.item_at(area, buf, 8, 1), None);
+        // Bottom border row (y = drop.y + height - 1 = 14) is not an item.
+        assert_eq!(mb.item_at(area, buf, 8, 14), None);
+        // Left border column (x = drop.x = 6) is not an item.
+        assert_eq!(mb.item_at(area, buf, 6, 2), None);
+        // A point fully outside the dropdown.
+        assert_eq!(mb.item_at(area, buf, 0, 2), None);
+    }
+
+    // T007: short terminal clips trailing items; clipped rows are not clickable.
+    #[test]
+    fn menu_bar_item_hit_test_clamped() {
+        let mut mb = MenuBar::new();
+        mb.open(1); // File (12 items)
+        let (area, buf) = (bar_area(), buf_area(6)); // height 6 → dropdown clamped
+        let drop = mb.dropdown_rect(area, buf).unwrap();
+        assert_eq!(drop.height, 5); // (6 - y=1) clamp
+                                    // Last visible item row is drop.y + height - 2 = 4 → index 2.
+        assert_eq!(mb.item_at(area, buf, 8, 4), Some(2));
+        // A row that was clipped away (y = 5 = bottom border) returns None.
+        assert_eq!(mb.item_at(area, buf, 8, 5), None);
+        // And anything below the dropdown.
+        assert_eq!(mb.item_at(area, buf, 8, 10), None);
+    }
+
+    // T009: in_dropdown distinguishes inside-frame (incl. border) from outside.
+    #[test]
+    fn menu_bar_in_dropdown() {
+        let mut mb = MenuBar::new();
+        let (area, buf) = (bar_area(), buf_area(24));
+        assert!(!mb.in_dropdown(area, buf, 6, 1)); // closed → false
+        mb.open(1);
+        assert!(mb.in_dropdown(area, buf, 6, 1)); // top-left border corner
+        assert!(mb.in_dropdown(area, buf, 8, 2)); // an item row
+        assert!(mb.in_dropdown(area, buf, 20, 14)); // bottom-right border
+        assert!(!mb.in_dropdown(area, buf, 21, 2)); // one past the right edge
+        assert!(!mb.in_dropdown(area, buf, 8, 15)); // one past the bottom edge
+        assert!(!mb.in_dropdown(area, buf, 5, 2)); // left of the dropdown
+    }
+
+    // Feature 065: toggle opens a closed/other menu, closes the same one.
+    #[test]
+    fn menu_bar_toggle() {
+        let mut mb = MenuBar::new();
+        mb.toggle(1);
+        assert!(mb.is_open());
+        mb.toggle(2); // different index → switch, stays open
+        assert!(mb.is_open());
+        assert!(matches!(mb.selected_command(), Some(Command::ShowUserMenu))); // Command menu item 0
+        mb.toggle(2); // same index → close
+        assert!(!mb.is_open());
+    }
+
+    // T011: select sets the highlighted item, clamps, no-ops when closed.
+    #[test]
+    fn menu_bar_select_sets_item() {
+        let mut mb = MenuBar::new();
+        mb.select(3); // closed → no panic, no effect
+        assert!(mb.selected_command().is_none());
+        mb.open(1); // File
+        mb.select(3); // index 3 → "Copy"
+        assert!(matches!(
+            mb.selected_command(),
+            Some(Command::CopySelection)
+        ));
+        mb.select(999); // clamps to last item "Hardlink"
+        assert!(matches!(
+            mb.selected_command(),
+            Some(Command::CreateHardLink)
+        ));
     }
 
     // T020: mini-status shows name/size/perms/mtime for the focused entry.

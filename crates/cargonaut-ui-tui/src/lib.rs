@@ -112,6 +112,10 @@ struct FrameLayout {
     fkeys: Rect,
     /// Subshell panel rect (Feature 054). `None` when panel is hidden.
     subshell: Option<Rect>,
+    /// Full terminal rect for the most recent frame (Feature 065). Passed to
+    /// [`chrome::MenuBar::item_at`]/`in_dropdown` so dropdown hit-test clamping
+    /// matches the rendered geometry on short terminals.
+    full: Rect,
 }
 
 /// Loop-owned chrome + mouse state (kept in one struct to avoid a
@@ -2296,10 +2300,33 @@ async fn handle_mouse(
                 dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
                 return Ok(());
             }
-            // 2. Menu-bar titles (FR-017).
+            // 2. Menu-bar titles (FR-017): click to open; click the open menu's
+            //    own title to close; a different title switches (FR-005/FR-006).
             if let Some(idx) = ui.menu.title_at(ui.layout.menu, x, y) {
-                ui.menu.open(idx);
+                ui.menu.toggle(idx);
                 return Ok(());
+            }
+            // 2b. Open dropdown (Feature 065): click an item to invoke it and
+            //     close the menu (FR-001/FR-012); a click inside the frame but
+            //     off the items (e.g. the border) is a no-op (FR-003); a click
+            //     fully outside closes the menu and falls through to the panel
+            //     hit logic for the same event (FR-004 close-and-pass-through).
+            if ui.menu.is_open() {
+                if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
+                    ui.menu.select(i);
+                    let cmd = ui.menu.selected_command();
+                    ui.menu.close();
+                    if let Some(cmd) = cmd {
+                        dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui)
+                            .await?;
+                    }
+                    return Ok(());
+                }
+                if ui.menu.in_dropdown(ui.layout.menu, ui.layout.full, x, y) {
+                    return Ok(());
+                }
+                // Fully outside the bar and the dropdown: close, then continue.
+                ui.menu.close();
             }
             // 3. Panel rows: focus + move cursor (FR-014), double-click
             //    descends (FR-015).
@@ -2345,6 +2372,17 @@ async fn handle_mouse(
                 } else {
                     ui.last_click = Some((x, y, Instant::now()));
                 }
+            }
+        }
+        // Feature 065 (FR-007/FR-008): hover highlights the item under the
+        // pointer while a menu is open. O(1), allocation-free, no dispatch.
+        // Terminals that don't report motion simply never reach this arm, so
+        // click-to-invoke degrades gracefully (FR-010).
+        MouseEventKind::Moved => {
+            // `item_at` already yields `None` when no menu is open, so this is
+            // a single hit-test with no extra guard.
+            if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
+                ui.menu.select(i);
             }
         }
         _ => {}
@@ -3115,6 +3153,7 @@ fn draw_frame(
         right: right_inner,
         fkeys: main_chunks[fkeys_idx],
         subshell: layout_subshell,
+        full: area,
     }
 }
 
@@ -3409,6 +3448,12 @@ mod tests {
                     height: 1,
                 },
                 subshell: None,
+                full: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 24,
+                },
             },
             last_click: None,
             help_overlay: None,
@@ -4024,6 +4069,212 @@ mod tests {
         );
     }
 
+    // ---- Feature 065: click / hover on the open dropdown ----
+
+    // Build a UiState with a standard 80x24 frame and an open menu `idx`.
+    fn ui_with_open_menu(idx: usize) -> UiState {
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
+        ui.layout.menu = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 1,
+        };
+        ui.menu.open(idx);
+        ui
+    }
+
+    fn moved(x: u16, y: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    // T013 (FR-001/FR-012): clicking the "Mkdir" item in the File menu
+    // dispatches its command (opens the Mkdir input dialog) and closes the menu.
+    #[tokio::test]
+    async fn t_menu_mouse_click_item_dispatches() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File
+        let (l, r) = synced_views(&app);
+        // File dropdown: x=6, items start at y=2. "Mkdir" is index 2 → y=4.
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(
+                dlg,
+                Some(ActiveDialog::Input {
+                    kind: InputKind::Mkdir,
+                    ..
+                })
+            ),
+            "clicking Mkdir must open the Mkdir input dialog; got {dlg:?}"
+        );
+        assert!(!ui.menu.is_open(), "menu must close after invoking an item");
+    }
+
+    // T014 (FR-002): first vs last item map to the correct commands (no
+    // off-by-one against the border). Options menu: Help (0), About (1).
+    #[tokio::test]
+    async fn t_menu_mouse_click_first_and_last_item() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Options title starts at x=21; dropdown rows y=2 (Help), y=3 (About).
+        // First item → Help opens the help overlay.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(3);
+            let (l, r) = synced_views(&app);
+            let _ = mouse(left_click(23, 2), &mut app, &mut ui, &l, &r).await;
+            assert!(
+                ui.help_overlay.is_some(),
+                "first item (Help) must open help"
+            );
+            assert!(!ui.menu.is_open());
+        }
+        // Last item → About opens the About dialog.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(3);
+            let (l, r) = synced_views(&app);
+            let (_s, dlg) = mouse_with_dlg(left_click(23, 3), &mut app, &mut ui, &l, &r).await;
+            assert!(
+                matches!(dlg, Some(ActiveDialog::About(_))),
+                "last item (About) must open the About dialog; got {dlg:?}"
+            );
+            assert!(!ui.menu.is_open());
+        }
+    }
+
+    // T015 (FR-003): a click on the dropdown border (inside the frame, not an
+    // item) dispatches nothing and leaves the menu open.
+    #[tokio::test]
+    async fn t_menu_mouse_click_border_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File: dropdown top border at y=1.
+        let (l, r) = synced_views(&app);
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 1), &mut app, &mut ui, &l, &r).await;
+        assert!(dlg.is_none(), "border click must not dispatch; got {dlg:?}");
+        assert!(ui.menu.is_open(), "border click must leave the menu open");
+    }
+
+    // T017 (FR-004): with a menu open, a click on a file-panel row closes the
+    // menu AND performs the panel action (focus + cursor) — close-and-pass-through.
+    #[tokio::test]
+    async fn t_menu_mouse_outside_closes_and_passes_through() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c", "d"] {
+            std::fs::write(td_r.path().join(n), b"").unwrap();
+        }
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File menu open
+        let (l, r) = synced_views(&app);
+        // Right pane rect is {50,1,40,10}; click row 2 (y=3) — outside the dropdown.
+        let _ = mouse(left_click(55, 3), &mut app, &mut ui, &l, &r).await;
+        assert!(!ui.menu.is_open(), "outside click must close the menu");
+        assert_eq!(app.active_pane(), PaneId::Right, "and focus the pane");
+        assert_eq!(app.pane(PaneId::Right).cursor, 2, "and move the cursor");
+    }
+
+    // T018 (FR-005/FR-006): clicking a different title switches the open menu;
+    // clicking the open menu's own title closes it.
+    #[tokio::test]
+    async fn t_menu_mouse_switch_and_toggle() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Switch: File open → click Options title (x≈23, y=0) → Options open.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(1);
+            let (l, r) = synced_views(&app);
+            let _ = mouse(left_click(23, 0), &mut app, &mut ui, &l, &r).await;
+            assert!(ui.menu.is_open(), "switching keeps a menu open");
+            // Confirm it's Options: clicking its second row (y=3) opens About.
+            let (_s, dlg) = mouse_with_dlg(left_click(23, 3), &mut app, &mut ui, &l, &r).await;
+            assert!(
+                matches!(dlg, Some(ActiveDialog::About(_))),
+                "switched menu must be Options; got {dlg:?}"
+            );
+        }
+        // Toggle: Options open → click Options title again → closes.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(3);
+            let (l, r) = synced_views(&app);
+            let _ = mouse(left_click(23, 0), &mut app, &mut ui, &l, &r).await;
+            assert!(
+                !ui.menu.is_open(),
+                "clicking the open menu's title closes it"
+            );
+        }
+    }
+
+    // T020 (FR-007): moving the pointer over an item highlights it (updates
+    // selection) without dispatching; a subsequent click invokes that item.
+    #[tokio::test]
+    async fn t_menu_mouse_hover_moves_highlight() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File; default selection = item 0 (View).
+        let (l, r) = synced_views(&app);
+        // Hover over item index 2 (Mkdir) at row y=4.
+        let _ = mouse(moved(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(ui.menu.selected_command(), Some(Command::Mkdir)),
+            "hover must move the highlight to the item under the pointer"
+        );
+        assert!(ui.menu.is_open(), "hover must not close the menu");
+        // A click on the hovered item then invokes it.
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(matches!(
+            dlg,
+            Some(ActiveDialog::Input {
+                kind: InputKind::Mkdir,
+                ..
+            })
+        ));
+    }
+
+    // T021 (FR-008): pointer movement over the border / off the item rows does
+    // not change the highlight and dispatches nothing.
+    #[tokio::test]
+    async fn t_menu_mouse_hover_border_no_change() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File; selection = item 0 (View → Preview).
+        let (l, r) = synced_views(&app);
+        // Move over the top border (y=1) — not an item row.
+        let _ = mouse(moved(8, 1), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(ui.menu.selected_command(), Some(Command::Preview)),
+            "hover over the border must leave the highlight unchanged"
+        );
+        assert!(ui.menu.is_open());
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]
@@ -4130,6 +4381,51 @@ mod tests {
             parent,
             "double-clicking `..` should ascend to the parent"
         );
+    }
+
+    // T023 (FR-010): graceful degradation — with NO prior Moved event, a click
+    // alone still selects-and-invokes the item (terminals without motion reports).
+    #[tokio::test]
+    async fn t_menu_mouse_click_without_hover() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File
+        let (l, r) = synced_views(&app);
+        // Deliberately no moved() before the click.
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(
+                dlg,
+                Some(ActiveDialog::Input {
+                    kind: InputKind::Mkdir,
+                    ..
+                })
+            ),
+            "click must work without any hover event; got {dlg:?}"
+        );
+        assert!(!ui.menu.is_open());
+    }
+
+    // T024 (FR-009/FR-011): with mouse disabled the menu mouse paths are inert;
+    // keyboard behavior (covered elsewhere) is unaffected.
+    #[tokio::test]
+    async fn t_menu_mouse_disabled_is_inert() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File, selection = item 0 (Preview)
+        ui.mouse_enabled = false;
+        let (l, r) = synced_views(&app);
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            dlg.is_none(),
+            "disabled mouse must not dispatch a menu item"
+        );
+        assert!(ui.menu.is_open(), "disabled mouse must not change the menu");
+        // Hover is likewise inert: selection stays on item 0.
+        let _ = mouse(moved(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(matches!(ui.menu.selected_command(), Some(Command::Preview)));
     }
 
     // T-MOUSE-1 (FR-013): with the mouse disabled, no event changes state.
@@ -5711,6 +6007,7 @@ mod tests {
             right: Rect::default(),
             fkeys: Rect::default(),
             subshell: None,
+            full: Rect::default(),
         };
         assert!(layout.subshell.is_none());
     }
