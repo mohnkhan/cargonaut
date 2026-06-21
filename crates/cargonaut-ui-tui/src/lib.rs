@@ -4035,6 +4035,112 @@ mod tests {
         );
     }
 
+    // ---- Feature 065: click / hover on the open dropdown ----
+
+    // Build a UiState with a standard 80x24 frame and an open menu `idx`.
+    fn ui_with_open_menu(idx: usize) -> UiState {
+        let mut ui = fresh_ui(
+            Rect {
+                x: 0,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            Rect {
+                x: 50,
+                y: 1,
+                width: 40,
+                height: 10,
+            },
+            true,
+        );
+        ui.layout.menu = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 1,
+        };
+        ui.menu.open(idx);
+        ui
+    }
+
+    fn moved(x: u16, y: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    // T013 (FR-001/FR-012): clicking the "Mkdir" item in the File menu
+    // dispatches its command (opens the Mkdir input dialog) and closes the menu.
+    #[tokio::test]
+    async fn t_menu_mouse_click_item_dispatches() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File
+        let (l, r) = synced_views(&app);
+        // File dropdown: x=6, items start at y=2. "Mkdir" is index 2 → y=4.
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(
+                dlg,
+                Some(ActiveDialog::Input {
+                    kind: InputKind::Mkdir,
+                    ..
+                })
+            ),
+            "clicking Mkdir must open the Mkdir input dialog; got {dlg:?}"
+        );
+        assert!(!ui.menu.is_open(), "menu must close after invoking an item");
+    }
+
+    // T014 (FR-002): first vs last item map to the correct commands (no
+    // off-by-one against the border). Options menu: Help (0), About (1).
+    #[tokio::test]
+    async fn t_menu_mouse_click_first_and_last_item() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Options title starts at x=21; dropdown rows y=2 (Help), y=3 (About).
+        // First item → Help opens the help overlay.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(3);
+            let (l, r) = synced_views(&app);
+            let _ = mouse(left_click(23, 2), &mut app, &mut ui, &l, &r).await;
+            assert!(ui.help_overlay.is_some(), "first item (Help) must open help");
+            assert!(!ui.menu.is_open());
+        }
+        // Last item → About opens the About dialog.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(3);
+            let (l, r) = synced_views(&app);
+            let (_s, dlg) = mouse_with_dlg(left_click(23, 3), &mut app, &mut ui, &l, &r).await;
+            assert!(
+                matches!(dlg, Some(ActiveDialog::About(_))),
+                "last item (About) must open the About dialog; got {dlg:?}"
+            );
+            assert!(!ui.menu.is_open());
+        }
+    }
+
+    // T015 (FR-003): a click on the dropdown border (inside the frame, not an
+    // item) dispatches nothing and leaves the menu open.
+    #[tokio::test]
+    async fn t_menu_mouse_click_border_noop() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File: dropdown top border at y=1.
+        let (l, r) = synced_views(&app);
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 1), &mut app, &mut ui, &l, &r).await;
+        assert!(dlg.is_none(), "border click must not dispatch; got {dlg:?}");
+        assert!(ui.menu.is_open(), "border click must leave the menu open");
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]
