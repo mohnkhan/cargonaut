@@ -6,8 +6,8 @@
 [![CI](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml/badge.svg)](https://github.com/mohnkhan/cargonaut/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
-[![Binary](https://img.shields.io/badge/binary-2.97%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-724-brightgreen.svg)](#at-a-glance)
+[![Binary](https://img.shields.io/badge/binary-4.15%20MiB-success.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-734-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,9 +31,9 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 26 features since (031–060) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Status** | Alpha · Phase 1 shipped, plus 27 features since (031–061) — see [`CHANGELOG.md`](./CHANGELOG.md) |
 | **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI), plus 2 live SFTP integration tests gated behind the `ci-integration` feature (SC-003 list latency + SC-004 throughput, enforced by the `sftp-integration` CI job against a Docker `atmoz/sftp` fixture) |
-| **Binary** | 2.97 MiB stripped (ceiling: 8 MiB) |
+| **Binary** | 4.15 MiB stripped (ceiling: 8 MiB) — incl. `panic=unwind` tables for crash recovery (Feature 061) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
 | **Language** | Rust workspace (6 crates), `ratatui` + `crossterm` + `tokio` |
 | **Platform** | Linux terminal (local filesystem) |
@@ -253,7 +253,20 @@ for the local filesystem:
   crypto-bound. A new `sftp-integration` CI job runs it and feeds the `ci` rollup.
   (Feature 060, closes #84).
 
-The full per-feature history (Features 001 → 060) lives in
+- **Survivability, crash safety & About/version** — release builds switch to
+  `panic = "unwind"` so panics no longer `SIGABRT`. A global panic hook captures
+  message/location/`force_capture` backtrace + a 64-entry recent-action trail
+  (secret-free) without touching the terminal; an outer `catch_unwind` in `run()`
+  guarantees terminal restoration on any fatal fault and writes a
+  `crash-<ts>.log` (version/OS/location/backtrace/actions) to the data dir, with
+  a stderr pointer on exit and a one-time notice on next launch. The render loop
+  recovers from per-frame panics (escalating to a clean exit after 3). The F1
+  Help "About" section and `--version` long output now carry version, author,
+  copyright, and license. New `cargonaut-core::diag` module; gated PTY test
+  proves terminal-restore + report on a real crash; binary 4.15 MiB.
+  (Feature 061, full spec-kit; closes survivability/crash-debug/version asks).
+
+The full per-feature history (Features 001 → 061) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
