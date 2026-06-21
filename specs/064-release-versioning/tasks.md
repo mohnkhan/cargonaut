@@ -24,4 +24,3 @@ US1 (RELEASING.md + release-check + workflow) — the repeatable release path.
 
 ## Note
 Actually cutting/pushing `v0.1.0` is deferred to explicit go-ahead (outward-facing).
-EOF
