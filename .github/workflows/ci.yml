@@ -128,9 +128,12 @@ jobs:
           echo "::error::SFTP port 2222 never opened" >&2
           docker compose -f docker-compose.ci.yml logs >&2 || true
           exit 1
-      - name: cargo test --features ci-integration
+      - name: cargo test --release --features ci-integration
+        # --release is required for SC-004 to be meaningful: SFTP throughput is
+        # bound by symmetric-cipher CPU cost, and an unoptimized debug build runs
+        # the crypto several times slower, badly understating real throughput.
         run: |
-          cargo test -p cargonaut-vfs --features ci-integration \
+          cargo test -p cargonaut-vfs --release --features ci-integration \
             --test sftp_integration -- --nocapture
       - name: SFTP fixture logs (on failure)
         if: failure()
