@@ -519,13 +519,15 @@ async fn run_loop<B: ratatui::backend::Backend>(
             Ok(Err(e)) => return Err(Error::Terminal(e)),
             Err(_payload) => {
                 consecutive_render_panics += 1;
-                // Discard the captured panic (already logged by the hook) so it
-                // isn't later mistaken for a fatal crash.
-                let _ = diag::take_captured_panic();
                 if consecutive_render_panics >= 3 {
                     // Persistent render failure → escalate to a clean fatal exit.
+                    // Leave the captured panic in the slot so `main` can write the
+                    // crash report (do NOT drain it here).
                     return Err(Error::FatalPanic);
                 }
+                // Recovered (non-fatal): discard the captured panic (already
+                // logged by the hook) so it isn't later mistaken for a crash.
+                let _ = diag::take_captured_panic();
                 status =
                     "recovered from internal render error (see ~/.local/share/cargonaut/debug.log)"
                         .to_string();
@@ -570,11 +572,12 @@ async fn run_loop<B: ratatui::backend::Backend>(
                                 }
                             }
                             Err(_payload) => {
-                                let _ = diag::take_captured_panic();
                                 consecutive_input_panics += 1;
                                 if consecutive_input_panics >= 3 {
+                                    // Leave the captured panic for `main` to report.
                                     return Err(Error::FatalPanic);
                                 }
+                                let _ = diag::take_captured_panic();
                                 status = "recovered from internal input error (see ~/.local/share/cargonaut/debug.log)".to_string();
                             }
                         }
@@ -592,11 +595,12 @@ async fn run_loop<B: ratatui::backend::Backend>(
                                 consecutive_input_panics = 0;
                             }
                             Err(_payload) => {
-                                let _ = diag::take_captured_panic();
                                 consecutive_input_panics += 1;
                                 if consecutive_input_panics >= 3 {
+                                    // Leave the captured panic for `main` to report.
                                     return Err(Error::FatalPanic);
                                 }
+                                let _ = diag::take_captured_panic();
                                 status = "recovered from internal input error (see ~/.local/share/cargonaut/debug.log)".to_string();
                             }
                         }
