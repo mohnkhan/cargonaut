@@ -272,6 +272,16 @@ impl MenuBar {
         self.open(0);
     }
 
+    /// Toggle a menu by index: close it if it is the currently-open menu,
+    /// otherwise open it. Used by title clicks (Feature 065, FR-005/FR-006).
+    pub fn toggle(&mut self, idx: usize) {
+        if self.open == Some(idx) {
+            self.close();
+        } else {
+            self.open(idx);
+        }
+    }
+
     /// Close the menu.
     pub fn close(&mut self) {
         self.open = None;

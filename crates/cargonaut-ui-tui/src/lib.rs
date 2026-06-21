@@ -2300,14 +2300,17 @@ async fn handle_mouse(
                 dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
                 return Ok(());
             }
-            // 2. Menu-bar titles (FR-017).
+            // 2. Menu-bar titles (FR-017): click to open; click the open menu's
+            //    own title to close; a different title switches (FR-005/FR-006).
             if let Some(idx) = ui.menu.title_at(ui.layout.menu, x, y) {
-                ui.menu.open(idx);
+                ui.menu.toggle(idx);
                 return Ok(());
             }
             // 2b. Open dropdown (Feature 065): click an item to invoke it and
             //     close the menu (FR-001/FR-012); a click inside the frame but
-            //     off the items (e.g. the border) is a no-op (FR-003).
+            //     off the items (e.g. the border) is a no-op (FR-003); a click
+            //     fully outside closes the menu and falls through to the panel
+            //     hit logic for the same event (FR-004 close-and-pass-through).
             if ui.menu.is_open() {
                 if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
                     ui.menu.select(i);
@@ -2321,6 +2324,8 @@ async fn handle_mouse(
                 if ui.menu.in_dropdown(ui.layout.menu, ui.layout.full, x, y) {
                     return Ok(());
                 }
+                // Fully outside the bar and the dropdown: close, then continue.
+                ui.menu.close();
             }
             // 3. Panel rows: focus + move cursor (FR-014), double-click
             //    descends (FR-015).
