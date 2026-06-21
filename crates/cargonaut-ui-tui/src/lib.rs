@@ -4158,6 +4158,55 @@ mod tests {
         assert!(ui.menu.is_open(), "border click must leave the menu open");
     }
 
+    // T017 (FR-004): with a menu open, a click on a file-panel row closes the
+    // menu AND performs the panel action (focus + cursor) — close-and-pass-through.
+    #[tokio::test]
+    async fn t_menu_mouse_outside_closes_and_passes_through() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        for n in ["a", "b", "c", "d"] {
+            std::fs::write(td_r.path().join(n), b"").unwrap();
+        }
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File menu open
+        let (l, r) = synced_views(&app);
+        // Right pane rect is {50,1,40,10}; click row 2 (y=3) — outside the dropdown.
+        let _ = mouse(left_click(55, 3), &mut app, &mut ui, &l, &r).await;
+        assert!(!ui.menu.is_open(), "outside click must close the menu");
+        assert_eq!(app.active_pane(), PaneId::Right, "and focus the pane");
+        assert_eq!(app.pane(PaneId::Right).cursor, 2, "and move the cursor");
+    }
+
+    // T018 (FR-005/FR-006): clicking a different title switches the open menu;
+    // clicking the open menu's own title closes it.
+    #[tokio::test]
+    async fn t_menu_mouse_switch_and_toggle() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        // Switch: File open → click Options title (x≈23, y=0) → Options open.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(1);
+            let (l, r) = synced_views(&app);
+            let _ = mouse(left_click(23, 0), &mut app, &mut ui, &l, &r).await;
+            assert!(ui.menu.is_open(), "switching keeps a menu open");
+            // Confirm it's Options: clicking its second row (y=3) opens About.
+            let (_s, dlg) = mouse_with_dlg(left_click(23, 3), &mut app, &mut ui, &l, &r).await;
+            assert!(
+                matches!(dlg, Some(ActiveDialog::About(_))),
+                "switched menu must be Options; got {dlg:?}"
+            );
+        }
+        // Toggle: Options open → click Options title again → closes.
+        {
+            let mut app = app_with(&td_l, &td_r).await;
+            let mut ui = ui_with_open_menu(3);
+            let (l, r) = synced_views(&app);
+            let _ = mouse(left_click(23, 0), &mut app, &mut ui, &l, &r).await;
+            assert!(!ui.menu.is_open(), "clicking the open menu's title closes it");
+        }
+    }
+
     // T-MOUSE-2 (FR-014): a left-click in the right panel focuses it and
     // moves the cursor to the clicked row.
     #[tokio::test]

@@ -816,6 +816,19 @@ mod tests {
         assert!(!mb.in_dropdown(area, buf, 5, 2)); // left of the dropdown
     }
 
+    // Feature 065: toggle opens a closed/other menu, closes the same one.
+    #[test]
+    fn menu_bar_toggle() {
+        let mut mb = MenuBar::new();
+        mb.toggle(1);
+        assert!(mb.is_open());
+        mb.toggle(2); // different index → switch, stays open
+        assert!(mb.is_open());
+        assert!(matches!(mb.selected_command(), Some(Command::ShowUserMenu))); // Command menu item 0
+        mb.toggle(2); // same index → close
+        assert!(!mb.is_open());
+    }
+
     // T011: select sets the highlighted item, clamps, no-ops when closed.
     #[test]
     fn menu_bar_select_sets_item() {
