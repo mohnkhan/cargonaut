@@ -42,7 +42,9 @@ Useful but not urgent. Pick up when the underlying use case materialises.
 
 | Issue | Title | Effort | Origin |
 |---|---|---|---|
-| [#90](https://github.com/mohnkhan/cargonaut/issues/90) | Feature 061 follow-ups: input/task recovery, About dialog, unwrap audit | M | Feature 061 deferred polish — render recovery + crash safety + About-via-help/CLI shipped; input/task recovery, dedicated About modal, and FR-009 unwrap audit remain |
+| _(none — Tier 3 is clear)_ | | | |
+
+> ✅ **Resolved**: [#90](https://github.com/mohnkhan/cargonaut/issues/90) (Feature 061 follow-ups) shipped in **Feature 062** (`062-survivability-followups`): input-handler recovery (catch_unwind on the input boundary, escalate after 3), transfer task-panic → `Failed` (non-downgrading, via `Arc<watch::Sender>`), a dedicated menu-reachable About modal, and the FR-009 unwrap audit (core hot paths were already unwrap-free; one fragile site hardened). Also fixed a recovery-semantics bug (keep the captured panic on fatal escalation so the report is written) and extended the gated PTY test to the input path.
 
 > ✅ **Resolved**: [#84](https://github.com/mohnkhan/cargonaut/issues/84) (Docker-based SFTP integration test, SC-003/SC-004) shipped in **Feature 060** (`060-sftp-docker-integration-test`). A `ci-integration`-gated test (`crates/cargonaut-vfs/tests/sftp_integration.rs`) drives the real `SftpFs::connect` path against an `atmoz/sftp` fixture (`docker-compose.ci.yml`; `make ci-sftp-up`/`ci-sftp-down`): SC-003 asserts root-list latency ≤ 5 s; SC-004 transfers a 10 MiB file and logs throughput vs the 87.5 MB/s target while gating on a conservative non-flaky floor (single-stream SFTP is crypto-bound). A new `sftp-integration` CI job runs it and feeds the `ci` rollup.
 
