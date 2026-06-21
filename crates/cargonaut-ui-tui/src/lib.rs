@@ -2317,7 +2317,8 @@ async fn handle_mouse(
                     let cmd = ui.menu.selected_command();
                     ui.menu.close();
                     if let Some(cmd) = cmd {
-                        dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
+                        dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui)
+                            .await?;
                     }
                     return Ok(());
                 }
@@ -2378,10 +2379,10 @@ async fn handle_mouse(
         // Terminals that don't report motion simply never reach this arm, so
         // click-to-invoke degrades gracefully (FR-010).
         MouseEventKind::Moved => {
-            if ui.menu.is_open() {
-                if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
-                    ui.menu.select(i);
-                }
+            // `item_at` already yields `None` when no menu is open, so this is
+            // a single hit-test with no extra guard.
+            if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
+                ui.menu.select(i);
             }
         }
         _ => {}
@@ -4143,7 +4144,10 @@ mod tests {
             let mut ui = ui_with_open_menu(3);
             let (l, r) = synced_views(&app);
             let _ = mouse(left_click(23, 2), &mut app, &mut ui, &l, &r).await;
-            assert!(ui.help_overlay.is_some(), "first item (Help) must open help");
+            assert!(
+                ui.help_overlay.is_some(),
+                "first item (Help) must open help"
+            );
             assert!(!ui.menu.is_open());
         }
         // Last item → About opens the About dialog.
@@ -4219,7 +4223,10 @@ mod tests {
             let mut ui = ui_with_open_menu(3);
             let (l, r) = synced_views(&app);
             let _ = mouse(left_click(23, 0), &mut app, &mut ui, &l, &r).await;
-            assert!(!ui.menu.is_open(), "clicking the open menu's title closes it");
+            assert!(
+                !ui.menu.is_open(),
+                "clicking the open menu's title closes it"
+            );
         }
     }
 
@@ -4374,6 +4381,51 @@ mod tests {
             parent,
             "double-clicking `..` should ascend to the parent"
         );
+    }
+
+    // T023 (FR-010): graceful degradation — with NO prior Moved event, a click
+    // alone still selects-and-invokes the item (terminals without motion reports).
+    #[tokio::test]
+    async fn t_menu_mouse_click_without_hover() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File
+        let (l, r) = synced_views(&app);
+        // Deliberately no moved() before the click.
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            matches!(
+                dlg,
+                Some(ActiveDialog::Input {
+                    kind: InputKind::Mkdir,
+                    ..
+                })
+            ),
+            "click must work without any hover event; got {dlg:?}"
+        );
+        assert!(!ui.menu.is_open());
+    }
+
+    // T024 (FR-009/FR-011): with mouse disabled the menu mouse paths are inert;
+    // keyboard behavior (covered elsewhere) is unaffected.
+    #[tokio::test]
+    async fn t_menu_mouse_disabled_is_inert() {
+        let td_l = TempDir::new().unwrap();
+        let td_r = TempDir::new().unwrap();
+        let mut app = app_with(&td_l, &td_r).await;
+        let mut ui = ui_with_open_menu(1); // File, selection = item 0 (Preview)
+        ui.mouse_enabled = false;
+        let (l, r) = synced_views(&app);
+        let (_s, dlg) = mouse_with_dlg(left_click(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(
+            dlg.is_none(),
+            "disabled mouse must not dispatch a menu item"
+        );
+        assert!(ui.menu.is_open(), "disabled mouse must not change the menu");
+        // Hover is likewise inert: selection stays on item 0.
+        let _ = mouse(moved(8, 4), &mut app, &mut ui, &l, &r).await;
+        assert!(matches!(ui.menu.selected_command(), Some(Command::Preview)));
     }
 
     // T-MOUSE-1 (FR-013): with the mouse disabled, no event changes state.

@@ -803,7 +803,7 @@ mod tests {
         let (area, buf) = (bar_area(), buf_area(6)); // height 6 → dropdown clamped
         let drop = mb.dropdown_rect(area, buf).unwrap();
         assert_eq!(drop.height, 5); // (6 - y=1) clamp
-        // Last visible item row is drop.y + height - 2 = 4 → index 2.
+                                    // Last visible item row is drop.y + height - 2 = 4 → index 2.
         assert_eq!(mb.item_at(area, buf, 8, 4), Some(2));
         // A row that was clipped away (y = 5 = bottom border) returns None.
         assert_eq!(mb.item_at(area, buf, 8, 5), None);
@@ -847,9 +847,15 @@ mod tests {
         assert!(mb.selected_command().is_none());
         mb.open(1); // File
         mb.select(3); // index 3 → "Copy"
-        assert!(matches!(mb.selected_command(), Some(Command::CopySelection)));
+        assert!(matches!(
+            mb.selected_command(),
+            Some(Command::CopySelection)
+        ));
         mb.select(999); // clamps to last item "Hardlink"
-        assert!(matches!(mb.selected_command(), Some(Command::CreateHardLink)));
+        assert!(matches!(
+            mb.selected_command(),
+            Some(Command::CreateHardLink)
+        ));
     }
 
     // T020: mini-status shows name/size/perms/mtime for the focused entry.
