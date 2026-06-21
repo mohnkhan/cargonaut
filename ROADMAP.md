@@ -2,7 +2,7 @@
 
 This file is a stable index into the open-issue tracker, organised by leverage. The authoritative source is `gh issue list`; this file exists so the structure is visible without leaving GitHub's repo browser.
 
-**Last updated**: 2026-06-21 (Feature 061 survivability/crash-safety; follow-ups in #90).
+**Last updated**: 2026-06-21 (Feature 062 survivability follow-ups; #90 resolved).
 
 Every item below has a corresponding GitHub issue with: a problem statement, a sketch of the proposed approach, an effort estimate, and a pointer to the spec / commit / file that originally deferred it. Tier numbers reflect leverage × effort tradeoff, not strict execution order.
 
