@@ -20,7 +20,29 @@ Changes merged since the last release accumulate here. When a version is cut,
 this heading is renamed to `## [X.Y.Z] — YYYY-MM-DD` and a fresh empty
 `## [Unreleased]` is added on top (see [`docs/RELEASING.md`](./docs/RELEASING.md)).
 
-_Nothing yet — changes merged after v0.1.0 will collect here._
+_Nothing yet — changes merged after v0.2.0 will collect here._
+
+---
+
+## [0.2.0] — 2026-06-22
+
+### Added
+
+- **Feature 065 — click-on-dropdown-item menus** (PR #98). The pull-down menu
+  bar is now fully mouse-operable: clicking a dropdown item runs its command and
+  closes the menu, moving the pointer over items highlights them, clicking a
+  different title switches menus, clicking the open title toggles it shut, and
+  clicking outside closes the menu while passing the click through to the panel
+  (focus + cursor). Gated by the existing mouse-capture state
+  (`--no-mouse` / `Alt-m`); degrades gracefully on terminals without motion
+  events. Hit-testing shares one geometry source (`MenuBar::dropdown_rect`) with
+  rendering so clickable rows always match drawn rows.
+- **Prebuilt, directly-runnable Linux binary** attached to each GitHub Release.
+  Alongside the existing `.tar.gz`, releases now carry a bare static `x86_64`
+  musl binary (`cargonaut-X.Y.Z-x86_64-unknown-linux-musl`) plus a `.sha256` for
+  every asset — download, `chmod +x`, run; no toolchain or runtime required.
+- **Animated demo GIF** in the README, generated from a committed, re-runnable
+  vhs tape (`make demo-gif` → `docs/demo.gif`).
 
 ---
 

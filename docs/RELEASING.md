@@ -50,14 +50,18 @@ automates the rest.
 
 7. **Automation (no action needed).** The `release` workflow then:
    - re-runs the preflight (tag ↔ version ↔ CHANGELOG),
-   - builds `make dist` (stripped static musl binary + tarball),
-   - writes a `.sha256` checksum,
+   - builds `make dist`, which emits **both** a stripped static musl `.tar.gz`
+     **and** a bare, directly-runnable binary
+     (`cargonaut-X.Y.Z-x86_64-unknown-linux-musl`),
+   - writes a `.sha256` checksum for **each** artifact,
    - extracts the `## [X.Y.Z]` CHANGELOG section as the release notes (it
      **fails** rather than publish empty notes), and
-   - creates the GitHub Release with the tarball + checksum attached.
+   - creates the GitHub Release with the tarball, the bare binary, and a
+     checksum for each attached.
 
-8. **Verify.** Check the Releases page: the artifact, checksum, and notes are
-   present and correct. Download the tarball and run `cargonaut --version`.
+8. **Verify.** Check the Releases page: the tarball, the bare binary, both
+   checksums, and the notes are present and correct. Download the bare binary,
+   `chmod +x`, and run `./cargonaut-X.Y.Z-x86_64-unknown-linux-musl --version`.
 
 ## Notes
 

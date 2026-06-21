@@ -9,6 +9,8 @@
 [![Binary](https://img.shields.io/badge/binary-4.15%20MiB-success.svg)](#at-a-glance)
 [![Tests](https://img.shields.io/badge/tests-760-brightgreen.svg)](#at-a-glance)
 
+![Cargonaut demo — dual-pane navigation, descend, scroll, quick-cd](docs/demo.gif)
+
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
 it on a modern foundation: memory-safe Rust, a resumable copy engine that
@@ -313,6 +315,29 @@ See [`ROADMAP.md`](./ROADMAP.md) — the authoritative, issue-backed plan.
 
 ## Quick start
 
+### Download a prebuilt binary (Linux x86_64)
+
+Grab the static binary from the [latest release](https://github.com/mohnkhan/cargonaut/releases/latest)
+— no toolchain, no runtime, ~4.3 MiB:
+
+```bash
+curl -fsSLO https://github.com/mohnkhan/cargonaut/releases/latest/download/cargonaut-0.2.0-x86_64-unknown-linux-musl
+chmod +x cargonaut-0.2.0-x86_64-unknown-linux-musl
+./cargonaut-0.2.0-x86_64-unknown-linux-musl ~ /tmp        # left pane, right pane
+```
+
+It's a fully static musl build, so it runs on any x86_64 Linux. Verify the
+download against its checksum (also attached to the release):
+
+```bash
+curl -fsSLO https://github.com/mohnkhan/cargonaut/releases/latest/download/cargonaut-0.2.0-x86_64-unknown-linux-musl.sha256
+sha256sum -c cargonaut-0.2.0-x86_64-unknown-linux-musl.sha256
+```
+
+A `.tar.gz` of the same binary is attached too, if you prefer.
+
+### Build from source
+
 ```bash
 git clone https://github.com/mohnkhan/cargonaut
 cd cargonaut
@@ -322,7 +347,8 @@ cargo build --release                    # debug build: cargo build
 
 **Install it:** `cargo install --git https://github.com/mohnkhan/cargonaut cargonaut`
 (to `~/.cargo/bin`), or `sudo make install` (to `/usr/local/bin`). For a
-dependency-free, runs-anywhere Linux binary: `make static`.
+dependency-free, runs-anywhere Linux binary: `make static` (or `make dist` for
+the release tarball + bare binary).
 
 Try `--theme monochrome` or `--no-mouse`. Full build profiles (debug / release /
 static), per-OS install, shell integration, and the make-target reference are in

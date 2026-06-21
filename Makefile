@@ -17,6 +17,7 @@
 #     install           install the release binary to $(DESTDIR)$(BINDIR)
 #     uninstall         remove the installed binary
 #     dist              stripped static binary + tarball under dist/
+#     demo-gif          regenerate docs/demo.gif via vhs (needs vhs+ttyd+ffmpeg)
 #
 #   CI:
 #     ci-local          Run the full CI pipeline locally
@@ -39,7 +40,7 @@
 #     help              Show this help
 
 .PHONY: help build build-release static run test clippy fmt fmt-check clean \
-        install uninstall dist \
+        install uninstall dist demo-gif \
         ci-local release-check ci-sftp-up ci-sftp-down \
         fuzz fuzz-vfspath fuzz-modespec fuzz-owner \
         tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
@@ -80,6 +81,7 @@ help:
 	@echo "  install           install release binary to \$$(DESTDIR)\$$(BINDIR)  (default /usr/local/bin)"
 	@echo "  uninstall         remove the installed binary"
 	@echo "  dist              stripped static binary + .tar.gz under dist/  (Linux)"
+	@echo "  demo-gif          regenerate docs/demo.gif via vhs (needs vhs+ttyd+ffmpeg)"
 	@echo
 	@echo "CI:"
 	@echo "  ci-local          Run the full CI pipeline locally (fmt+clippy+test+build+docs-gate)"
@@ -161,12 +163,26 @@ uninstall:
 	@echo "[uninstall] removed $(DESTDIR)$(BINDIR)/cargonaut"
 
 # Release artifact: a stripped, fully-static binary + tarball under dist/.
+# Emits BOTH a `.tar.gz` and a directly-runnable, versioned bare binary
+# (`cargonaut-X.Y.Z-<triple>`) so users can download one file, chmod +x, run.
 dist: static
 	@mkdir -p dist
 	@cp target/$(MUSL_TARGET)/release/cargonaut dist/cargonaut
 	@$(STRIP) dist/cargonaut 2>/dev/null || true
 	@tar -C dist -czf "dist/cargonaut-$(CARGONAUT_VERSION)-$(MUSL_TARGET).tar.gz" cargonaut
+	@cp dist/cargonaut "dist/cargonaut-$(CARGONAUT_VERSION)-$(MUSL_TARGET)"
+	@chmod +x "dist/cargonaut-$(CARGONAUT_VERSION)-$(MUSL_TARGET)"
 	@echo "[dist] dist/cargonaut-$(CARGONAUT_VERSION)-$(MUSL_TARGET).tar.gz  ($$(du -h dist/cargonaut | cut -f1) static binary)"
+	@echo "[dist] dist/cargonaut-$(CARGONAUT_VERSION)-$(MUSL_TARGET)         (bare runnable binary)"
+
+# Regenerate the README demo GIF. Needs vhs + ttyd + ffmpeg (see docs/RELEASING.md).
+# Seeds a demo tree in /tmp (tmpfs §V), then runs the committed vhs tape with the
+# freshly-built release binary on PATH. Output: docs/demo.gif.
+demo-gif: build-release
+	@command -v vhs >/dev/null 2>&1 || { echo "[demo-gif] vhs not found — install vhs + ttyd + ffmpeg (see docs/RELEASING.md)"; exit 1; }
+	@DEMO_ROOT=/tmp/cargonaut-demo scripts/demo/seed-demo-dir.sh
+	@PATH="$(CURDIR)/target/release:$$PATH" TMPDIR=/tmp vhs docs/demo.tape
+	@echo "[demo-gif] wrote docs/demo.gif  ($$(du -h docs/demo.gif | cut -f1))"
 
 # ── CI ────────────────────────────────────────────────────────────────────────
 

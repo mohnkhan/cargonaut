@@ -44,7 +44,12 @@ jobs:
       - name: Checksum
         run: |
           cd dist
-          for f in cargonaut-*.tar.gz; do sha256sum "$f" > "$f.sha256"; done
+          # Checksum every release artifact: the .tar.gz AND the bare runnable
+          # binary (cargonaut-X.Y.Z-<triple>). Skip any pre-existing .sha256.
+          for f in cargonaut-*; do
+            case "$f" in *.sha256) continue;; esac
+            sha256sum "$f" > "$f.sha256"
+          done
           ls -l
 
       - name: Extract CHANGELOG notes for this tag
@@ -65,7 +70,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Upload all versioned artifacts: tarball, bare runnable binary, and
+          # a .sha256 for each (the dist/cargonaut-* glob excludes the
+          # unversioned dist/cargonaut copy, which has no hyphen).
           gh release create "${GITHUB_REF_NAME}" \
-            dist/cargonaut-*.tar.gz dist/cargonaut-*.tar.gz.sha256 \
+            dist/cargonaut-* \
             --title "cargonaut ${GITHUB_REF_NAME}" \
             --notes-file release-notes.md
