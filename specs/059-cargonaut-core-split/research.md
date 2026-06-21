@@ -45,7 +45,7 @@ This is the best possible outcome for **FR-007** (no widening) and keeps the cha
 
 ## R-003 — Module decomposition map
 
-**Decision**: 12 production submodules + 1 test-support module, grouped by the feature-history banners already present in the file (the code is *already* informally sectioned by `// ===== Feature NNN =====` comments — we formalize those seams).
+**Decision**: 14 production submodules + 1 test-support module, grouped by the feature-history banners already present in the file (the code is *already* informally sectioned by `// ===== Feature NNN =====` comments — we formalize those seams).
 
 | Module | Owns (types) | Owns (`impl App` / fns) |
 |--------|--------------|--------------------------|
@@ -65,7 +65,7 @@ This is the best possible outcome for **FR-007** (no widening) and keeps the cha
 | `transfers` | — | `transfer_ids`, `transfer`, `job_views`, `cancel_transfer`, `pause_transfer`, `resume_paused`, `confirm_copy`, `transfer_opts`, `scan_resume_offers`, `pending_resume_views`, `resume_offer`, `start_over_offer`, `skip_offer`, `request_copy_confirmation`, `request_move_confirmation`, `request_delete_confirmation` |
 | `glob_match` (pub) | — | placed in `pane` (filter-adjacent) **or** a tiny `util` module |
 
-This is 12–13 modules. The spec floor is ≥4 (FR-002); we exceed it to maximize cohesion. Each module's responsibility is stateable in one sentence (SC-002, SC-007). `glob_match` placement is the only soft call — folded into `pane` to avoid a one-function module.
+This is 14 production modules (+ `test_support`). The spec floor is ≥4 (FR-002); we exceed it to maximize cohesion. Each module's responsibility is stateable in one sentence (SC-002, SC-007). `glob_match` placement is the only soft call — folded into `pane` to avoid a one-function module.
 
 **Rationale**: Boundaries follow the existing `// ===== Feature NNN =====` banners, so the split is recognizable to anyone who knows the feature history, and review locality maps to how the code grew.
 

@@ -6,7 +6,7 @@
 
 ## Summary
 
-`crates/cargonaut-core/src/lib.rs` is a 6,246-line single module (≈2,700 lines production + ≈3,537 lines tests). This feature splits it into 12 cohesive production submodules + 1 test-support module, leaving `lib.rs` a thin module root (~150–230 lines: crate docs, imports, `mod` declarations, the `pub use` surface, and the two structs with private fields — `App` and `SideState`). The refactor is **move-only**: no logic, signature, control-flow, or message changes. Public-API stability is proven two ways — a rustdoc-JSON surface diff against a committed 179-line baseline, and compiling/testing every downstream crate **and the benches** with zero source edits. See [research.md](./research.md) for the decisions; [data-model.md](./data-model.md) for the module map; [contracts/](./contracts/) for the API gate.
+`crates/cargonaut-core/src/lib.rs` is a 6,246-line single module (≈2,700 lines production + ≈3,537 lines tests). This feature splits it into 14 cohesive production submodules + 1 test-support module, leaving `lib.rs` a thin module root (~150–230 lines: crate docs, imports, `mod` declarations, the `pub use` surface, and the two structs with private fields — `App` and `SideState`). The refactor is **move-only**: no logic, signature, control-flow, or message changes. Public-API stability is proven two ways — a rustdoc-JSON surface diff against a committed 179-line baseline, and compiling/testing every downstream crate **and the benches** with zero source edits. See [research.md](./research.md) for the decisions; [data-model.md](./data-model.md) for the module map; [contracts/](./contracts/) for the API gate.
 
 ## Technical Context
 
@@ -26,7 +26,7 @@
 
 **Constraints**: Public API byte-for-byte stable (FR-003); zero downstream `src/` edits (FR-004); no visibility widening beyond crate-internal where strictly required (FR-007); `#![warn(missing_docs)]` + `-D warnings` + `-D broken-intra-doc-links` stay clean (FR-008/FR-009); SSD/tmpfs discipline (Constitution §V).
 
-**Scale/Scope**: One 6,246-line file → ~14 files. 179-item public surface to preserve. ~70 `App`/value-type methods + 12 free fns + ~140 test fns to relocate.
+**Scale/Scope**: One 6,246-line file → ~16 files (`lib.rs` + 14 submodules + `test_support`). 179-item public surface to preserve. ~70 `App`/value-type methods + 12 free fns + ~140 test fns to relocate.
 
 ## Constitution Check
 
