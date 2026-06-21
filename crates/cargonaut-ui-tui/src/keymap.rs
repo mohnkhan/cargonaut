@@ -59,6 +59,8 @@ pub enum Command {
     // Global
     /// Show the help dialog.
     ShowHelp,
+    /// Show the dedicated About dialog (Feature 062). UI-only; menu-reachable.
+    ShowAbout,
     /// Quit cargonaut.
     Quit,
     /// Swap focus between the two panes.

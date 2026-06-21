@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Binary](https://img.shields.io/badge/binary-4.15%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-734-brightgreen.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-737-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,7 +31,7 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 27 features since (031–061) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Status** | Alpha · Phase 1 shipped, plus 28 features since (031–062) — see [`CHANGELOG.md`](./CHANGELOG.md) |
 | **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI), plus 2 live SFTP integration tests gated behind the `ci-integration` feature (SC-003 list latency + SC-004 throughput, enforced by the `sftp-integration` CI job against a Docker `atmoz/sftp` fixture) |
 | **Binary** | 4.15 MiB stripped (ceiling: 8 MiB) — incl. `panic=unwind` tables for crash recovery (Feature 061) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
@@ -266,7 +266,16 @@ for the local filesystem:
   proves terminal-restore + report on a real crash; binary 4.15 MiB.
   (Feature 061, full spec-kit; closes survivability/crash-debug/version asks).
 
-The full per-feature history (Features 001 → 061) lives in
+- **Survivability follow-ups** — completes Feature 061's deferred polish (#90):
+  input-handler faults now recover in-session like the render path (catch +
+  status + escalate after 3); a panicking background transfer transitions its job
+  to **Failed** (non-downgrading) instead of vanishing; a dedicated **About**
+  modal is reachable from the menu (Options → About) showing version/author/
+  copyright/license; and the one fragile production `unwrap` was converted to a
+  guard (core hot paths were already unwrap-free). Gated PTY test now covers both
+  render and input fatal paths. (Feature 062, full spec-kit; closes #90).
+
+The full per-feature history (Features 001 → 062) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap

@@ -195,6 +195,9 @@ enum ActiveDialog {
         /// The hotlist list widget.
         widget: HotlistDialog,
     },
+    /// Feature 062 — dedicated About modal (build identity). Display-only;
+    /// Esc/Enter closes it.
+    About(dialog::AboutDialog),
     /// Feature 047 — F2 user-defined action menu. Items loaded from
     /// `~/.config/cargonaut/menu.toml`; filtered by `only_if` condition.
     UserMenu {
@@ -330,6 +333,8 @@ async fn run_loop<B: ratatui::backend::Backend>(
     // Feature 061 (US2): count consecutive recovered render panics; escalate to a
     // clean fatal exit after 3 to avoid a hot redraw loop (research R7).
     let mut consecutive_render_panics: u32 = 0;
+    // Feature 062 (US1): same bound for recovered input-handler panics.
+    let mut consecutive_input_panics: u32 = 0;
 
     // Per-pane PaneView, synced from App state once per frame.
     let mut left = PaneView::new(
@@ -514,13 +519,15 @@ async fn run_loop<B: ratatui::backend::Backend>(
             Ok(Err(e)) => return Err(Error::Terminal(e)),
             Err(_payload) => {
                 consecutive_render_panics += 1;
-                // Discard the captured panic (already logged by the hook) so it
-                // isn't later mistaken for a fatal crash.
-                let _ = diag::take_captured_panic();
                 if consecutive_render_panics >= 3 {
                     // Persistent render failure → escalate to a clean fatal exit.
+                    // Leave the captured panic in the slot so `main` can write the
+                    // crash report (do NOT drain it here).
                     return Err(Error::FatalPanic);
                 }
+                // Recovered (non-fatal): discard the captured panic (already
+                // logged by the hook) so it isn't later mistaken for a crash.
+                let _ = diag::take_captured_panic();
                 status =
                     "recovered from internal render error (see ~/.local/share/cargonaut/debug.log)"
                         .to_string();
@@ -541,7 +548,9 @@ async fn run_loop<B: ratatui::backend::Backend>(
             maybe_ev = events.next() => {
                 match maybe_ev {
                     Some(Ok(CtEvent::Key(key))) => {
-                        let cont = handle_key(
+                        // Feature 062 (US1): input handling is an inner recovery
+                        // boundary, mirroring render — a panic here is contained.
+                        let res = AssertUnwindSafe(handle_key(
                             key,
                             app,
                             &keymap,
@@ -551,14 +560,50 @@ async fn run_loop<B: ratatui::backend::Backend>(
                             &mut status,
                             &mut quit,
                             &mut ui,
-                        ).await?;
-                        if !cont { return Ok(()); }
+                        ))
+                        .catch_unwind()
+                        .await;
+                        match res {
+                            Ok(inner) => {
+                                let cont = inner?;
+                                consecutive_input_panics = 0;
+                                if !cont {
+                                    return Ok(());
+                                }
+                            }
+                            Err(_payload) => {
+                                consecutive_input_panics += 1;
+                                if consecutive_input_panics >= 3 {
+                                    // Leave the captured panic for `main` to report.
+                                    return Err(Error::FatalPanic);
+                                }
+                                let _ = diag::take_captured_panic();
+                                status = "recovered from internal input error (see ~/.local/share/cargonaut/debug.log)".to_string();
+                            }
+                        }
                     }
                     Some(Ok(CtEvent::Mouse(m))) => {
-                        handle_mouse(
+                        let res = AssertUnwindSafe(handle_mouse(
                             m, app, &mut ui, &left, &right, &mut status,
                             &mut mode, &mut active_dialog, &mut quit,
-                        ).await?;
+                        ))
+                        .catch_unwind()
+                        .await;
+                        match res {
+                            Ok(inner) => {
+                                inner?;
+                                consecutive_input_panics = 0;
+                            }
+                            Err(_payload) => {
+                                consecutive_input_panics += 1;
+                                if consecutive_input_panics >= 3 {
+                                    // Leave the captured panic for `main` to report.
+                                    return Err(Error::FatalPanic);
+                                }
+                                let _ = diag::take_captured_panic();
+                                status = "recovered from internal input error (see ~/.local/share/cargonaut/debug.log)".to_string();
+                            }
+                        }
                     }
                     Some(Ok(CtEvent::Resize(new_cols, new_rows))) => {
                         // Resize PTY if the subshell panel is visible (T017).
@@ -625,6 +670,10 @@ async fn handle_key(
     ui: &mut UiState,
 ) -> Result<bool, Error> {
     use crossterm::event::KeyCode;
+
+    // Feature 062 (US1): test seam — recover-from-input-panic boundary lives at
+    // the call site in `run_loop`. Inert unless CARGONAUT_PANIC_INJECT=input.
+    diag::maybe_inject_panic("input");
 
     // Help overlay — swallows all keys; Esc/F1 close it.
     if let Some(overlay) = ui.help_overlay.as_mut() {
@@ -1003,6 +1052,14 @@ async fn handle_key(
                 }
                 return Ok(true);
             }
+            // Feature 062 US3: dedicated About modal — Esc/Enter closes, swallow rest.
+            ActiveDialog::About(_) => {
+                if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                    *active_dialog = None;
+                    *mode = Mode::Pane;
+                }
+                return Ok(true);
+            }
             // Feature 047 US2 (FR-006/007/008): F2 user-defined action menu.
             ActiveDialog::UserMenu {
                 widget,
@@ -1340,6 +1397,11 @@ async fn dispatch_ui_command(
             ui.help_overlay = Some(dialog::HelpOverlay::new(visible_h));
             return Ok(());
         }
+        Command::ShowAbout => {
+            *mode = Mode::Dialog;
+            *active_dialog = Some(ActiveDialog::About(dialog::AboutDialog::new()));
+            return Ok(());
+        }
         // Feature 054 (FR-002): Ctrl-o cycles through Hidden→VisibleFmFocus→VisibleShellFocus→Hidden.
         Command::OpenSubshell => {
             // FR-012: no-op when any modal is open.
@@ -1615,7 +1677,12 @@ async fn dispatch_ui_command(
             let is_file =
                 entry.is_some_and(|e| !matches!(e.meta.kind, cargonaut_vfs::VfsKind::Dir));
             if is_file {
-                let entry = entry.unwrap();
+                // Feature 062 (FR-006): `is_file` already implies `entry` is
+                // Some, but use a guard instead of `unwrap()` so a future refactor
+                // of the guard above can't turn this into a panic.
+                let Some(entry) = entry else {
+                    return Ok(());
+                };
                 let display_name = entry.name.to_string();
                 let raw_path: std::path::PathBuf = {
                     let cwd = p.cwd.display().to_string();
@@ -3017,6 +3084,7 @@ fn draw_frame(
             ActiveDialog::FilterPrompt { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::TasksPanel { widget } => widget.render(darea, f.buffer_mut(), theme),
             ActiveDialog::Hotlist { widget } => widget.render(darea, f.buffer_mut(), theme),
+            ActiveDialog::About(widget) => widget.render(darea, f.buffer_mut(), theme),
             // Feature 047 US2: UserMenuDialog::render manages its own centering.
             ActiveDialog::UserMenu { widget, .. } => widget.render(f, area, theme),
             // Feature 051: full-screen overlay — use `area`, not the centred `darea`.

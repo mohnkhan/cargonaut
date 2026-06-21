@@ -109,6 +109,37 @@ impl ConfirmDialog {
 }
 
 // =====================================================================
+// AboutDialog (Feature 062 US3) — dedicated identity modal
+// =====================================================================
+
+/// A minimal modal showing build identity from `cargonaut_core::diag::about_lines()`.
+/// Display-only; the caller closes it on Esc/Enter.
+#[derive(Debug, Default, Clone)]
+pub struct AboutDialog;
+
+impl AboutDialog {
+    /// Construct a new About dialog.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Render a centered About box (modal — clears the rect first).
+    pub fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .title("About")
+            .borders(Borders::ALL)
+            .style(theme.dialog_style());
+        let body = cargonaut_core::diag::about_lines().join("\n");
+        let para = Paragraph::new(format!("{body}\n\n(Esc/Enter to close)"))
+            .block(block)
+            .style(theme.dialog_style())
+            .wrap(Wrap { trim: false });
+        Widget::render(para, area, buf);
+    }
+}
+
+// =====================================================================
 // TextInputDialog (mkdir name, select-by-pattern)
 // =====================================================================
 
@@ -4340,6 +4371,32 @@ mod tests {
         assert!(rendered.contains("foo.txt"), "body missing");
         assert!(rendered.contains("Confirm"), "Confirm button missing");
         assert!(rendered.contains("Cancel"), "Cancel button missing");
+    }
+
+    // ---------- AboutDialog (Feature 062 US3) ----------
+
+    #[test]
+    fn about_dialog_renders_identity_fields() {
+        let d = AboutDialog::new();
+        let backend = TestBackend::new(70, 12);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| {
+            d.render(f.size(), f.buffer_mut(), &Theme::default());
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let rendered: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(rendered.contains("About"), "title missing");
+        assert!(
+            rendered.contains(env!("CARGO_PKG_VERSION")),
+            "version missing"
+        );
+        assert!(rendered.contains("Mohiuddin"), "author/copyright missing");
+        assert!(rendered.contains("MIT OR Apache-2.0"), "license missing");
     }
 
     // ---------- ResumePromptDialog ----------
