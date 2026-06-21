@@ -1,3 +1,1 @@
-{
-  "feature_directory": "specs/062-survivability-followups"
-}
+{ "feature_directory": "specs/063-fuzzing-parsers" }

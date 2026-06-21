@@ -142,6 +142,30 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.ci.yml down -v || true
 
+  # ---- Fuzz smoke (issue #93) ----
+  # Bounded coverage-guided fuzz of the parsers. Intentionally NOT part of the
+  # `ci` rollup `needs`: the always-on no-panic guarantee is the proptest gate in
+  # `unit-test` (which IS required); this heavyweight nightly+cargo-fuzz job is
+  # informational so a toolchain hiccup can't block merges. A real crash still
+  # turns this job red. CI runners are ephemeral (Constitution §V is dev-host only).
+  fuzz-smoke:
+    name: fuzz-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz each parser (bounded)
+        run: |
+          for t in vfspath_parse modespec_parse owner_parse; do
+            echo "::group::fuzz $t"
+            cargo +nightly fuzz run "$t" -- -max_total_time=20 -rss_limit_mb=4096
+            echo "::endgroup::"
+          done
+
   # ---- Docs gate + PR-body gate ----
   docs-gate:
     name: docs-gate
