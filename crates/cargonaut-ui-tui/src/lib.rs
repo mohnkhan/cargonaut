@@ -2305,6 +2305,23 @@ async fn handle_mouse(
                 ui.menu.open(idx);
                 return Ok(());
             }
+            // 2b. Open dropdown (Feature 065): click an item to invoke it and
+            //     close the menu (FR-001/FR-012); a click inside the frame but
+            //     off the items (e.g. the border) is a no-op (FR-003).
+            if ui.menu.is_open() {
+                if let Some(i) = ui.menu.item_at(ui.layout.menu, ui.layout.full, x, y) {
+                    ui.menu.select(i);
+                    let cmd = ui.menu.selected_command();
+                    ui.menu.close();
+                    if let Some(cmd) = cmd {
+                        dispatch_ui_command(cmd, app, mode, active_dialog, status, quit, ui).await?;
+                    }
+                    return Ok(());
+                }
+                if ui.menu.in_dropdown(ui.layout.menu, ui.layout.full, x, y) {
+                    return Ok(());
+                }
+            }
             // 3. Panel rows: focus + move cursor (FR-014), double-click
             //    descends (FR-015).
             let hit = if rect_contains(ui.layout.left, x, y) {
