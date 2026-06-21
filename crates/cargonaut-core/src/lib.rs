@@ -43,6 +43,9 @@ mod app;
 mod attrs;
 mod command;
 mod compare;
+/// Diagnostics: panic capture, recent-action ring buffer, crash-report
+/// formatting + on-disk lifecycle, and the About identity surface (Feature 061).
+pub mod diag;
 mod error;
 mod fsops;
 mod history;
