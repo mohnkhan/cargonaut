@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Binary](https://img.shields.io/badge/binary-4.15%20MiB-success.svg)](#at-a-glance)
-[![Tests](https://img.shields.io/badge/tests-737-brightgreen.svg)](#at-a-glance)
+[![Tests](https://img.shields.io/badge/tests-744-brightgreen.svg)](#at-a-glance)
 
 Cargonaut brings back the fastest way ever invented to move files around a
 machine — two panes, source and target, driven from the keyboard — and rebuilds
@@ -31,7 +31,7 @@ software written this decade.
 
 | | |
 |---|---|
-| **Status** | Alpha · Phase 1 shipped, plus 28 features since (031–062) — see [`CHANGELOG.md`](./CHANGELOG.md) |
+| **Status** | Alpha · Phase 1 shipped, plus 29 features since (031–063) — see [`CHANGELOG.md`](./CHANGELOG.md) |
 | **Tests** | 724 total, all green (SC-002 SIGKILL-resume + SC-004 PTY navigation, both gated behind `CARGONAUT_PTY_TESTS=1`, enforced in CI), plus 2 live SFTP integration tests gated behind the `ci-integration` feature (SC-003 list latency + SC-004 throughput, enforced by the `sftp-integration` CI job against a Docker `atmoz/sftp` fixture) |
 | **Binary** | 4.15 MiB stripped (ceiling: 8 MiB) — incl. `panic=unwind` tables for crash recovery (Feature 061) |
 | **Quality** | `clippy -D warnings` clean · CI green · TDD-gated |
@@ -275,7 +275,16 @@ for the local filesystem:
   guard (core hot paths were already unwrap-free). Gated PTY test now covers both
   render and input fatal paths. (Feature 062, full spec-kit; closes #90).
 
-The full per-feature history (Features 001 → 062) lives in
+- **Parser fuzzing** — two layers (#93): an always-on `proptest` gate
+  (1500 cases/parser) asserting `VfsPath::parse` / `ModeSpec::parse` /
+  `parse_owner` never panic on arbitrary input (runs in normal CI), plus a
+  standalone, workspace-excluded `fuzz/` `cargo-fuzz` crate with libfuzzer
+  targets for each parser. `make fuzz*` keeps all build artifacts + corpora in
+  tmpfs (§V); a non-blocking CI `fuzz-smoke` job runs bounded coverage-guided
+  fuzzing per PR. Verified locally: 1.64M runs/16s on `VfsPath::parse`, no crash.
+  (Feature 063, full spec-kit; closes #93).
+
+The full per-feature history (Features 001 → 063) lives in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Not yet — on the roadmap
