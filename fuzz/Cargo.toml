@@ -1,0 +1,40 @@
+# Feature 063: standalone cargo-fuzz crate. NOT a workspace member (see the root
+# Cargo.toml `exclude`) — it requires nightly + libfuzzer/sanitizer flags and
+# must not affect the shipped binary or `cargo test`. Run via `make fuzz*`.
+[package]
+name = "cargonaut-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cargonaut-vfs = { path = "../crates/cargonaut-vfs" }
+
+[[bin]]
+name = "vfspath_parse"
+path = "fuzz_targets/vfspath_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "modespec_parse"
+path = "fuzz_targets/modespec_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_parse"
+path = "fuzz_targets/owner_parse.rs"
+test = false
+doc = false
+bench = false
+
+# Keep fuzz binaries optimized but debuggable; required so libfuzzer link works.
+[profile.release]
+debug = 1

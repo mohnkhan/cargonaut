@@ -17,6 +17,10 @@ members = [
     "crates/cargonaut-transfer",
     "crates/cargonaut-config",
 ]
+# Feature 063: the cargo-fuzz crate needs nightly + libfuzzer/sanitizer flags, so
+# it is excluded from the default workspace build/test and the shipped binary.
+# Run it via `make fuzz*` (tmpfs target dir) or the CI nightly fuzz job.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

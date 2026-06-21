@@ -23,6 +23,12 @@
 #     ci-sftp-up        Start the atmoz/sftp fixture for the integration test
 #     ci-sftp-down      Stop + remove the SFTP fixture
 #
+#   Fuzzing (needs nightly + cargo-fuzz; artifacts in tmpfs):
+#     fuzz              Run all parser fuzz targets (FUZZ_SECS each)
+#     fuzz-vfspath      Fuzz VfsPath::parse
+#     fuzz-modespec     Fuzz ModeSpec::parse
+#     fuzz-owner        Fuzz parse_owner
+#
 #   Dev ergonomics (single-user dev box only — auto-skipped on CI):
 #     tmpfs-setup       Redirect target/ into /tmp/cargonaut/<hash>/ to spare the SSD
 #     tmpfs-status      Show whether target/ is tmpfs-symlinked + disk usage
@@ -34,6 +40,7 @@
 .PHONY: help build build-release static run test clippy fmt fmt-check clean \
         install uninstall dist \
         ci-local ci-sftp-up ci-sftp-down \
+        fuzz fuzz-vfspath fuzz-modespec fuzz-owner \
         tmpfs-setup tmpfs-status tmpfs-teardown check-tmpfs bench
 
 # Default goal: print help instead of building, so a user who types `make`
@@ -77,6 +84,10 @@ help:
 	@echo "  ci-local          Run the full CI pipeline locally (fmt+clippy+test+build+docs-gate)"
 	@echo "  ci-sftp-up        Start the atmoz/sftp fixture (localhost:2222) for the integration test"
 	@echo "  ci-sftp-down      Stop + remove the SFTP fixture"
+	@echo
+	@echo "Fuzzing (needs nightly + cargo-fuzz; build+corpus in tmpfs per §V):"
+	@echo "  fuzz              Run all parser fuzz targets (FUZZ_SECS=$(FUZZ_SECS) each)"
+	@echo "  fuzz-vfspath / fuzz-modespec / fuzz-owner   Fuzz one parser"
 	@echo
 	@echo "Dev ergonomics (single-user dev box only — auto-skipped on CI):"
 	@echo "  tmpfs-setup       Redirect target/ into /tmp/cargonaut/<hash>/ to spare the SSD."
@@ -177,6 +188,31 @@ ci-sftp-up:
 
 ci-sftp-down:
 	@$(COMPOSE) -f docker-compose.ci.yml down -v
+
+# ── Fuzzing (issue #93) ─────────────────────────────────────────────────────────
+# Coverage-guided cargo-fuzz over the untrusted-input parsers. Build artifacts +
+# corpus live in tmpfs (Constitution §V — never the SSD). Requires nightly +
+# cargo-fuzz (`cargo install cargo-fuzz`). FUZZ_SECS bounds each run.
+FUZZ_SECS ?= 30
+
+define _run_fuzz
+	@command -v cargo-fuzz >/dev/null 2>&1 || { echo "cargo-fuzz not installed — run: cargo install cargo-fuzz (needs nightly)"; exit 1; }
+	@mkdir -p "$(CARGONAUT_TMPFS_ROOT)/fuzz-corpus/$(1)"
+	@CARGO_TARGET_DIR="$(CARGONAUT_TMPFS_ROOT)/fuzz-target" \
+	  cargo +nightly fuzz run $(1) "$(CARGONAUT_TMPFS_ROOT)/fuzz-corpus/$(1)" \
+	  -- -max_total_time=$(FUZZ_SECS) -artifact_prefix="$(CARGONAUT_TMPFS_ROOT)/fuzz-corpus/$(1)/"
+endef
+
+fuzz: fuzz-vfspath fuzz-modespec fuzz-owner
+
+fuzz-vfspath:
+	$(call _run_fuzz,vfspath_parse)
+
+fuzz-modespec:
+	$(call _run_fuzz,modespec_parse)
+
+fuzz-owner:
+	$(call _run_fuzz,owner_parse)
 
 # ── tmpfs (dev-ergonomics) ────────────────────────────────────────────────────
 # Redirect Cargo's `target/` into tmpfs so heavy build iteration doesn't
